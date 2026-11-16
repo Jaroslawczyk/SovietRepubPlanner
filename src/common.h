@@ -69,6 +69,7 @@ struct PlanInput {
     float roadV = 0;                                // where the street crosses the district
     std::vector<float> stopsU;                      // bus stops along the street
     float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
+    float utilRadius[4] = { 200, 200, 250, 150 };   // water, sewage, heating, power: how far a node serves, m
     float walkRadius = 400;                         // how tooFar residents walk to a stop
     float maxDiff = 3.0f;                           // allowed height difference under one building
     std::function<float(float, float)> height;      // terrain height at (u, v); may be empty
@@ -86,6 +87,9 @@ struct PlanResult {
     std::vector<RoadSeg> roads;
     std::vector<V2>      stops, crossings;
     int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0, jobs = 0;
+    std::vector<V2> utilNodes[4];                   // substations next to the streets
+    int   utilUncovered[4] = {};                    // buildings out of reach of every node
+    float utilLength = 0;                           // trench length of one network (it follows the footpaths)
     float pathLength = 0, roadLength = 0, maxWalkToShop = -1, maxWalkToStop = -1, cut = 0, fill = 0;
 };
 PlanResult MakePlan(const PlanInput& in);

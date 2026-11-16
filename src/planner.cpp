@@ -249,5 +249,33 @@ PlanResult MakePlan(const PlanInput& in) {
         }
         r.maxWalkToShop = std::max(r.maxWalkToShop, shop);
     }
+
+    // Utilities follow the footpath network (so they never run under a building); substations stand beside the
+    // streets, chosen greedily so that every building is within the service radius (measured along the grid).
+    r.utilLength = std::max(0.0f, r.pathLength - r.roadLength);     // both pavements of a street share one trench
+    for (int k = 0; k < 4; ++k) {
+        std::vector<V2> cand;
+        for (auto& rd : r.roads) {
+            float off = rd.width / 2 + 4.5f;
+            for (float u = rd.u1 + 12 + k * 6.0f; u < rd.u2 - 6; u += 15) { cand.push_back({ u, rd.v1 + off }); cand.push_back({ u, rd.v1 - off }); }
+        }
+        std::vector<char> covered(r.buildings.size(), 0);
+        size_t left = r.buildings.size();
+        float R = in.utilRadius[k];
+        while (left > 0 && !cand.empty() && r.utilNodes[k].size() < 200) {
+            int best = -1, bestN = 0;
+            for (size_t ci = 0; ci < cand.size(); ++ci) {
+                int n = 0;
+                for (size_t bi = 0; bi < r.buildings.size(); ++bi)
+                    if (!covered[bi] && fabsf(r.buildings[bi].u - cand[ci].u) + fabsf(r.buildings[bi].v - cand[ci].v) <= R) ++n;
+                if (n > bestN) { bestN = n; best = (int)ci; }
+            }
+            if (best < 0) break;
+            r.utilNodes[k].push_back(cand[best]);
+            for (size_t bi = 0; bi < r.buildings.size(); ++bi)
+                if (!covered[bi] && fabsf(r.buildings[bi].u - cand[best].u) + fabsf(r.buildings[bi].v - cand[best].v) <= R) { covered[bi] = 1; --left; }
+        }
+        r.utilUncovered[k] = (int)left;
+    }
     return r;
 }

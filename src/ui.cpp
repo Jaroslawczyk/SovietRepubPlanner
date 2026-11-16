@@ -42,6 +42,16 @@ int   g_roadType = 1;
 float g_roadV = 0;
 std::vector<float> g_stops;
 float g_walk = 400.0f, g_maxDiff = 5.0f;
+// utilities: water, sewage, heating, power
+const char* const kUtilName[4] = { "Вода", "Канализация", "Отопление", "Электричество" };
+const char* const kUtilNode[4] = { "водораспределитель", "канализационная станция", "тепловой пункт", "трансформатор" };
+const char* const kUtilUnit[4] = { "м³/сут", "м³/сут", "кВт", "кВт" };
+const ImU32 kUtilCol[4] = { IM_COL32(70, 150, 255, 255), IM_COL32(165, 110, 55, 255), IM_COL32(245, 85, 60, 255), IM_COL32(250, 220, 60, 255) };
+bool  g_utilShow[4] = { false, false, false, false };
+float g_utilRadius[4] = { 200, 200, 250, 150 };
+float g_utilNorm[4] = { 0.12f, 0.12f, 0.9f, 0.25f };   // per resident; rough guesses, editable in the panel
+std::vector<std::vector<V3>> g_utilLines[4];
+std::vector<V3> g_utilPts[4];
 float g_streetGap = 250.0f;        // parallel streets every N metres, 0 = off
 bool  g_showSlope = true, g_showLevel = false;
 bool  g_dirty = true, g_areaChanged = false, g_inited = false;
@@ -158,6 +168,7 @@ void Regenerate() {
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) in.houseTypes.push_back((int)i);
     in.services = &g_services;
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
+    for (int k = 0; k < 4; ++k) in.utilRadius[k] = g_utilRadius[k];
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     g_plan = MakePlan(in);
 
@@ -181,6 +192,12 @@ void Regenerate() {
             g_roadQuads.push_back(c);
         }
         g_lines.push_back(Sample(a, rd.u1, rd.v1, rd.u2, rd.v2));       // centre line
+    }
+    for (int k = 0; k < 4; ++k) {
+        g_utilLines[k].clear(); g_utilPts[k].clear();
+        float off = (k - 1.5f) * 1.3f;          // each network beside the footpath, not on top of the others
+        for (auto& p : g_plan.paths) g_utilLines[k].push_back(Sample(a, p.u1 + off, p.v1 + off, p.u2 + off, p.v2 + off));
+        for (auto& nd : g_plan.utilNodes[k]) g_utilPts[k].push_back(LocalToWorld(a, nd.u, nd.v, 1.0f));
     }
     for (auto& s : g_plan.stops) g_stopPts.push_back(LocalToWorld(a, s.u, s.v, 1.0f));
     for (auto& s : g_plan.crossings) g_crossPts.push_back(LocalToWorld(a, s.u, s.v, 0.6f));
@@ -264,6 +281,16 @@ void DrawWorld() {
     for (auto& l : g_outline) DrawPolyline(dl, l, IM_COL32(255, 235, 80, 230), 2.5f);
     DrawCells(dl, g_roadQuads);
     for (auto& l : g_lines) DrawPolyline(dl, l, IM_COL32(235, 235, 235, 220), 2.0f);
+    for (int k = 0; k < 4; ++k) {
+        if (!g_utilShow[k]) continue;
+        for (auto& l : g_utilLines[k]) DrawPolyline(dl, l, kUtilCol[k], 2.0f);
+        for (auto& p : g_utilPts[k]) {
+            ImVec2 sp;
+            if (!Proj(p, sp)) continue;
+            dl->AddRectFilled(ImVec2(sp.x - 7, sp.y - 7), ImVec2(sp.x + 7, sp.y + 7), kUtilCol[k], 2.0f);
+            dl->AddRect(ImVec2(sp.x - 7, sp.y - 7), ImVec2(sp.x + 7, sp.y + 7), IM_COL32(30, 30, 30, 255), 2.0f, 0, 1.5f);
+        }
+    }
     for (auto& q : g_quads) DrawBuilding(dl, q);
     ImVec2 s;
     for (auto& c : g_crossPts) if (Proj(c, s)) {       // pedestrian crossing
@@ -529,6 +556,35 @@ void TabRoads() {
     ImGui::TextDisabled("Дома дальше этого расстояния обводятся красным.");
 }
 
+void TabUtils() {
+    ImGui::TextWrapped("Сети идут вдоль дорожек и улиц — под домами не проходят. Узлы (квадраты на карте) стоят у улиц так, "
+                       "чтобы каждое здание было в радиусе обслуживания. Это план-подсказка: в игре сети пока строятся вручную.");
+    ImGui::Spacing();
+    int people = g_plan.capacity;
+    for (int k = 0; k < 4; ++k) {
+        ImGui::PushID(k);
+        ImGui::PushStyleColor(ImGuiCol_CheckMark, ImGui::ColorConvertU32ToFloat4(kUtilCol[k]));
+        ImGui::Checkbox(kUtilName[k], &g_utilShow[k]);
+        ImGui::PopStyleColor();
+        ImGui::SetNextItemWidth(200);
+        if (ImGui::SliderFloat("радиус узла, м", &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
+        ImGui::SetNextItemWidth(120);
+        ImGui::InputFloat("на жителя", &g_utilNorm[k], 0, 0, "%.2f");
+        ImGui::SameLine(); ImGui::TextDisabled("%s (прикидка)", kUtilUnit[k]);
+        if (g_area.ok && !g_plan.buildings.empty()) {
+            int nodes = (int)g_plan.utilNodes[k].size();
+            ImGui::Text("Узлов (%s): %d  ·  нагрузка %.0f %s  ·  траншей %.0f м", kUtilNode[k], nodes, people * g_utilNorm[k], kUtilUnit[k], g_plan.utilLength);
+            if (g_plan.roads.empty()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Нет улицы — узлы ставить негде.");
+            else if (g_plan.utilUncovered[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Вне радиуса зданий: %d — увеличьте радиус или добавьте улицу.", g_plan.utilUncovered[k]);
+        }
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+    if (ImGui::SmallButton("Показать все")) for (bool& b : g_utilShow) b = true;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Скрыть все")) for (bool& b : g_utilShow) b = false;
+}
+
 void Footer() {
     ImGui::Separator();
     const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
@@ -601,7 +657,7 @@ void Panel() {
 
     float footer = ImGui::GetTextLineHeightWithSpacing() * 5 + ImGui::GetFrameHeightWithSpacing() * 3 + 14;
     if (ImGui::BeginTabBar("##tabs")) {
-        struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads } };
+        struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads }, { "Сети", TabUtils } };
         for (auto& t : tabs) {
             if (!ImGui::BeginTabItem(t.name)) continue;
             ImGui::BeginChild("##body", ImVec2(0, std::max(120.0f, ImGui::GetContentRegionAvail().y - footer)));
