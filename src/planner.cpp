@@ -49,7 +49,7 @@ PlanResult MakePlan(const PlanInput& in) {
     for (auto& p : in.poly) { minU = std::min(minU, p.u); maxU = std::max(maxU, p.u); minV = std::min(minV, p.v); maxV = std::max(maxV, p.v); }
     if (maxU - minU < 20 || maxV - minV < 20) return r;
 
-    const float margin = 5.0f, band = 7.0f, gap = in.gap;
+    const float margin = 5.0f, band = 7.0f, gap = in.gap, corridor = 4.5f;
 
     // what to build: services first (they end up next to the street), then houses round-robin
     std::vector<Item> items;
@@ -102,6 +102,7 @@ PlanResult MakePlan(const PlanInput& in) {
             const Item& it = items[i];
             if (it.d > vhi - vlo + 0.01f) break;
             if (u + it.w > R - margin) break;
+            if (u < spineU + corridor && u + it.w > spineU - corridor) { u = spineU + corridor; continue; }  // leave the spine free
             float cu = u + it.w / 2;
             float cv = north ? vlo + it.d / 2 : vhi - it.d / 2;
             if (heightRange(cu, cv, it.w, it.d) > in.maxDiff) { u += 6; ++r.steepSkipped; continue; }   // too steep here

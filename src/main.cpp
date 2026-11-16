@@ -144,8 +144,8 @@ static void Frame(IDXGISwapChain* sc) {
     ImGuiIO& io = ImGui::GetIO();
     eng::g_blockMouseButtons = io.WantCaptureMouse || ui::WantsGameMouse();
     eng::g_blockMouseMove = io.WantCaptureMouse;
-    eng::g_hideMouse = io.WantCaptureMouse && !ui::WantsGameMouse();
-    io.MouseDrawCursor = eng::g_hideMouse;      // the game cursor is hidden under the panel, draw our own
+    eng::g_hideMouse = false;   // reporting an off-screen cursor made the game edge-scroll the camera
+    io.MouseDrawCursor = io.WantCaptureMouse && !ui::WantsGameMouse();   // game cursor is under the panel, draw our own
     eng::g_blockKeys = io.WantTextInput;
     ImGui::Render();
 

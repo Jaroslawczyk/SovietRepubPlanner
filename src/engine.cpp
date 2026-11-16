@@ -73,6 +73,27 @@ static float h_AxisValue(void* s, char* name, int* a, float b, float c) {
     return g_blockMouseMove ? 0.0f : o_AxisValue(s, name, a, b, c);   // camera zoom / rotation axes
 }
 
+// Diagnostics: record how the game calls its own terrain-edit and building-cursor functions.
+typedef void (*TerrEdit_t)(void*, V3*, V3*, float, float, float, bool);
+typedef void (*BldCursor_t)(void*, int, V3*, float, bool, float, bool);
+typedef void (*BldVoid_t)(void*);
+static TerrEdit_t o_EditToHeight; static BldCursor_t o_SetCursorSingle; static BldVoid_t o_AddCursor;
+static void h_EditToHeight(void* s, V3* a, V3* b, float f1, float f2, float f3, bool flag) {
+    static int n = 0;
+    if (n < 40) { ++n; Log("EditToHeight this=%p a=(%.1f %.1f %.1f) b=(%.1f %.1f %.1f) f=%.3f %.3f %.3f flag=%d", s, a->x, a->y, a->z, b->x, b->y, b->z, f1, f2, f3, (int)flag); }
+    o_EditToHeight(s, a, b, f1, f2, f3, flag);
+}
+static void h_SetCursorSingle(void* s, int type, V3* pos, float rot, bool b1, float f2, bool b2) {
+    static int n = 0, lastType = -1;
+    if (n < 40 && type != lastType) { ++n; lastType = type; Log("EditorSetCursorSingle this=%p type=%d pos=(%.1f %.1f %.1f) rot=%.3f b=%d f=%.3f b=%d", s, type, pos->x, pos->y, pos->z, rot, (int)b1, f2, (int)b2); }
+    o_SetCursorSingle(s, type, pos, rot, b1, f2, b2);
+}
+static void h_AddCursor(void* s) {
+    static int n = 0;
+    if (n < 40) { ++n; Log("AddCursorBuildings this=%p", s); }
+    o_AddCursor(s);
+}
+
 struct IatHook { const char* name; void* hook; void** orig; };
 static IatHook g_hooks[] = {
     { "?ViewSetPosition@C3D_CAMERA@@QEAAXVC3DVECTOR3@@@Z", h_ViewSetPosition, (void**)&o_ViewSetPosition },
@@ -90,6 +111,9 @@ static IatHook g_hooks[] = {
     { "?GetMouseSolid@C3D_INPUT@@QEAA?AVC3DVECTOR3@@XZ", h_MouseSolid, (void**)&o_MouseSolid },
     { "?GetMouseSolidWithInvZoom@C3D_INPUT@@QEAA?AVC3DVECTOR3@@XZ", h_MouseSolidInv, (void**)&o_MouseSolidInv },
     { "?CommonInterfaceGetAxisValue@C3D_INPUT@@QEAAMPEADPEAHMM@Z", h_AxisValue, (void**)&o_AxisValue },
+    { "?EditToHeight@C3D_TERRAIN@@QEAAXVC3DVECTOR3@@0MMM_N@Z", h_EditToHeight, (void**)&o_EditToHeight },
+    { "?EditorSetCursorSingle@C3D_BUILDING@@QEAAXHVC3DVECTOR3@@M_NM1@Z", h_SetCursorSingle, (void**)&o_SetCursorSingle },
+    { "?AddCursorBuildings@C3D_BUILDING@@QEAAXXZ", h_AddCursor, (void**)&o_AddCursor },
     { "?GetMouseRelative@C3D_INPUT@@QEAA?AVC3DVECTOR3@@XZ", h_MouseRel, (void**)&o_MouseRel },
 };
 

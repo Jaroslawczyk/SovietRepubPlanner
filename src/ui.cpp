@@ -597,9 +597,18 @@ void ToggleButton() {
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
     ImGui::Begin("##dp_toggle2", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
     ImVec2 p = ImGui::GetCursorScreenPos();
-    if (ImGui::InvisibleButton("##toggle", ImVec2(sz, sz))) g_open = !g_open;
+    static bool dragged = false;
+    ImGui::InvisibleButton("##toggle", ImVec2(sz, sz));
+    if (ImGui::IsItemActivated()) dragged = false;
+    if (ImGui::IsItemActive() && (dragged || ImGui::IsMouseDragging(0, 5.0f))) {
+        dragged = true;
+        ImVec2 wpos = ImGui::GetWindowPos();
+        ImGui::SetWindowPos(ImVec2(std::clamp(wpos.x + io.MouseDelta.x, 0.0f, io.DisplaySize.x - sz - 8),
+                                   std::clamp(wpos.y + io.MouseDelta.y, 0.0f, io.DisplaySize.y - sz - 8)));
+    }
+    if (ImGui::IsItemDeactivated() && !dragged) g_open = !g_open;
     bool hov = ImGui::IsItemHovered();
-    ImGui::SetItemTooltip("Планировщик квартала (F8)");
+    ImGui::SetItemTooltip("Планировщик квартала (F8). Можно перетащить.");
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 q(p.x + sz, p.y + sz);
     dl->AddRectFilled(ImVec2(p.x + 2, p.y + 3), ImVec2(q.x + 2, q.y + 3), IM_COL32(0, 0, 0, 70), 5);
