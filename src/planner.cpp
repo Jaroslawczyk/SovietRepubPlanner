@@ -114,17 +114,21 @@ PlanResult MakePlan(const PlanInput& in) {
         return placed;
     };
 
-    float pathLo = 1e9f, pathHi = -1e9f;
-    // one strip: south row, footpath, north row; returns false when it does not fit
-    auto strip = [&](float lo, float hi, float depth) {
+    struct StripInfo { float pathV, l, r; };
+    std::vector<StripInfo> stripsUp, stripsDown;    // in order, going away from the street
+    bool curUp = true;
+    // one strip: south row, footpath, north row (rows = 1: only the row next to the previous strip)
+    auto strip = [&](float lo, float hi, float depth, int rows = 2) {
         size_t limit = std::min(items.size(), i + 40);
-        float pathV = lo + depth + band / 2;
-        float rowL = spineU, rowR = spineU;
-        int placed = placeRow(lo, lo + depth, false, pathV, limit, rowL, rowR);
-        placed += placeRow(pathV + band / 2, hi, true, pathV, limit, rowL, rowR);
+        bool southOnly = rows == 1 && curUp, northOnly = rows == 1 && !curUp;
+        float pathV = northOnly ? lo + band / 2 : lo + depth + band / 2;
+        float rowL = 1e9f, rowR = -1e9f;
+        int placed = 0;
+        if (!northOnly) placed += placeRow(lo, lo + depth, false, pathV, limit, rowL, rowR);
+        if (!southOnly) placed += placeRow(pathV + band / 2, hi, true, pathV, limit, rowL, rowR);
         if (placed) {
             r.paths.push_back({ rowL - 4, pathV, rowR + 4, pathV });
-            pathLo = std::min(pathLo, pathV); pathHi = std::max(pathHi, pathV);
+            (curUp ? stripsUp : stripsDown).push_back({ pathV, rowL - 4, rowR + 4 });
         }
         return placed;
     };
@@ -137,14 +141,39 @@ PlanResult MakePlan(const PlanInput& in) {
     // fill strips alternately above and below the street so that everything stays close to it
     float up = roadV + roadBand, down = roadV - roadBand;
     bool upDone = false, downDone = false;
+    float nextUpStreet = in.streetSpacing, nextDownStreet = in.streetSpacing;
     int emptyUp = 0, emptyDown = 0;
     while (i < items.size() && !(upDone && downDone)) {
         for (int side = 0; side < 2 && i < items.size(); ++side) {
             bool goUp = side == 0;
             if (goUp ? upDone : downDone) continue;
+            // a parallel street every "streetSpacing" metres, so that the whole area gets road access
+            float& nextStreet = goUp ? nextUpStreet : nextDownStreet;
+            if (roadHalf > 0 && in.streetSpacing > 0 && (goUp ? up - roadV : roadV - down) >= nextStreet) {
+                float sv = goUp ? up + roadBand : down - roadBand, L, R;
+                bool fits = goUp ? sv + roadBand < maxV - margin : sv - roadBand > minV + margin;
+                if (fits && PolyScan(in.poly, sv, L, R) && R - L > 30) {
+                    r.roads.push_back({ L, sv, R, sv, roadHalf * 2 });
+                    float nearV = goUp ? sv - roadHalf - 2 : sv + roadHalf + 2, farV = goUp ? sv + roadHalf + 2 : sv - roadHalf - 2;
+                    r.paths.push_back({ L, nearV, R, nearV });
+                    r.paths.push_back({ L, farV, R, farV });
+                    auto& list = goUp ? stripsUp : stripsDown;
+                    list.push_back({ nearV, L, R });
+                    list.push_back({ farV, L, R });
+                    if (goUp) up = sv + roadBand; else down = sv - roadBand;
+                }
+                nextStreet += in.streetSpacing;
+            }
             float depth = nextDepth(), h = 2 * depth + band;
             float lo = goUp ? up : down - h, hi = lo + h;
-            if (goUp ? hi > maxV - margin : lo < minV + margin) { (goUp ? upDone : downDone) = true; continue; }
+            curUp = goUp;
+            if (goUp ? hi > maxV - margin : lo < minV + margin) {
+                // no room for a full strip: one last single row with its footpath, if that fits
+                float h1 = depth + band;
+                float lo1 = goUp ? up : down - h1, hi1 = lo1 + h1;
+                if (!(goUp ? hi1 > maxV - margin : lo1 < minV + margin)) strip(lo1, hi1, depth, 1);
+                (goUp ? upDone : downDone) = true; continue;
+            }
             int placed = strip(lo, hi, depth);
             int& empty = goUp ? emptyUp : emptyDown;
             empty = placed ? 0 : empty + 1;
@@ -155,11 +184,40 @@ PlanResult MakePlan(const PlanInput& in) {
     }
     r.unplaced = (int)(items.size() - i);
 
-    if (pathHi >= pathLo) {     // the spine links every strip with the street and the first stop
-        float lo = std::min(pathLo, roadHalf > 0 ? roadV : pathLo), hi = std::max(pathHi, roadHalf > 0 ? roadV : pathHi);
-        r.paths.push_back({ spineU, lo, spineU, hi });
-        if (roadHalf > 0) r.crossings.push_back({ spineU, roadV });
+    // Links between neighbouring strips (and the street): a short footpath across, placed as close to the stop
+    // as possible where it stays inside both footpaths' extents and does not run through a building.
+    auto blocked = [&](float u, float v1, float v2) {
+        if (v1 > v2) std::swap(v1, v2);
+        for (auto& b : r.buildings)
+            if (fabsf(b.u - u) < b.w / 2 + 1.5f && b.v + b.d / 2 > v1 && b.v - b.d / 2 < v2) return true;
+        return false;
+    };
+    auto link = [&](const StripInfo& a, const StripInfo& b) {
+        float lo = std::max(a.l, b.l), hi = std::min(a.r, b.r);
+        if (hi < lo) return false;
+        for (int k = 0; k < 400; ++k) {
+            float cu = spineU + (k % 2 ? 1 : -1) * (float)((k + 1) / 2) * 2.0f;
+            if (cu < lo || cu > hi) { if (spineU + k < lo && spineU - k > hi) break; continue; }
+            if (blocked(cu, a.pathV, b.pathV)) continue;
+            r.paths.push_back({ cu, a.pathV, cu, b.pathV });
+            return true;
+        }
+        return false;
+    };
+    for (int side = 0; side < 2; ++side) {
+        auto& list = side == 0 ? stripsUp : stripsDown;
+        StripInfo prev{}; bool havePrev = false;
+        if (roadHalf > 0 && !r.roads.empty()) {
+            float pv = side == 0 ? roadV + roadHalf + 2 : roadV - roadHalf - 2;     // the pavement on this side
+            prev = { pv, r.roads[0].u1, r.roads[0].u2 }; havePrev = true;
+        } else if (side == 1 && !stripsUp.empty()) { prev = stripsUp[0]; havePrev = true; }
+        for (auto& st : list) {
+            if (havePrev) link(prev, st);
+            prev = st; havePrev = true;
+        }
     }
+    if (roadHalf > 0 && !r.roads.empty() && (!stripsUp.empty() || !stripsDown.empty()))
+        r.crossings.push_back({ spineU, roadV });
     for (auto& p : r.paths) r.pathLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
     for (auto& p : r.roads) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
 

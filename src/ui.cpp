@@ -42,6 +42,7 @@ int   g_roadType = 1;
 float g_roadV = 0;
 std::vector<float> g_stops;
 float g_walk = 400.0f, g_maxDiff = 5.0f;
+float g_streetGap = 250.0f;        // parallel streets every N metres, 0 = off
 bool  g_showSlope = true, g_showLevel = false;
 bool  g_dirty = true, g_areaChanged = false, g_inited = false;
 char  g_filter[64] = "";
@@ -156,7 +157,7 @@ void Regenerate() {
     in.poly = a.local; in.population = g_population; in.gap = g_gap;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) in.houseTypes.push_back((int)i);
     in.services = &g_services;
-    in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff;
+    in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     g_plan = MakePlan(in);
 
@@ -500,6 +501,7 @@ void TabRoads() {
     const char* types[] = { "без дороги (только дорожки)", "улица, 2 полосы", "проспект, 4 полосы" };
     ImGui::SetNextItemWidth(280);
     if (ImGui::Combo("тип дороги", &g_roadType, types, 3)) g_dirty = true;
+    if (ImGui::SliderFloat("улица через каждые, м (0 — одна)", &g_streetGap, 0.0f, 600.0f, "%.0f")) { if (g_streetGap < 80) g_streetGap = 0; g_dirty = true; }
     ImGui::TextDisabled("Вдоль улицы идут тротуары, дорожки кварталов сходятся к переходу у остановки.");
 
     ImGui::SeparatorText("Остановки");
@@ -540,9 +542,11 @@ void Footer() {
             if (g_plan.farHouses) ImGui::TextColored(red, "До остановки до %.0f м — %d домов дальше %.0f м, добавьте остановку.", g_plan.maxWalkToStop, g_plan.farHouses, g_walk);
             else ImGui::Text("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м", g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));
         } else if (g_plan.maxWalkToShop >= 0) ImGui::Text("До магазина не дальше %.0f м", g_plan.maxWalkToShop);
-        if (g_plan.unplaced > 0) ImGui::TextColored(red, "Не поместилось зданий: %d — увеличьте участок.", g_plan.unplaced);
+        if (g_plan.unplaced > 0) ImGui::TextColored(red, "Вмещается около %d жит., не влезло зданий: %d — нужен участок больше.", g_plan.capacity, g_plan.unplaced);
         else if (g_plan.steepSkipped > 0) ImGui::TextDisabled("Крутые места обойдены (%d раз).", g_plan.steepSkipped);
     }
+    if (ImGui::Button("Пересобрать план", ImVec2(-FLT_MIN, 0)) && g_area.ok) g_dirty = g_areaChanged = true;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Заново читает рельеф и расставляет здания, улицу и дорожки по всему участку.");
     static bool levelling = false;
     int pending = eng::LevelPending();
     if (levelling && !pending) { levelling = false; g_dirty = g_areaChanged = true; }
@@ -595,7 +599,7 @@ void Panel() {
 
     if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
 
-    float footer = ImGui::GetTextLineHeightWithSpacing() * 5 + ImGui::GetFrameHeightWithSpacing() * 2 + 14;
+    float footer = ImGui::GetTextLineHeightWithSpacing() * 5 + ImGui::GetFrameHeightWithSpacing() * 3 + 14;
     if (ImGui::BeginTabBar("##tabs")) {
         struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads } };
         for (auto& t : tabs) {

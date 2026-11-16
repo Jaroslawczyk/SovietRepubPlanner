@@ -68,6 +68,7 @@ struct PlanInput {
     int   roadType = 1;                             // 0 none, 1 street, 2 avenue
     float roadV = 0;                                // where the street crosses the district
     std::vector<float> stopsU;                      // bus stops along the street
+    float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
     float walkRadius = 400;                         // how tooFar residents walk to a stop
     float maxDiff = 3.0f;                           // allowed height difference under one building
     std::function<float(float, float)> height;      // terrain height at (u, v); may be empty
