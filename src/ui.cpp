@@ -546,20 +546,16 @@ void Footer() {
     static bool levelling = false;
     int pending = eng::LevelPending();
     if (levelling && !pending) { levelling = false; g_dirty = g_areaChanged = true; }
-    // The button is hidden unless DistrictPlanner.experimental exists next to the exe: levelling is not reliable yet.
-    static int experimental = -1;
-    if (experimental < 0) experimental = GetFileAttributesW((GameDir() + L"DistrictPlanner.experimental").c_str()) != INVALID_FILE_ATTRIBUTES;
     bool canLevel = g_area.ok && !g_plan.buildings.empty() && !pending;
-    if (experimental) {
     ImGui::BeginDisabled(!canLevel);
     char lbl[96];
     if (pending) snprintf(lbl, sizeof(lbl), "Выравниваю… осталось точек: %d", pending);
-    else snprintf(lbl, sizeof(lbl), "Применить выравнивание (эксперимент, может сломать карту)");
+    else snprintf(lbl, sizeof(lbl), "Выровнять землю под зданиями (сразу, бесплатно)");
     if (ImGui::Button(lbl, ImVec2(-FLT_MIN, 0))) {
         std::vector<V3> pts;
         for (auto& b : g_plan.buildings)
-            for (float du = -b.w / 2 - 4; du <= b.w / 2 + 4.01f; du += 4)
-                for (float dv = -b.d / 2 - 4; dv <= b.d / 2 + 4.01f; dv += 4) {
+            for (float du = -b.w / 2; du <= b.w / 2 + 0.01f; du += 2.5f)
+                for (float dv = -b.d / 2; dv <= b.d / 2 + 0.01f; dv += 2.5f) {
                     V3 w = LocalToWorld(g_area, b.u + du, b.v + dv, 0);
                     pts.push_back({ w.x, b.pad, w.z });
                 }
@@ -567,7 +563,9 @@ void Footer() {
         levelling = true;
     }
     ImGui::EndDisabled();
-    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Землю под зданиями плана сразу ставит на высоту площадок. "
+                          "Бесплатно, без техники; отменить нельзя — сохранитесь заранее.");
     ImGui::BeginDisabled(true);
     ImGui::Button("Построить в игре (в разработке)", ImVec2(-FLT_MIN, 0));
     ImGui::EndDisabled();

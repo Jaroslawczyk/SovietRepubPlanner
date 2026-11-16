@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <map>
 #include <atomic>
 
 namespace eng {
@@ -126,92 +127,101 @@ static void h_RegenColl(void* s) { static int n = 0; if (n < 30) { ++n; Log("Reg
 static void h_RegenNorm(void* s) { static int n = 0; if (n < 30) { ++n; Log("RegenerateCollisionNormalDataSoviet this=%p", s); } o_RegenNorm(s); }
 
 // ---- terrain levelling ----
-// EXPERIMENTAL, not reliable yet. The game's flatten tool calls
-// EditRaiseLowerAngleLimit(pos, 0, 1.7, c, 0.0012, false, 0.409) on a 5 m grid every frame with |c| <= 0.00004,
-// which moves the ground about 2 cm per call (c * ~550 m). Calling it ourselves moves the ground once (about
-// 0.6 m) and then stalls until some parameter changes; the reason is not understood. The heightmap texture
-// must be open (HeightmapTextureOpen) or the engine crashes, and all of it must run on the render thread.
+// From the disassembly of C3D_TERRAIN::EditRaiseLower(pos, inner, outer, amount, limit, selfOpen):
+//  - inner / outer are brush radii in heightmap texels; weight is 1 inside "inner" and falls to 0 at "outer";
+//  - heights are normalised (0..1 of the terrain height scale); new = h + weight * amount;
+//  - "limit" is a normalised target: raising stops at it, lowering stops at it, texels already past it are skipped;
+//  - the heightmap texture must be open (HeightmapTextureOpen) or the engine reads a null buffer and crashes;
+//    selfOpen = true makes the call open / close it itself;
+//  - collision heights are refreshed by the call.
+// A large amount with limit = target therefore puts every texel under the brush exactly on the target height.
+// Runs from the Present hook: the texture is mapped on the D3D context, which is only safe on the render thread.
 static std::mutex g_lvlMx;
 static std::vector<V3> g_lvlPts;            // x, target height, z
 static std::atomic<int> g_lvlLeft{ 0 };
-static float g_lvlGain = 0.0002f;
-static int g_lvlPass = 0;
-static bool g_lvlRegen = false;
-static int g_lvlStall = 0;
-static bool g_lvlOpen = false;
-static int g_lvlVar = 0;
-static DWORD g_lvlLast = 0;
+static int g_lvlStage = 0;                  // 0 edit, 1 verify
+static BldVoid_t f_HmOpen, f_HmClose;
+typedef float (*TerrScale_t)(void*);
+static TerrScale_t f_TerrScale;
 
 void QueueLevel(const std::vector<V3>& pts) {
     std::lock_guard<std::mutex> l(g_lvlMx);
-    g_lvlPts = pts; g_lvlPass = 0; g_lvlGain = 0.0002f; g_lvlRegen = false; g_lvlStall = 0; g_lvlVar = 0;
+    g_lvlPts = pts; g_lvlStage = 0;
     g_lvlLeft = (int)pts.size();
     Log("level: queued %d points", (int)pts.size());
 }
 int LevelPending() { return g_lvlLeft; }
 
-static std::vector<float> g_lvlPrevH, g_lvlPrevStep;
-static BldVoid_t f_HmOpen, f_HmClose;
-
-// Called from the Present hook: the heightmap texture is mapped / unmapped on the D3D context, which is only
-// safe on the render thread (doing it from the input-polling thread crashed the game).
 void LevelTick() {
     if (!g_lvlLeft || !g_terrain || !o_EdRL || !o_TerrHeight) return;
-    DWORD now = GetTickCount();
-    if (now - g_lvlLast < 30) return;       // polled several times per frame
-    g_lvlLast = now;
     std::lock_guard<std::mutex> l(g_lvlMx);
     if (!f_HmOpen) {
         HMODULE c3d = GetModuleHandleW(L"C3DDLL64.dll");
         f_HmOpen = (BldVoid_t)GetProcAddress(c3d, "?HeightmapTextureOpen@C3D_TERRAIN@@QEAAXXZ");
         f_HmClose = (BldVoid_t)GetProcAddress(c3d, "?HeightmapTextureClose@C3D_TERRAIN@@QEAAXXZ");
-        Log("level: HeightmapTextureOpen=%p Close=%p thread %lu", f_HmOpen, f_HmClose, GetCurrentThreadId());
+        f_TerrScale = (TerrScale_t)GetProcAddress(c3d, "?GetTerrainHeight@C3D_TERRAIN@@QEAAMXZ");
     }
-    if (!f_HmOpen || !f_HmClose) { g_lvlLeft = 0; return; }
-    size_t n = g_lvlPts.size();
-    if (g_lvlPass == 0) { g_lvlPrevH.assign(n, 0); g_lvlPrevStep.assign(n, 0); }
-    const float tol = 0.12f;
-    // heights now show what the previous pass achieved; tune the gain from that
-    std::vector<float> h(n);
-    double want = 0, got = 0; int active = 0; float worst = 0;
-    for (size_t i = 0; i < n; ++i) {
-        V3 p{ g_lvlPts[i].x, 0, g_lvlPts[i].z };
-        h[i] = o_TerrHeight(g_terrain, &p);
-        float ps = g_lvlPrevStep[i];
-        if (ps != 0) { want += fabsf(ps); got += (h[i] - g_lvlPrevH[i]) * (ps > 0 ? 1.0 : -1.0); }
-        float d = fabsf(g_lvlPts[i].y - h[i]);
-        if (d > worst) worst = d;
-        if (d >= tol) ++active;
-    }
-    if (want > 0) {                          // aim at closing roughly 40 % of the gap per pass
-        double ratio = got / want;
-        if (ratio < 0.01) { ++g_lvlStall; } else g_lvlStall = 0;
-        if (ratio < 0.01) {}
-        else if (ratio < 0.25) g_lvlGain *= 1.5f;
-        else if (ratio > 0.7) g_lvlGain *= 0.5f;
-        if (g_lvlGain > 0.0008f) g_lvlGain = 0.0008f; else if (g_lvlGain < 0.00001f) g_lvlGain = 0.00001f;
-    }
-    if (g_lvlPass < 15 || g_lvlPass % 25 == 0)
-        Log("level: pass %d, active %d, worst %.2f m, gain %.6f, moved %.3f of %.3f, variant %d", g_lvlPass, active, worst, g_lvlGain, got, want, g_lvlVar);
-    if (!active || g_lvlPass >= 400 || g_lvlStall > 40) {
-        Log("level: finished after %d passes, worst %.2f m", g_lvlPass, worst);
-        if (g_lvlOpen) { f_HmClose(g_terrain); g_lvlOpen = false; }
+    float scale = f_TerrScale ? f_TerrScale(g_terrain) : 0;
+    if (!f_HmOpen || !f_HmClose || !(scale > 1.0f && scale < 100000.0f)) {
+        Log("level: unavailable (open %p, close %p, height scale %.3f)", f_HmOpen, f_HmClose, scale);
         g_lvlLeft = 0; return;
     }
-    if (!g_lvlOpen) { f_HmOpen(g_terrain); g_lvlOpen = true; }   // stays open for the whole job, like the game's own tool
-    for (size_t i = 0; i < n; ++i) {
-        float d = g_lvlPts[i].y - h[i];
-        g_lvlPrevH[i] = h[i]; g_lvlPrevStep[i] = 0;
-        if (fabsf(d) < tol) continue;
-        float step = d > 1.5f ? 1.5f : d < -1.5f ? -1.5f : d;
-        g_lvlPrevStep[i] = step;
-        V3 q{ g_lvlPts[i].x, h[i], g_lvlPts[i].z };
-        float c = step * g_lvlGain;
-        if (c > 0.001f) c = 0.001f; else if (c < -0.001f) c = -0.001f;     // larger steps are ignored by the engine
-        o_EdRL(g_terrain, &q, 0.0f, 1.7f, c, 0.0012f, false);
+    if (g_lvlStage == 1) {                   // next frame: report how flat it became
+        float worst = 0; int off = 0;
+        for (auto& t : g_lvlPts) {
+            V3 p{ t.x, 0, t.z };
+            float d = fabsf(o_TerrHeight(g_terrain, &p) - t.y);
+            if (d > worst) worst = d;
+            if (d > 0.3f) ++off;
+        }
+        { V3 p0{ g_lvlPts[0].x, 0, g_lvlPts[0].z }; Log("level: first point target %.2f, now %.2f", g_lvlPts[0].y, o_TerrHeight(g_terrain, &p0)); }
+        Log("level: done, worst deviation %.2f m, points off by more than 0.3 m: %d of %d", worst, off, (int)g_lvlPts.size());
+        g_lvlLeft = 0; return;
     }
-    ++g_lvlPass;
-    g_lvlLeft = active;
+    float worst = 0;
+    // world height = origin.y + normalised * scale; the terrain origin vector sits at +0x890 (x, y, z), as used by
+    // the engine's own world -> texel conversion
+    const float* tf = (const float*)((const BYTE*)g_terrain + 0x878);
+    float originY = tf[7];
+    Log("level: heightmap %u x %u texels; terrain floats", *(const unsigned*)((const BYTE*)g_terrain + 0x220), *(const unsigned*)((const BYTE*)g_terrain + 0x224));
+    Log("level: terrain floats %.2f %.2f %.2f %.2f %.2f %.2f | origin %.2f %.2f %.2f", tf[0], tf[1], tf[2], tf[3], tf[4], tf[5], tf[6], tf[7], tf[8]);
+    if (!(fabsf(originY) < 5000.0f)) originY = 0;
+    // The heightmap is coarse (about 10 m per texel on a 20 km map) and heights are interpolated between texels,
+    // so every texel around a footprint point matters. Texels shared by neighbouring pads get the mean target.
+    const BYTE* tb = (const BYTE*)g_terrain;
+    unsigned texW = *(const unsigned*)(tb + 0x220), texH = *(const unsigned*)(tb + 0x224);
+    float originX = tf[6], originZ = tf[8], sizeX = tf[1], sizeZ = tf[2];
+    if (texW < 16 || texW > 65536 || texH < 16 || texH > 65536 || !(sizeX > 10) || !(sizeZ > 10)) {
+        Log("level: unexpected terrain layout, cancelled"); g_lvlLeft = 0; return;
+    }
+    std::map<unsigned long long, std::pair<double, int>> cells;
+    for (auto& t : g_lvlPts) {
+        V3 p{ t.x, 0, t.z };
+        float d = fabsf(t.y - o_TerrHeight(g_terrain, &p));
+        if (d > worst) worst = d;
+        float fx = (t.x - originX) / sizeX * texW, fz = (t.z - originZ) / sizeZ * texH;
+        int ix = (int)floorf(fx), iz = (int)floorf(fz);
+        for (int a = 0; a < 2; ++a) for (int b = 0; b < 2; ++b) {
+            int cx = ix + a, cz = iz + b;
+            if (cx < 1 || cz < 1 || cx >= (int)texW - 1 || cz >= (int)texH - 1) continue;
+            auto& c = cells[((unsigned long long)cx << 32) | (unsigned)cz];
+            c.first += t.y; ++c.second;
+        }
+    }
+    f_HmOpen(g_terrain);
+    for (auto& kv : cells) {
+        int cx = (int)(kv.first >> 32), cz = (int)(kv.first & 0xffffffffu);
+        float target = (float)(kv.second.first / kv.second.second);
+        float lim = (target - originY) / scale;
+        V3 q{ originX + cx * sizeX / texW, target, originZ + cz * sizeZ / texH };
+        o_EdRL(g_terrain, &q, 0.2f, 0.3f, 1.0f, lim, false);     // brush smaller than a texel: exactly this one (inner must be > 0: the engine skips distance == inner)
+        q = { originX + cx * sizeX / texW, target, originZ + cz * sizeZ / texH };
+        o_EdRL(g_terrain, &q, 0.2f, 0.3f, -1.0f, lim, false);
+    }
+    Log("level: %d heightmap texels set", (int)cells.size());
+    f_HmClose(g_terrain);
+    Log("level: edited %d points, height scale %.2f, worst gap before %.2f m", (int)g_lvlPts.size(), scale, worst);
+    g_lvlStage = 1;
 }
 
 struct IatHook { const char* name; void* hook; void** orig; };
