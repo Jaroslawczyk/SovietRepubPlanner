@@ -166,7 +166,7 @@ PlanResult MakePlan(const PlanInput& in) {
     for (auto& b : r.buildings) {
         const BuildingType& t = all[b.type];
         bool living = t.category == "LIVING";
-        if (living) { r.capacity += t.capacity; ++r.houses; } else ++r.services;
+        if (living) { r.capacity += t.capacity; ++r.houses; } else { ++r.services; r.jobs += t.workers; }
 
         if (in.height) {        // levelling: pad at the mean height, earth volumes from a 3x3 sample
             float h[9], sum = 0; int k = 0;

@@ -81,7 +81,7 @@ struct PlanResult {
     std::vector<PathSeg> paths;
     std::vector<RoadSeg> roads;
     std::vector<V2>      stops, crossings;
-    int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0;
+    int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0, jobs = 0;
     float pathLength = 0, roadLength = 0, maxWalkToShop = -1, maxWalkToStop = -1, cut = 0, fill = 0;
 };
 PlanResult MakePlan(const PlanInput& in);

@@ -535,6 +535,7 @@ void Footer() {
     else {
         ImGui::Text("Домов %d  ·  мест %d из %d  ·  служб %d", g_plan.houses, g_plan.capacity, g_population, g_plan.services);
         ImGui::Text("Дорог %.0f м  ·  дорожек %.0f м  ·  срезать %.0f м³  ·  насыпать %.0f м³", g_plan.roadLength, g_plan.pathLength, g_plan.cut, g_plan.fill);
+        ImGui::Text("Рабочих мест в службах %d  ·  работников ≈ %d (60 %% жителей)", g_plan.jobs, g_plan.capacity * 6 / 10);
         if (g_plan.maxWalkToStop >= 0) {
             if (g_plan.farHouses) ImGui::TextColored(red, "До остановки до %.0f м — %d домов дальше %.0f м, добавьте остановку.", g_plan.maxWalkToStop, g_plan.farHouses, g_walk);
             else ImGui::Text("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м", g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));
@@ -571,7 +572,7 @@ void Panel() {
 
     if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
 
-    float footer = ImGui::GetTextLineHeightWithSpacing() * 4 + ImGui::GetFrameHeightWithSpacing() + 14;
+    float footer = ImGui::GetTextLineHeightWithSpacing() * 5 + ImGui::GetFrameHeightWithSpacing() + 14;
     if (ImGui::BeginTabBar("##tabs")) {
         struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads } };
         for (auto& t : tabs) {
