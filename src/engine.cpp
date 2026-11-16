@@ -2,6 +2,8 @@
 #include "common.h"
 #include <cmath>
 #include <cstring>
+#include <mutex>
+#include <atomic>
 
 namespace eng {
 
@@ -46,7 +48,9 @@ static bool h_TerrRay(void* self, V3* a, V3* b, V3* out, bool f1, bool f2, float
     return o_TerrRay(self, a, b, out, f1, f2, f);
 }
 #define MB_HOOK(name, orig) static bool name(void* s) { return g_blockMouseButtons ? false : orig(s); }
-MB_HOOK(h_LPress, o_LPress) MB_HOOK(h_LDown, o_LDown) MB_HOOK(h_LPressA, o_LPressA)
+MB_HOOK(h_LPress, o_LPress)
+static bool h_LDown(void* s) { static DWORD t = 0; if (t != GetCurrentThreadId()) { t = GetCurrentThreadId(); Log("input polled on thread %lu", t); } return g_blockMouseButtons ? false : o_LDown(s); }   // polled every frame
+ MB_HOOK(h_LPressA, o_LPressA)
 MB_HOOK(h_RPress, o_RPress) MB_HOOK(h_RDown, o_RDown) MB_HOOK(h_RPressA, o_RPressA)
 MB_HOOK(h_MDown, o_MDown)
 static bool h_KeyDown(void* s, int k)  { return g_blockKeys ? false : o_KeyDown(s, k); }
@@ -106,11 +110,109 @@ static BldVoid_t o_RegenColl, o_RegenNorm;
 static void h_EdLevel(void* s, V3* p, float a, float b, float c, bool d) { LOGV("EditLevel", "f=%.3f %.3f %.3f flag=%d", a, b, c, (int)d); o_EdLevel(s, p, a, b, c, d); }
 static void h_EdSmooth(void* s, V3* p, float a, float b, float c, bool d) { LOGV("EditSmooth", "f=%.3f %.3f %.3f flag=%d", a, b, c, (int)d); o_EdSmooth(s, p, a, b, c, d); }
 static void h_EdRL(void* s, V3* p, float a, float b, float c, float e, bool d) { LOGV("EditRaiseLower", "f=%.3f %.3f %.3f %.3f flag=%d", a, b, c, e, (int)d); o_EdRL(s, p, a, b, c, e, d); }
-static void h_EdRLA(void* s, V3* p, float a, float b, float c, float e, bool d, float g) { LOGV("EditRaiseLowerAngleLimit", "f=%.3f %.3f %.3f %.3f flag=%d g=%.3f", a, b, c, e, (int)d, g); o_EdRLA(s, p, a, b, c, e, d, g); }
+static void h_EdRLA(void* s, V3* p, float a, float b, float c, float e, bool d, float g) {
+    static int n = 0;
+    if (n >= 120) { o_EdRLA(s, p, a, b, c, e, d, g); return; }
+    ++n;
+    V3 q{ p->x, 0, p->z }; float h0 = o_TerrHeight(s, &q);
+    V3 keep = *p;
+    o_EdRLA(s, p, a, b, c, e, d, g);
+    V3 q2{ keep.x, 0, keep.z }; float h1 = o_TerrHeight(s, &q2);
+    Log("GAME EdRLA tid=%lu p=(%.2f %.3f %.2f) a=%.6f b=%.6f c=%.7f e=%.6f flag=%d g=%.4f | h %.3f -> %.3f", GetCurrentThreadId(), keep.x, keep.y, keep.z, a, b, c, e, (int)d, g, h0, h1);
+}
 static float h_EdRLC(void* s, V3* p, float a, float b, float c, float e, bool d) { float r = o_EdRLC(s, p, a, b, c, e, d); LOGV("EditRaiseLowerAngleLimitGetCost", "f=%.3f %.3f %.3f %.3f flag=%d -> %.3f", a, b, c, e, (int)d, r); return r; }
 static void h_EdSWL(void* s, V3* p, float a, float b, float c, float d, float e, float f, float g, float h, float i) { LOGV("EditSmoothWithLimits", "f=%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f", a, b, c, d, e, f, g, h, i); o_EdSWL(s, p, a, b, c, d, e, f, g, h, i); }
 static void h_RegenColl(void* s) { static int n = 0; if (n < 30) { ++n; Log("RegenerateCollisionDataSoviet this=%p", s); } o_RegenColl(s); }
 static void h_RegenNorm(void* s) { static int n = 0; if (n < 30) { ++n; Log("RegenerateCollisionNormalDataSoviet this=%p", s); } o_RegenNorm(s); }
+
+// ---- terrain levelling ----
+// EXPERIMENTAL, not reliable yet. The game's flatten tool calls
+// EditRaiseLowerAngleLimit(pos, 0, 1.7, c, 0.0012, false, 0.409) on a 5 m grid every frame with |c| <= 0.00004,
+// which moves the ground about 2 cm per call (c * ~550 m). Calling it ourselves moves the ground once (about
+// 0.6 m) and then stalls until some parameter changes; the reason is not understood. The heightmap texture
+// must be open (HeightmapTextureOpen) or the engine crashes, and all of it must run on the render thread.
+static std::mutex g_lvlMx;
+static std::vector<V3> g_lvlPts;            // x, target height, z
+static std::atomic<int> g_lvlLeft{ 0 };
+static float g_lvlGain = 0.0002f;
+static int g_lvlPass = 0;
+static bool g_lvlRegen = false;
+static int g_lvlStall = 0;
+static bool g_lvlOpen = false;
+static int g_lvlVar = 0;
+static DWORD g_lvlLast = 0;
+
+void QueueLevel(const std::vector<V3>& pts) {
+    std::lock_guard<std::mutex> l(g_lvlMx);
+    g_lvlPts = pts; g_lvlPass = 0; g_lvlGain = 0.0002f; g_lvlRegen = false; g_lvlStall = 0; g_lvlVar = 0;
+    g_lvlLeft = (int)pts.size();
+    Log("level: queued %d points", (int)pts.size());
+}
+int LevelPending() { return g_lvlLeft; }
+
+static std::vector<float> g_lvlPrevH, g_lvlPrevStep;
+static BldVoid_t f_HmOpen, f_HmClose;
+
+// Called from the Present hook: the heightmap texture is mapped / unmapped on the D3D context, which is only
+// safe on the render thread (doing it from the input-polling thread crashed the game).
+void LevelTick() {
+    if (!g_lvlLeft || !g_terrain || !o_EdRL || !o_TerrHeight) return;
+    DWORD now = GetTickCount();
+    if (now - g_lvlLast < 30) return;       // polled several times per frame
+    g_lvlLast = now;
+    std::lock_guard<std::mutex> l(g_lvlMx);
+    if (!f_HmOpen) {
+        HMODULE c3d = GetModuleHandleW(L"C3DDLL64.dll");
+        f_HmOpen = (BldVoid_t)GetProcAddress(c3d, "?HeightmapTextureOpen@C3D_TERRAIN@@QEAAXXZ");
+        f_HmClose = (BldVoid_t)GetProcAddress(c3d, "?HeightmapTextureClose@C3D_TERRAIN@@QEAAXXZ");
+        Log("level: HeightmapTextureOpen=%p Close=%p thread %lu", f_HmOpen, f_HmClose, GetCurrentThreadId());
+    }
+    if (!f_HmOpen || !f_HmClose) { g_lvlLeft = 0; return; }
+    size_t n = g_lvlPts.size();
+    if (g_lvlPass == 0) { g_lvlPrevH.assign(n, 0); g_lvlPrevStep.assign(n, 0); }
+    const float tol = 0.12f;
+    // heights now show what the previous pass achieved; tune the gain from that
+    std::vector<float> h(n);
+    double want = 0, got = 0; int active = 0; float worst = 0;
+    for (size_t i = 0; i < n; ++i) {
+        V3 p{ g_lvlPts[i].x, 0, g_lvlPts[i].z };
+        h[i] = o_TerrHeight(g_terrain, &p);
+        float ps = g_lvlPrevStep[i];
+        if (ps != 0) { want += fabsf(ps); got += (h[i] - g_lvlPrevH[i]) * (ps > 0 ? 1.0 : -1.0); }
+        float d = fabsf(g_lvlPts[i].y - h[i]);
+        if (d > worst) worst = d;
+        if (d >= tol) ++active;
+    }
+    if (want > 0) {                          // aim at closing roughly 40 % of the gap per pass
+        double ratio = got / want;
+        if (ratio < 0.01) { ++g_lvlStall; } else g_lvlStall = 0;
+        if (ratio < 0.01) {}
+        else if (ratio < 0.25) g_lvlGain *= 1.5f;
+        else if (ratio > 0.7) g_lvlGain *= 0.5f;
+        if (g_lvlGain > 0.0008f) g_lvlGain = 0.0008f; else if (g_lvlGain < 0.00001f) g_lvlGain = 0.00001f;
+    }
+    if (g_lvlPass < 15 || g_lvlPass % 25 == 0)
+        Log("level: pass %d, active %d, worst %.2f m, gain %.6f, moved %.3f of %.3f, variant %d", g_lvlPass, active, worst, g_lvlGain, got, want, g_lvlVar);
+    if (!active || g_lvlPass >= 400 || g_lvlStall > 40) {
+        Log("level: finished after %d passes, worst %.2f m", g_lvlPass, worst);
+        if (g_lvlOpen) { f_HmClose(g_terrain); g_lvlOpen = false; }
+        g_lvlLeft = 0; return;
+    }
+    if (!g_lvlOpen) { f_HmOpen(g_terrain); g_lvlOpen = true; }   // stays open for the whole job, like the game's own tool
+    for (size_t i = 0; i < n; ++i) {
+        float d = g_lvlPts[i].y - h[i];
+        g_lvlPrevH[i] = h[i]; g_lvlPrevStep[i] = 0;
+        if (fabsf(d) < tol) continue;
+        float step = d > 1.5f ? 1.5f : d < -1.5f ? -1.5f : d;
+        g_lvlPrevStep[i] = step;
+        V3 q{ g_lvlPts[i].x, h[i], g_lvlPts[i].z };
+        float c = step * g_lvlGain;
+        if (c > 0.001f) c = 0.001f; else if (c < -0.001f) c = -0.001f;     // larger steps are ignored by the engine
+        o_EdRL(g_terrain, &q, 0.0f, 1.7f, c, 0.0012f, false);
+    }
+    ++g_lvlPass;
+    g_lvlLeft = active;
+}
 
 struct IatHook { const char* name; void* hook; void** orig; };
 static IatHook g_hooks[] = {

@@ -148,6 +148,7 @@ static void Frame(IDXGISwapChain* sc) {
     io.MouseDrawCursor = io.WantCaptureMouse && !ui::WantsGameMouse();   // game cursor is under the panel, draw our own
     eng::g_blockKeys = io.WantTextInput;
     ImGui::Render();
+    eng::LevelTick();
 
     ID3D11Texture2D* bb = nullptr;
     if (FAILED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&bb))) return;

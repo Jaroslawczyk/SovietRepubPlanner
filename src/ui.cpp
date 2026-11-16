@@ -543,6 +543,31 @@ void Footer() {
         if (g_plan.unplaced > 0) ImGui::TextColored(red, "Не поместилось зданий: %d — увеличьте участок.", g_plan.unplaced);
         else if (g_plan.steepSkipped > 0) ImGui::TextDisabled("Крутые места обойдены (%d раз).", g_plan.steepSkipped);
     }
+    static bool levelling = false;
+    int pending = eng::LevelPending();
+    if (levelling && !pending) { levelling = false; g_dirty = g_areaChanged = true; }
+    // The button is hidden unless DistrictPlanner.experimental exists next to the exe: levelling is not reliable yet.
+    static int experimental = -1;
+    if (experimental < 0) experimental = GetFileAttributesW((GameDir() + L"DistrictPlanner.experimental").c_str()) != INVALID_FILE_ATTRIBUTES;
+    bool canLevel = g_area.ok && !g_plan.buildings.empty() && !pending;
+    if (experimental) {
+    ImGui::BeginDisabled(!canLevel);
+    char lbl[96];
+    if (pending) snprintf(lbl, sizeof(lbl), "Выравниваю… осталось точек: %d", pending);
+    else snprintf(lbl, sizeof(lbl), "Применить выравнивание (эксперимент, может сломать карту)");
+    if (ImGui::Button(lbl, ImVec2(-FLT_MIN, 0))) {
+        std::vector<V3> pts;
+        for (auto& b : g_plan.buildings)
+            for (float du = -b.w / 2 - 4; du <= b.w / 2 + 4.01f; du += 4)
+                for (float dv = -b.d / 2 - 4; dv <= b.d / 2 + 4.01f; dv += 4) {
+                    V3 w = LocalToWorld(g_area, b.u + du, b.v + dv, 0);
+                    pts.push_back({ w.x, b.pad, w.z });
+                }
+        eng::QueueLevel(pts);
+        levelling = true;
+    }
+    ImGui::EndDisabled();
+    }
     ImGui::BeginDisabled(true);
     ImGui::Button("Построить в игре (в разработке)", ImVec2(-FLT_MIN, 0));
     ImGui::EndDisabled();
@@ -572,7 +597,7 @@ void Panel() {
 
     if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
 
-    float footer = ImGui::GetTextLineHeightWithSpacing() * 5 + ImGui::GetFrameHeightWithSpacing() + 14;
+    float footer = ImGui::GetTextLineHeightWithSpacing() * 5 + ImGui::GetFrameHeightWithSpacing() * 2 + 14;
     if (ImGui::BeginTabBar("##tabs")) {
         struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads } };
         for (auto& t : tabs) {

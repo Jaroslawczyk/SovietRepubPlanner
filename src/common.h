@@ -22,6 +22,9 @@ namespace eng {
     bool WorldToScreen(const V3& w, float sw, float sh, float& sx, float& sy);
     bool ScreenToTerrain(float sx, float sy, float sw, float sh, V3& out);
     float TerrainHeight(float x, float z);
+    void QueueLevel(const std::vector<V3>& pts);    // flatten: each point is x, target height, z
+    void LevelTick();                               // one levelling pass; call on the render thread
+    int  LevelPending();                            // points still being levelled, 0 = idle
     void BeginFrame();                              // refresh cached matrices
     extern bool g_blockMouseButtons;                // game sees no mouse buttons
     extern bool g_blockMouseMove;                   // game sees no wheel / relative motion
