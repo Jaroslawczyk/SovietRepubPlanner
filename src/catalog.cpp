@@ -75,6 +75,11 @@ void Load() {
                 std::string res; int n = 0; ls >> res >> n;
                 if (res == "RESOURCE_TRANSPORT_PASSANGER" && n > b.capacity) b.capacity = n;
             }
+            else if (key == "STYLE_FLAG") { if (b.style.empty()) ls >> b.style; }
+            else if (key == "COST_RESOURCE_AUTO") {
+                std::string res; ls >> res;
+                if (res.rfind("wall_", 0) == 0 && b.material.empty()) b.material = res.substr(5);
+            }
             else if (key == "QUALITY_OF_LIVING") ls >> b.quality;
             else if (key == "WORKERS_NEEDED") ls >> b.workers;
         }

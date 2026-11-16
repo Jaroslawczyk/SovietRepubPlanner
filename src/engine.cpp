@@ -5,6 +5,7 @@
 
 namespace eng {
 
+bool g_hideMouse = false;
 bool g_blockMouseButtons = false, g_blockMouseMove = false, g_blockKeys = false;
 
 static void* g_camera = nullptr;
@@ -27,6 +28,9 @@ static TerrRay_t    o_TerrRay;
 static InBool_t     o_LPress, o_LDown, o_LPressA, o_RPress, o_RDown, o_RPressA, o_MDown;
 static InKey_t      o_KeyDown, o_KeyPress;
 static InV3_t       o_MouseRel;
+typedef float (*InAxis_t)(void*, char*, int*, float, float);
+static InV3_t       o_MouseSolid, o_MouseSolidInv;
+static InAxis_t     o_AxisValue;
 static CamMat_t     f_ViewGetMatrix, f_ProjGetMatrix;
 
 static void h_ViewSetPosition(void* self, V3* p) {
@@ -53,6 +57,22 @@ static V3* h_MouseRel(void* s, V3* out) {
     return r;
 }
 
+// While the cursor is over our panel the game is told the mouse is far off-screen, so its own
+// buttons and tooltips underneath do not react.
+static V3* h_MouseSolid(void* s, V3* out) {
+    V3* r = o_MouseSolid(s, out);
+    if (g_hideMouse && r) { r->x = -10000; r->y = -10000; }
+    return r;
+}
+static V3* h_MouseSolidInv(void* s, V3* out) {
+    V3* r = o_MouseSolidInv(s, out);
+    if (g_hideMouse && r) { r->x = -10000; r->y = -10000; }
+    return r;
+}
+static float h_AxisValue(void* s, char* name, int* a, float b, float c) {
+    return g_blockMouseMove ? 0.0f : o_AxisValue(s, name, a, b, c);   // camera zoom / rotation axes
+}
+
 struct IatHook { const char* name; void* hook; void** orig; };
 static IatHook g_hooks[] = {
     { "?ViewSetPosition@C3D_CAMERA@@QEAAXVC3DVECTOR3@@@Z", h_ViewSetPosition, (void**)&o_ViewSetPosition },
@@ -67,6 +87,9 @@ static IatHook g_hooks[] = {
     { "?GetMouseMiddleDown@C3D_INPUT@@QEAA_NXZ", h_MDown, (void**)&o_MDown },
     { "?GetKeyDown@C3D_INPUT@@QEAA_NH@Z", h_KeyDown, (void**)&o_KeyDown },
     { "?GetKeyPress@C3D_INPUT@@QEAA_NH@Z", h_KeyPress, (void**)&o_KeyPress },
+    { "?GetMouseSolid@C3D_INPUT@@QEAA?AVC3DVECTOR3@@XZ", h_MouseSolid, (void**)&o_MouseSolid },
+    { "?GetMouseSolidWithInvZoom@C3D_INPUT@@QEAA?AVC3DVECTOR3@@XZ", h_MouseSolidInv, (void**)&o_MouseSolidInv },
+    { "?CommonInterfaceGetAxisValue@C3D_INPUT@@QEAAMPEADPEAHMM@Z", h_AxisValue, (void**)&o_AxisValue },
     { "?GetMouseRelative@C3D_INPUT@@QEAA?AVC3DVECTOR3@@XZ", h_MouseRel, (void**)&o_MouseRel },
 };
 

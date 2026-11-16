@@ -1,6 +1,7 @@
 // In-game panel: territory picking, house / service selection, plan preview drawn over the terrain.
 #include "common.h"
 #include "imgui.h"
+#include <cfloat>
 #include <cmath>
 #include <algorithm>
 
@@ -172,17 +173,42 @@ void Picking() {
     }
 }
 
-void Panel() {
+const char* MaterialName(const std::string& m) {
+    if (m == "brick") return "кирпич";
+    if (m == "panels") return "панели";
+    if (m == "wood") return "дерево";
+    if (m == "concrete") return "бетон";
+    if (m == "steel") return "сталь";
+    return m.empty() ? "-" : m.c_str();
+}
+
+std::vector<int> g_houseOrder;      // catalog indices of residential buildings in display order
+bool g_onlySelected = false;
+
+void SortHouses(ImGuiTableSortSpecs* specs) {
     const auto& all = catalog::All();
-    ImGui::SetNextWindowSize(ImVec2(520, 900), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(60, 110), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Планировщик квартала", &g_open)) { ImGui::End(); return; }
+    if (g_houseOrder.empty())
+        for (size_t i = 0; i < all.size(); ++i) if (all[i].category == "LIVING" && all[i].capacity > 0) g_houseOrder.push_back((int)i);
+    if (!specs || specs->SpecsCount == 0) return;
+    int col = specs->Specs[0].ColumnIndex;
+    bool asc = specs->Specs[0].SortDirection == ImGuiSortDirection_Ascending;
+    std::stable_sort(g_houseOrder.begin(), g_houseOrder.end(), [&](int x, int y) {
+        const BuildingType& a = all[asc ? x : y]; const BuildingType& b = all[asc ? y : x];
+        switch (col) {
+            case 1: return a.capacity < b.capacity;
+            case 2: return a.sx * a.sz < b.sx * b.sz;
+            case 3: return a.quality < b.quality;
+            case 4: return a.material < b.material;
+            case 5: return a.style < b.style;
+            default: return a.name < b.name;
+        }
+    });
+}
 
-    if (!eng::Ready()) ImGui::TextColored(ImVec4(1, 0.7f, 0.3f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
-
+void TabArea() {
     ImGui::SeparatorText("Территория");
     ImGui::BeginDisabled(!eng::Ready());
-    if (ImGui::Button(g_pick ? "Выбор на карте…" : "Выбрать на карте")) g_pick = g_pick ? 0 : 1;
+    if (ImGui::Button(g_pick ? "Отменить выбор" : "Выбрать на карте", ImVec2(190, 0))) g_pick = g_pick ? 0 : 1;
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (g_area.ok) {
@@ -190,30 +216,50 @@ void Panel() {
         ImGui::SameLine();
         if (ImGui::SmallButton("Сбросить")) { g_area.ok = false; g_dirty = true; }
     } else ImGui::TextDisabled("участок не выбран");
+    ImGui::TextDisabled("Три клика по карте: угол, ширина, глубина. ПКМ — отмена.");
 
     ImGui::SeparatorText("Население");
-    if (ImGui::InputInt("Жителей", &g_population, 100, 1000)) { g_population = std::clamp(g_population, 10, 200000); g_dirty = true; }
-    if (ImGui::SliderFloat("Отступ между зданиями, м", &g_gap, 3.0f, 30.0f, "%.0f")) g_dirty = true;
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::InputInt("жителей", &g_population, 100, 1000)) { g_population = std::clamp(g_population, 10, 200000); g_dirty = true; }
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::SliderFloat("отступ между зданиями, м", &g_gap, 3.0f, 30.0f, "%.0f")) g_dirty = true;
 
-    ImGui::SeparatorText("Жилые дома");
-    ImGui::SetNextItemWidth(180);
-    ImGui::InputTextWithHint("##filter", "поиск", g_filter, sizeof(g_filter));
+    ImGui::SeparatorText("Выбранные дома");
+    const auto& all = catalog::All();
+    int n = 0;
+    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) {
+        ImGui::BulletText("%s — %d жит.", all[i].name.c_str(), all[i].capacity); ++n;
+    }
+    if (!n) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Не выбрано ни одного дома — откройте вкладку «Дома».");
+}
+
+void TabHouses() {
+    const auto& all = catalog::All();
+    ImGui::SetNextItemWidth(200);
+    ImGui::InputTextWithHint("##filter", "поиск по названию", g_filter, sizeof(g_filter));
+    ImGui::SameLine(); ImGui::Checkbox("только выбранные", &g_onlySelected);
     ImGui::SameLine();
     if (ImGui::SmallButton("Снять все")) { std::fill(g_houseSel.begin(), g_houseSel.end(), 0); g_dirty = true; }
-    if (ImGui::BeginTable("houses", 4, ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV, ImVec2(0, 190))) {
+    const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+                                  ImGuiTableFlags_Sortable | ImGuiTableFlags_Resizable;
+    if (ImGui::BeginTable("houses", 6, flags, ImVec2(0, ImGui::GetContentRegionAvail().y))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("Дом", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Жителей", ImGuiTableColumnFlags_WidthFixed, 62);
-        ImGui::TableSetupColumn("Размер, м", ImGuiTableColumnFlags_WidthFixed, 74);
-        ImGui::TableSetupColumn("Кач.", ImGuiTableColumnFlags_WidthFixed, 40);
+        ImGui::TableSetupColumn("Жителей", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_PreferSortDescending, 70);
+        ImGui::TableSetupColumn("Размер, м", ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("Кач.", ImGuiTableColumnFlags_WidthFixed, 46);
+        ImGui::TableSetupColumn("Материал", ImGuiTableColumnFlags_WidthFixed, 78);
+        ImGui::TableSetupColumn("Стиль", ImGuiTableColumnFlags_WidthFixed, 96);
         ImGui::TableHeadersRow();
-        for (size_t i = 0; i < all.size(); ++i) {
+        ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs();
+        if (g_houseOrder.empty() || (specs && specs->SpecsDirty)) { SortHouses(specs); if (specs) specs->SpecsDirty = false; }
+        for (int i : g_houseOrder) {
             const BuildingType& b = all[i];
-            if (b.category != "LIVING" || b.capacity <= 0) continue;
+            if (g_onlySelected && !g_houseSel[i]) continue;
             if (g_filter[0] && b.name.find(g_filter) == std::string::npos && b.id.find(g_filter) == std::string::npos) continue;
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::PushID((int)i);
+            ImGui::PushID(i);
             bool sel = g_houseSel[i] != 0;
             if (ImGui::Checkbox(b.name.c_str(), &sel)) { g_houseSel[i] = sel; g_dirty = true; }
             ImGui::SetItemTooltip("%s", b.id.c_str());
@@ -221,15 +267,20 @@ void Panel() {
             ImGui::TableNextColumn(); ImGui::Text("%d", b.capacity);
             ImGui::TableNextColumn(); ImGui::Text("%.0fx%.0f", b.sx, b.sz);
             ImGui::TableNextColumn(); if (b.quality > 0) ImGui::Text("%.2f", b.quality); else ImGui::TextDisabled("-");
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(MaterialName(b.material));
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(b.style.empty() ? "-" : b.style.c_str());
         }
         ImGui::EndTable();
     }
+}
 
-    ImGui::SeparatorText("Нужды жителей");
-    if (ImGui::BeginTable("services", 3, ImGuiTableFlags_BordersInnerV)) {
-        ImGui::TableSetupColumn("Что строить", ImGuiTableColumnFlags_WidthFixed, 150);
+void TabServices() {
+    const auto& all = catalog::All();
+    ImGui::TextDisabled("Что строить в квартале и на сколько жителей одно здание.");
+    if (ImGui::BeginTable("services", 3, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Что строить", ImGuiTableColumnFlags_WidthFixed, 170);
         ImGui::TableSetupColumn("Здание", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("1 на N жит.", ImGuiTableColumnFlags_WidthFixed, 92);
+        ImGui::TableSetupColumn("1 на N жит.", ImGuiTableColumnFlags_WidthFixed, 100);
         ImGui::TableHeadersRow();
         for (auto& s : g_services) {
             ImGui::PushID(s.category);
@@ -255,23 +306,95 @@ void Panel() {
         }
         ImGui::EndTable();
     }
+}
 
-    ImGui::SeparatorText("План");
+void Footer() {
+    ImGui::Separator();
+    const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
     if (!g_area.ok) ImGui::TextDisabled("Выберите участок на карте.");
-    else if (g_plan.buildings.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Ничего не поместилось: отметьте дома или увеличьте участок.");
+    else if (g_plan.buildings.empty()) ImGui::TextColored(red, "Ничего не поместилось: отметьте дома или увеличьте участок.");
     else {
-        ImGui::Text("Домов: %d, мест: %d из %d", g_plan.houses, g_plan.capacity, g_population);
-        ImGui::Text("Зданий обслуживания: %d", g_plan.services);
-        ImGui::Text("Дорожек: %.0f м", g_plan.pathLength);
-        if (g_plan.maxWalkToShop >= 0) ImGui::Text("Самый дальний путь до магазина: %.0f м", g_plan.maxWalkToShop);
-        if (g_plan.unplaced > 0)
-            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Не поместилось зданий: %d. Увеличьте участок\nили выберите дома вместительнее.", g_plan.unplaced);
+        ImGui::Text("Домов %d  ·  мест %d из %d  ·  служб %d", g_plan.houses, g_plan.capacity, g_population, g_plan.services);
+        if (g_plan.maxWalkToShop >= 0) ImGui::Text("Дорожек %.0f м  ·  до магазина не дальше %.0f м", g_plan.pathLength, g_plan.maxWalkToShop);
+        else ImGui::Text("Дорожек %.0f м", g_plan.pathLength);
+        if (g_plan.unplaced > 0) ImGui::TextColored(red, "Не поместилось зданий: %d — увеличьте участок.", g_plan.unplaced);
     }
     ImGui::BeginDisabled(true);
-    ImGui::Button("Построить в игре");
+    ImGui::Button("Построить в игре (в разработке)", ImVec2(-FLT_MIN, 0));
     ImGui::EndDisabled();
-    ImGui::SetItemTooltip("Автоматическая постройка ещё не готова: пока мод показывает план на местности.");
+}
+
+void Panel() {
+    ImGui::SetNextWindowSize(ImVec2(640, 620), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(70, 110), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(520, 420), ImVec2(1400, 1400));
+    if (!ImGui::Begin("##dp_panel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar)) { ImGui::End(); return; }
+
+    // header band like the game windows: dark red strip with a centred caption
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 wp = ImGui::GetWindowPos(); float ww = ImGui::GetWindowWidth();
+    const float hh = 36;
+    dl->AddRectFilled(wp, ImVec2(wp.x + ww, wp.y + hh), IM_COL32(146, 45, 38, 255), ImGui::GetStyle().WindowRounding, ImDrawFlags_RoundCornersTop);
+    const char* title = ":: Планировщик квартала ::";
+    ImVec2 ts = ImGui::CalcTextSize(title);
+    dl->AddText(ImVec2(wp.x + (ww - ts.x) / 2, wp.y + (hh - ts.y) / 2), IM_COL32(255, 244, 222, 255), title);
+    ImGui::SetCursorPos(ImVec2(ww - 32, 6));
+    if (ImGui::InvisibleButton("##close", ImVec2(24, 24))) g_open = false;
+    ImU32 xc = ImGui::IsItemHovered() ? IM_COL32(255, 255, 255, 255) : IM_COL32(255, 230, 200, 200);
+    ImVec2 c(wp.x + ww - 20, wp.y + 18);
+    dl->AddLine(ImVec2(c.x - 6, c.y - 6), ImVec2(c.x + 6, c.y + 6), xc, 2.5f);
+    dl->AddLine(ImVec2(c.x - 6, c.y + 6), ImVec2(c.x + 6, c.y - 6), xc, 2.5f);
+    ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, hh + 8));
+
+    if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
+
+    float footer = ImGui::GetTextLineHeightWithSpacing() * 3 + ImGui::GetFrameHeightWithSpacing() + 14;
+    if (ImGui::BeginTabBar("##tabs")) {
+        struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices } };
+        for (auto& t : tabs) {
+            if (!ImGui::BeginTabItem(t.name)) continue;
+            ImGui::BeginChild("##body", ImVec2(0, std::max(120.0f, ImGui::GetContentRegionAvail().y - footer)));
+            t.fn();
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    Footer();
     ImGui::End();
+}
+
+// Square paper button in the style of the game's left toolbar, with a small "houses" pictogram.
+void ToggleButton() {
+    ImGuiIO& io = ImGui::GetIO();
+    const float sz = 54;
+    ImGui::SetNextWindowPos(ImVec2(10, io.DisplaySize.y * 0.80f), ImGuiCond_FirstUseEver);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4, 4));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
+    ImGui::Begin("##dp_toggle2", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    if (ImGui::InvisibleButton("##toggle", ImVec2(sz, sz))) g_open = !g_open;
+    bool hov = ImGui::IsItemHovered();
+    ImGui::SetItemTooltip("Планировщик квартала (F8)");
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 q(p.x + sz, p.y + sz);
+    dl->AddRectFilled(ImVec2(p.x + 2, p.y + 3), ImVec2(q.x + 2, q.y + 3), IM_COL32(0, 0, 0, 70), 5);
+    dl->AddRectFilled(p, q, g_open ? IM_COL32(250, 236, 200, 255) : hov ? IM_COL32(246, 234, 206, 255) : IM_COL32(233, 222, 196, 255), 5);
+    dl->AddRect(p, q, g_open ? IM_COL32(146, 45, 38, 255) : IM_COL32(120, 92, 62, 255), 5, 0, g_open ? 3.0f : 1.5f);
+    const ImU32 wall = IM_COL32(120, 92, 62, 255), roof = IM_COL32(146, 45, 38, 255), win = IM_COL32(250, 240, 215, 255);
+    auto block = [&](float x, float y, float w, float h) {      // apartment block with a roof line and windows
+        dl->AddRectFilled(ImVec2(p.x + x, p.y + y), ImVec2(p.x + x + w, p.y + y + h), wall);
+        dl->AddRectFilled(ImVec2(p.x + x - 1, p.y + y - 3), ImVec2(p.x + x + w + 1, p.y + y), roof);
+        for (float wy = y + 4; wy + 4 < y + h; wy += 7)
+            for (float wx = x + 3; wx + 4 <= x + w - 2; wx += 6)
+                dl->AddRectFilled(ImVec2(p.x + wx, p.y + wy), ImVec2(p.x + wx + 3, p.y + wy + 4), win);
+    };
+    block(9, 22, 15, 24); block(28, 13, 17, 33);
+    dl->AddLine(ImVec2(p.x + 6, p.y + 47), ImVec2(q.x - 6, p.y + 47), wall, 2.0f);
+    ImGui::End();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
 }
 
 // Debug aid: if DistrictPlanner.selftest exists next to the game exe, build a district in front of the
@@ -307,18 +430,41 @@ void SelfTest() {
 
 namespace ui {
 
+void ApplyStyle() {
+    ImGui::StyleColorsLight();
+    ImGuiStyle& st = ImGui::GetStyle();
+    st.WindowRounding = 7; st.FrameRounding = 4; st.GrabRounding = 4; st.TabRounding = 4; st.PopupRounding = 5; st.ChildRounding = 4;
+    st.WindowBorderSize = 1.5f; st.FrameBorderSize = 1; st.WindowPadding = ImVec2(12, 10); st.ItemSpacing = ImVec2(8, 7);
+    st.FramePadding = ImVec2(8, 5); st.ScrollbarSize = 16; st.CellPadding = ImVec2(6, 4);
+    const ImVec4 paper(0.925f, 0.885f, 0.785f, 0.98f), light(0.975f, 0.95f, 0.875f, 1), ink(0.21f, 0.14f, 0.10f, 1);
+    const ImVec4 brown(0.47f, 0.36f, 0.24f, 1), tan(0.84f, 0.76f, 0.61f, 1), tanHi(0.90f, 0.82f, 0.64f, 1), red(0.573f, 0.176f, 0.149f, 1);
+    ImVec4* c = st.Colors;
+    c[ImGuiCol_Text] = ink; c[ImGuiCol_TextDisabled] = ImVec4(0.47f, 0.40f, 0.32f, 1);
+    c[ImGuiCol_WindowBg] = paper; c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0); c[ImGuiCol_PopupBg] = ImVec4(0.95f, 0.92f, 0.83f, 1);
+    c[ImGuiCol_Border] = brown; c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_FrameBg] = light; c[ImGuiCol_FrameBgHovered] = ImVec4(1, 0.98f, 0.91f, 1); c[ImGuiCol_FrameBgActive] = tanHi;
+    c[ImGuiCol_Button] = tan; c[ImGuiCol_ButtonHovered] = tanHi; c[ImGuiCol_ButtonActive] = ImVec4(0.76f, 0.64f, 0.46f, 1);
+    c[ImGuiCol_CheckMark] = red; c[ImGuiCol_SliderGrab] = red; c[ImGuiCol_SliderGrabActive] = ImVec4(0.70f, 0.22f, 0.18f, 1);
+    c[ImGuiCol_Header] = ImVec4(0.84f, 0.76f, 0.61f, 0.7f); c[ImGuiCol_HeaderHovered] = tanHi; c[ImGuiCol_HeaderActive] = tan;
+    c[ImGuiCol_Separator] = brown; c[ImGuiCol_SeparatorHovered] = red; c[ImGuiCol_SeparatorActive] = red;
+    c[ImGuiCol_ResizeGrip] = ImVec4(0.47f, 0.36f, 0.24f, 0.4f); c[ImGuiCol_ResizeGripHovered] = brown; c[ImGuiCol_ResizeGripActive] = red;
+    c[ImGuiCol_Tab] = tan; c[ImGuiCol_TabHovered] = tanHi; c[ImGuiCol_TabSelected] = light; c[ImGuiCol_TabSelectedOverline] = red;
+    c[ImGuiCol_TabDimmed] = tan; c[ImGuiCol_TabDimmedSelected] = light;
+    c[ImGuiCol_TableHeaderBg] = tan; c[ImGuiCol_TableBorderStrong] = brown; c[ImGuiCol_TableBorderLight] = ImVec4(0.47f, 0.36f, 0.24f, 0.45f);
+    c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0); c[ImGuiCol_TableRowBgAlt] = ImVec4(0.47f, 0.36f, 0.24f, 0.08f);
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0.47f, 0.36f, 0.24f, 0.12f); c[ImGuiCol_ScrollbarGrab] = ImVec4(0.62f, 0.50f, 0.36f, 1);
+    c[ImGuiCol_ScrollbarGrabHovered] = brown; c[ImGuiCol_ScrollbarGrabActive] = red;
+    c[ImGuiCol_TitleBg] = red; c[ImGuiCol_TitleBgActive] = red; c[ImGuiCol_TextSelectedBg] = ImVec4(0.573f, 0.176f, 0.149f, 0.3f);
+    c[ImGuiCol_NavCursor] = red;
+}
+
 bool WantsGameMouse() { return g_pick != 0; }
 
 void Draw() {
     if (!g_inited && !catalog::All().empty()) InitDefaults();
     if (ImGui::IsKeyPressed(ImGuiKey_F8, false)) g_open = !g_open;
 
-    ImGuiIO& io = ImGui::GetIO();
-    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 150, 96), ImGuiCond_FirstUseEver);
-    ImGui::Begin("##dp_toggle", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
-    if (ImGui::Button(g_open ? "Квартал  <" : "Квартал  >")) g_open = !g_open;
-    ImGui::SetItemTooltip("Планировщик квартала (F8)");
-    ImGui::End();
+    ToggleButton();
 
     if (!g_inited) return;
     if (!eng::Ready()) g_pick = 0;

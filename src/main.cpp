@@ -60,9 +60,11 @@ static LRESULT CALLBACK GetMsgProc(int code, WPARAM wp, LPARAM lp) {
     MSG* m = (MSG*)lp;
     if (code == HC_ACTION && wp == PM_REMOVE && m && m->hwnd == g_hwnd && ImGui::GetCurrentContext()) {
         UINT msg = m->message;
-        ImGui_ImplWin32_WndProcHandler(m->hwnd, msg, m->wParam, m->lParam);
         ImGuiIO& io = ImGui::GetIO();
-        bool mouseMsg = (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) && msg != WM_MOUSEMOVE;
+        bool anyMouse = msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST;
+        bool wheel = msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL;
+        if (!anyMouse || wheel) ImGui_ImplWin32_WndProcHandler(m->hwnd, msg, m->wParam, m->lParam);
+        bool mouseMsg = anyMouse && msg != WM_MOUSEMOVE;
         bool buttonMsg = mouseMsg && msg != WM_MOUSEWHEEL && msg != WM_MOUSEHWHEEL;
         bool keyMsg = msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR;
         if ((mouseMsg && io.WantCaptureMouse) || (buttonMsg && ui::WantsGameMouse()) || (keyMsg && io.WantTextInput))
@@ -83,13 +85,11 @@ static bool InitOverlay(IDXGISwapChain* sc) {
     ImGuiIO& io = ImGui::GetIO();
     g_iniPath = WideToUtf8(GameDir() + L"DistrictPlanner.ini");
     io.IniFilename = g_iniPath.c_str();
-    ImGui::StyleColorsDark();
-    ImGuiStyle& st = ImGui::GetStyle();
-    st.WindowRounding = 6; st.FrameRounding = 4; st.Colors[ImGuiCol_WindowBg].w = 0.94f;
+    ui::ApplyStyle();
     wchar_t win[MAX_PATH]; GetWindowsDirectoryW(win, MAX_PATH);
     std::string font = WideToUtf8(std::wstring(win) + L"\\Fonts\\segoeui.ttf");
     if (GetFileAttributesW((std::wstring(win) + L"\\Fonts\\segoeui.ttf").c_str()) == INVALID_FILE_ATTRIBUTES ||
-        !io.Fonts->AddFontFromFileTTF(font.c_str(), 18.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic()))
+        !io.Fonts->AddFontFromFileTTF(font.c_str(), 19.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic()))
         io.Fonts->AddFontDefault();
 
     ImGui_ImplWin32_Init(g_hwnd);
@@ -124,12 +124,28 @@ static void Frame(IDXGISwapChain* sc) {
 
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
+    {   // Poll the mouse directly: the game does not always pump button messages through its queue.
+        ImGuiIO& mio = ImGui::GetIO();
+        bool active = GetForegroundWindow() == g_hwnd;
+        POINT pt;
+        if (active && GetCursorPos(&pt) && ScreenToClient(g_hwnd, &pt)) mio.AddMousePosEvent((float)pt.x, (float)pt.y);
+        static const int vk[3] = { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON };
+        static bool down[3] = {};
+        bool swapped = GetSystemMetrics(SM_SWAPBUTTON) != 0;
+        for (int b = 0; b < 3; ++b) {
+            int key = (swapped && b < 2) ? vk[1 - b] : vk[b];
+            bool d = active && (GetAsyncKeyState(key) & 0x8000) != 0;
+            if (d != down[b]) { down[b] = d; mio.AddMouseButtonEvent(b, d); }
+        }
+    }
     ImGui::NewFrame();
     eng::BeginFrame();
     ui::Draw();
     ImGuiIO& io = ImGui::GetIO();
     eng::g_blockMouseButtons = io.WantCaptureMouse || ui::WantsGameMouse();
     eng::g_blockMouseMove = io.WantCaptureMouse;
+    eng::g_hideMouse = io.WantCaptureMouse && !ui::WantsGameMouse();
+    io.MouseDrawCursor = eng::g_hideMouse;      // the game cursor is hidden under the panel, draw our own
     eng::g_blockKeys = io.WantTextInput;
     ImGui::Render();
 

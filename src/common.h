@@ -23,6 +23,7 @@ namespace eng {
     void BeginFrame();                              // refresh cached matrices
     extern bool g_blockMouseButtons;                // game sees no mouse buttons
     extern bool g_blockMouseMove;                   // game sees no wheel / relative motion
+    extern bool g_hideMouse;                        // game sees the cursor far off-screen
     extern bool g_blockKeys;                        // game sees no keyboard
 }
 
@@ -31,6 +32,8 @@ struct BuildingType {
     std::string id;         // ini file name without extension
     std::string name;       // localized, UTF-8
     std::string category;   // LIVING, SHOP, ...
+    std::string material;   // brick / panels / wood ... (from construction cost)
+    std::string style;      // STYLE_FLAG
     int   capacity = 0;     // residents (LIVING)
     float quality = 0;      // QUALITY_OF_LIVING
     int   workers = 0;
@@ -69,6 +72,7 @@ PlanResult MakePlan(const PlanInput& in);
 
 // ---- ui ----
 namespace ui {
+    void ApplyStyle();      // paper look matching the game windows
     void Draw();            // called once per frame between ImGui::NewFrame and Render
     bool WantsGameMouse();  // true while picking territory on the map
 }
