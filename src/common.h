@@ -25,6 +25,8 @@ namespace eng {
     void QueueLevel(const std::vector<V3>& pts);    // flatten: each point is x, target height, z
     void LevelTick();                               // one levelling pass; call on the render thread
     int  LevelPending();                            // points still being levelled, 0 = idle
+    int  Occupied(float x, float z);                // 1 = an existing building here, 2 = an existing engine path
+    bool OccupancyReady();
     void BeginFrame();                              // refresh cached matrices
     extern bool g_blockMouseButtons;                // game sees no mouse buttons
     extern bool g_blockMouseMove;                   // game sees no wheel / relative motion
@@ -72,6 +74,7 @@ struct PlanInput {
     float utilRadius[4] = { 200, 200, 250, 150 };   // water, sewage, heating, power: how far a node serves, m
     float walkRadius = 400;                         // how tooFar residents walk to a stop
     float maxDiff = 3.0f;                           // allowed height difference under one building
+    std::function<bool(float, float)> occupied;     // something already stands at (u, v); may be empty
     std::function<float(float, float)> height;      // terrain height at (u, v); may be empty
 };
 struct Placed {
@@ -86,7 +89,7 @@ struct PlanResult {
     std::vector<PathSeg> paths;
     std::vector<RoadSeg> roads;
     std::vector<V2>      stops, crossings;
-    int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0, jobs = 0;
+    int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0, jobs = 0, busySkipped = 0;
     std::vector<V2> utilNodes[4];                   // substations next to the streets
     int   utilUncovered[4] = {};                    // buildings out of reach of every node
     float utilLength = 0;                           // trench length of one network (it follows the footpaths)

@@ -149,6 +149,8 @@ void RebuildSlope() {
             c.c[2] = LocalToWorld(a, u + step, v + step, 0.2f); c.c[3] = LocalToWorld(a, u, v + step, 0.2f);
             float lo = 1e9f, hi = -1e9f;
             for (auto& p : c.c) { lo = std::min(lo, p.y); hi = std::max(hi, p.y); }
+            V3 mid = LocalToWorld(a, u + step / 2, v + step / 2, 0.2f);
+            if (eng::Occupied(mid.x, mid.z)) { c.col = IM_COL32(150, 60, 220, 120); g_slope.push_back(c); continue; }   // existing buildings
             float slope = (hi - lo) / step;
             if (slope < 0.12f) continue;
             c.col = slope > 0.25f ? IM_COL32(230, 40, 30, 95) : IM_COL32(255, 150, 30, 70);
@@ -157,6 +159,17 @@ void RebuildSlope() {
 }
 
 void Regenerate() {
+    static bool scanned = false;
+    if (!scanned && eng::OccupancyReady()) {    // diagnostic: how much of the map the engine reports as built-up
+        scanned = true;
+        int b = 0, p = 0, shown = 0;
+        for (float z = -10000; z < 10000; z += 50) for (float x = -10000; x < 10000; x += 50) {
+            int o = eng::Occupied(x, z);
+            if (o & 1) { ++b; if (shown < 6) { ++shown; Log("occupied by a building: %.0f %.0f", x, z); } }
+            if (o & 2) ++p;
+        }
+        Log("occupancy scan (50 m grid): %d building hits, %d path hits of 160000", b, p);
+    }
     g_dirty = false;
     g_quads.clear(); g_lines.clear(); g_outline.clear(); g_roadQuads.clear(); g_stopPts.clear(); g_crossPts.clear();
     g_plan = PlanResult();
@@ -169,6 +182,7 @@ void Regenerate() {
     in.services = &g_services;
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     for (int k = 0; k < 4; ++k) in.utilRadius[k] = g_utilRadius[k];
+    in.occupied = [&a](float u, float v) { return eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0; };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     g_plan = MakePlan(in);
 
@@ -599,7 +613,7 @@ void Footer() {
             else ImGui::Text("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м", g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));
         } else if (g_plan.maxWalkToShop >= 0) ImGui::Text("До магазина не дальше %.0f м", g_plan.maxWalkToShop);
         if (g_plan.unplaced > 0) ImGui::TextColored(red, "Вмещается около %d жит., не влезло зданий: %d — нужен участок больше.", g_plan.capacity, g_plan.unplaced);
-        else if (g_plan.steepSkipped > 0) ImGui::TextDisabled("Крутые места обойдены (%d раз).", g_plan.steepSkipped);
+        else if (g_plan.steepSkipped > 0 || g_plan.busySkipped > 0) ImGui::TextDisabled("Обойдено: крутые места %d раз, существующая застройка %d раз.", g_plan.steepSkipped, g_plan.busySkipped);
     }
     if (ImGui::Button("Пересобрать план", ImVec2(-FLT_MIN, 0)) && g_area.ok) g_dirty = g_areaChanged = true;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Заново читает рельеф и расставляет здания, улицу и дорожки по всему участку.");

@@ -224,6 +224,32 @@ void LevelTick() {
     g_lvlStage = 1;
 }
 
+// ---- existing buildings / paths ----
+// The game keeps its buildings in the engine's C3D_BUILDING manager and asks it for 2D bounding-box hits itself,
+// so the same query tells the planner where something already stands.
+static void* g_bld = nullptr; static void* g_path = nullptr;
+static BldVoid_t o_BldRenderSel;
+typedef void (*PathRefresh_t)(void*, void*, void*, unsigned, float, float);
+static PathRefresh_t o_PathRefresh;
+static void h_BldRenderSel(void* s) { if (g_bld != s) { g_bld = s; Log("buildings = %p", s); } o_BldRenderSel(s); }
+static void h_PathRefresh(void* s, void* cam, void* list, unsigned n, float a, float b) { if (g_path != s) { g_path = s; Log("paths = %p", s); } o_PathRefresh(s, cam, list, n, a, b); }
+typedef bool (*BldHit_t)(void*, V3*, int, int);
+typedef bool (*PathHit_t)(void*, V3*, void**, bool);
+int Occupied(float x, float z) {
+    static BldHit_t f_bld; static PathHit_t f_path; static bool looked = false;
+    if (!looked) {
+        looked = true;
+        HMODULE c3d = GetModuleHandleW(L"C3DDLL64.dll");
+        f_bld = (BldHit_t)GetProcAddress(c3d, "?Collision2DBBoxIgnore@C3D_BUILDING@@QEAA_NVC3DVECTOR3@@HH@Z");
+        f_path = (PathHit_t)GetProcAddress(c3d, "?Collision@C3D_PATH@@QEAA_NVC3DVECTOR3@@PEAPEAX_N@Z");
+    }
+    int r = 0;
+    if (g_bld && f_bld) { V3 p{ x, TerrainHeight(x, z), z }; if (f_bld(g_bld, &p, -1, -1)) r |= 1; }
+    if (g_path && f_path) { V3 p{ x, TerrainHeight(x, z), z }; void* frag = nullptr; if (f_path(g_path, &p, &frag, false)) r |= 2; }
+    return r;
+}
+bool OccupancyReady() { return g_bld != nullptr; }
+
 struct IatHook { const char* name; void* hook; void** orig; };
 static IatHook g_hooks[] = {
     { "?ViewSetPosition@C3D_CAMERA@@QEAAXVC3DVECTOR3@@@Z", h_ViewSetPosition, (void**)&o_ViewSetPosition },
@@ -253,6 +279,8 @@ static IatHook g_hooks[] = {
     { "?RegenerateCollisionDataSoviet@C3D_TERRAIN@@QEAAXXZ", h_RegenColl, (void**)&o_RegenColl },
     { "?RegenerateCollisionNormalDataSoviet@C3D_TERRAIN@@QEAAXXZ", h_RegenNorm, (void**)&o_RegenNorm },
     { "?GetMouseRelative@C3D_INPUT@@QEAA?AVC3DVECTOR3@@XZ", h_MouseRel, (void**)&o_MouseRel },
+    { "?RenderSelection@C3D_BUILDING@@QEAAXXZ", h_BldRenderSel, (void**)&o_BldRenderSel },
+    { "?Refresh@C3D_PATH@@QEAAXPEAVC3D_CAMERA@@PEAUENDNODEVISIBLE_LIST@@IMM@Z", h_PathRefresh, (void**)&o_PathRefresh },
 };
 
 void InstallIatHooks() {

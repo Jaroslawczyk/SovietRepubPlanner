@@ -90,6 +90,16 @@ PlanResult MakePlan(const PlanInput& in) {
         return hi - lo;
     };
 
+    // existing buildings: sample the footprint plus a 4 m margin on a grid of about 6 m
+    auto busy = [&](float cu, float cv, float w, float d) {
+        if (!in.occupied) return false;
+        float W = w + 8, D = d + 8;
+        int nu = std::max(2, (int)(W / 6) + 1), nv = std::max(2, (int)(D / 6) + 1);
+        for (int a = 0; a <= nu; ++a) for (int b = 0; b <= nv; ++b)
+            if (in.occupied(cu - W / 2 + W * a / nu, cv - D / 2 + D * b / nv)) return true;
+        return false;
+    };
+
     size_t i = 0;
     // one row of buildings between vlo and vhi, facing the path at pathV
     auto placeRow = [&](float vlo, float vhi, bool north, float pathV, size_t limit, float& rowL, float& rowR) {
@@ -105,6 +115,7 @@ PlanResult MakePlan(const PlanInput& in) {
             if (u < spineU + corridor && u + it.w > spineU - corridor) { u = spineU + corridor; continue; }  // leave the spine free
             float cu = u + it.w / 2;
             float cv = north ? vlo + it.d / 2 : vhi - it.d / 2;
+            if (busy(cu, cv, it.w, it.d)) { u += 6; ++r.busySkipped; continue; }                        // something is already built here
             if (heightRange(cu, cv, it.w, it.d) > in.maxDiff) { u += 6; ++r.steepSkipped; continue; }   // too steep here
             r.buildings.push_back({ it.type, cu, cv, it.w, it.d, it.rotated });
             r.paths.push_back({ cu, pathV, cu, north ? pathV + band / 2 : pathV - band / 2 });
