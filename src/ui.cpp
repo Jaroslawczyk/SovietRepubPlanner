@@ -1,4 +1,5 @@
-// In-game panel: territory picking, house / service selection, plan preview drawn over the terrain.
+// In-game panel: free-form territory outline, house / service / road settings, and the plan preview
+// (slopes, levelling, street, stops, footpaths, buildings) drawn over the terrain.
 #include "common.h"
 #include "imgui.h"
 #include <cfloat>
@@ -7,11 +8,20 @@
 
 namespace {
 
-bool g_open = false;
-int  g_pick = 0;                    // 0 none, 1 first corner, 2 second corner, 3 depth
-V3   g_a{}, g_b{};
+const float kPi = 3.14159265f;
 
-struct Area { bool ok = false; V3 o{}; float ux = 1, uz = 0, vx = 0, vz = 1, w = 0, d = 0; } g_area;
+bool g_open = false;
+bool g_pick = false;                // drawing the outline on the map
+std::vector<V3> g_draft;            // outline points clicked so tooFar
+
+struct Area {
+    bool ok = false;
+    std::vector<V3> pts;            // world outline
+    V3 o{}; float ux = 1, uz = 0, vx = 0, vz = 1;   // local frame
+    std::vector<V2> local;
+    float minU = 0, maxU = 0, minV = 0, maxV = 0, sqm = 0;
+} g_area;
+float g_angle = 0;                  // extra rotation of the building grid, degrees
 
 std::vector<char> g_houseSel;       // per catalog index
 std::vector<ServiceRule> g_services = {
@@ -28,28 +38,72 @@ std::vector<ServiceRule> g_services = {
 };
 int   g_population = 1000;
 float g_gap = 8.0f;
-bool  g_dirty = true, g_inited = false;
+int   g_roadType = 1;
+float g_roadV = 0;
+std::vector<float> g_stops;
+float g_walk = 400.0f, g_maxDiff = 5.0f;
+bool  g_showSlope = true, g_showLevel = false;
+bool  g_dirty = true, g_areaChanged = false, g_inited = false;
 char  g_filter[64] = "";
+int   g_dragStop = -1, g_hoverStop = -1;
 
 PlanResult g_plan;
-struct Quad { V3 c[4]; V3 mid; int type; };
+struct Quad { V3 g[4]; V3 mid; float pad, h; int type; bool tooFar; };
+struct Cell { V3 c[4]; ImU32 col; };
 std::vector<Quad> g_quads;
+std::vector<Cell> g_slope, g_roadQuads;
 std::vector<std::vector<V3>> g_lines, g_outline;
+std::vector<V3> g_stopPts, g_crossPts;
 
-V3 ToWorld(const Area& a, float u, float v) {
+// ---------- geometry helpers ----------
+V3 LocalToWorld(const Area& a, float u, float v, float lift = 0.3f) {
     V3 p{ a.o.x + a.ux * u + a.vx * v, 0, a.o.z + a.uz * u + a.vz * v };
-    p.y = eng::TerrainHeight(p.x, p.z) + 0.3f;
+    p.y = eng::TerrainHeight(p.x, p.z) + lift;
     return p;
 }
-std::vector<V3> Sample(const Area& a, float u1, float v1, float u2, float v2) {
+V2 WorldToLocal(const Area& a, const V3& p) {
+    float dx = p.x - a.o.x, dz = p.z - a.o.z;
+    return { dx * a.ux + dz * a.uz, dx * a.vx + dz * a.vz };
+}
+std::vector<V3> Sample(const Area& a, float u1, float v1, float u2, float v2, float step = 10.0f) {
     float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
-    int n = std::max(1, (int)(len / 10.0f));
+    int n = std::max(1, (int)(len / step));
     std::vector<V3> pts;
-    for (int i = 0; i <= n; ++i) { float t = (float)i / n; pts.push_back(ToWorld(a, u1 + (u2 - u1) * t, v1 + (v2 - v1) * t)); }
+    for (int i = 0; i <= n; ++i) { float t = (float)i / n; pts.push_back(LocalToWorld(a, u1 + (u2 - u1) * t, v1 + (v2 - v1) * t)); }
     return pts;
 }
-std::vector<std::vector<V3>> Outline(const Area& a) {
-    return { Sample(a, 0, 0, a.w, 0), Sample(a, a.w, 0, a.w, a.d), Sample(a, a.w, a.d, 0, a.d), Sample(a, 0, a.d, 0, 0) };
+
+// Local frame along the longest edge (plus the user's rotation); also resets the street to the middle.
+void BuildFrame(Area& a, bool resetRoad) {
+    size_t n = a.pts.size(), best = 0; float bestLen = -1;
+    for (size_t i = 0; i < n; ++i) {
+        const V3& p = a.pts[i]; const V3& q = a.pts[(i + 1) % n];
+        float len = (q.x - p.x) * (q.x - p.x) + (q.z - p.z) * (q.z - p.z);
+        if (len > bestLen) { bestLen = len; best = i; }
+    }
+    const V3& p = a.pts[best]; const V3& q = a.pts[(best + 1) % n];
+    float ang = atan2f(q.z - p.z, q.x - p.x) + g_angle * kPi / 180.0f;
+    a.ux = cosf(ang); a.uz = sinf(ang); a.vx = -a.uz; a.vz = a.ux; a.o = a.pts[0];
+    a.local.clear();
+    a.minU = a.minV = 1e9f; a.maxU = a.maxV = -1e9f;
+    for (auto& w : a.pts) {
+        V2 l = WorldToLocal(a, w); a.local.push_back(l);
+        a.minU = std::min(a.minU, l.u); a.maxU = std::max(a.maxU, l.u); a.minV = std::min(a.minV, l.v); a.maxV = std::max(a.maxV, l.v);
+    }
+    float s = 0;
+    for (size_t i = 0; i < n; ++i) { const V2& x = a.local[i]; const V2& y = a.local[(i + 1) % n]; s += x.u * y.v - y.u * x.v; }
+    a.sqm = fabsf(s) / 2;
+    if (resetRoad) {
+        g_roadV = (a.minV + a.maxV) / 2;
+        float L, R;
+        g_stops.assign(1, PolyScan(a.local, g_roadV, L, R) ? (L + R) / 2 : (a.minU + a.maxU) / 2);
+    }
+}
+
+void SetArea(const std::vector<V3>& pts) {
+    g_area = Area(); g_area.pts = pts; g_area.ok = true;
+    BuildFrame(g_area, true);
+    g_dirty = g_areaChanged = true;
 }
 
 void InitDefaults() {
@@ -70,28 +124,70 @@ void InitDefaults() {
     g_inited = true;
 }
 
-void Regenerate() {
-    g_dirty = false;
-    g_quads.clear(); g_lines.clear(); g_outline.clear();
-    g_plan = PlanResult();
+// Steep ground inside the outline: orange above 12 %, red above 25 %.
+void RebuildSlope() {
+    g_slope.clear();
     if (!g_area.ok) return;
-    PlanInput in;
-    in.width = g_area.w; in.depth = g_area.d; in.population = g_population; in.gap = g_gap;
-    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) in.houseTypes.push_back((int)i);
-    in.services = &g_services;
-    g_plan = MakePlan(in);
-    for (auto& b : g_plan.buildings) {
-        Quad q; q.type = b.type;
-        float hw = b.w / 2, hd = b.d / 2;
-        q.c[0] = ToWorld(g_area, b.u - hw, b.v - hd); q.c[1] = ToWorld(g_area, b.u + hw, b.v - hd);
-        q.c[2] = ToWorld(g_area, b.u + hw, b.v + hd); q.c[3] = ToWorld(g_area, b.u - hw, b.v + hd);
-        q.mid = ToWorld(g_area, b.u, b.v);
-        g_quads.push_back(q);
-    }
-    for (auto& p : g_plan.paths) g_lines.push_back(Sample(g_area, p.u1, p.v1, p.u2, p.v2));
-    g_outline = Outline(g_area);
+    const Area& a = g_area;
+    float step = std::clamp(sqrtf((a.maxU - a.minU) * (a.maxV - a.minV)) / 55.0f, 6.0f, 30.0f);
+    for (float v = a.minV; v < a.maxV; v += step)
+        for (float u = a.minU; u < a.maxU; u += step) {
+            if (!PolyContains(a.local, u + step / 2, v + step / 2)) continue;
+            Cell c;
+            c.c[0] = LocalToWorld(a, u, v, 0.2f); c.c[1] = LocalToWorld(a, u + step, v, 0.2f);
+            c.c[2] = LocalToWorld(a, u + step, v + step, 0.2f); c.c[3] = LocalToWorld(a, u, v + step, 0.2f);
+            float lo = 1e9f, hi = -1e9f;
+            for (auto& p : c.c) { lo = std::min(lo, p.y); hi = std::max(hi, p.y); }
+            float slope = (hi - lo) / step;
+            if (slope < 0.12f) continue;
+            c.col = slope > 0.25f ? IM_COL32(230, 40, 30, 95) : IM_COL32(255, 150, 30, 70);
+            g_slope.push_back(c);
+        }
 }
 
+void Regenerate() {
+    g_dirty = false;
+    g_quads.clear(); g_lines.clear(); g_outline.clear(); g_roadQuads.clear(); g_stopPts.clear(); g_crossPts.clear();
+    g_plan = PlanResult();
+    if (g_areaChanged) { g_areaChanged = false; RebuildSlope(); }
+    if (!g_area.ok) return;
+    const Area& a = g_area;
+    PlanInput in;
+    in.poly = a.local; in.population = g_population; in.gap = g_gap;
+    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) in.houseTypes.push_back((int)i);
+    in.services = &g_services;
+    in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff;
+    in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
+    g_plan = MakePlan(in);
+
+    const auto& all = catalog::All();
+    for (auto& b : g_plan.buildings) {
+        Quad q; q.type = b.type; q.pad = b.pad; q.h = std::max(3.0f, all[b.type].height); q.tooFar = b.tooFar;
+        float hw = b.w / 2, hd = b.d / 2;
+        q.g[0] = LocalToWorld(a, b.u - hw, b.v - hd); q.g[1] = LocalToWorld(a, b.u + hw, b.v - hd);
+        q.g[2] = LocalToWorld(a, b.u + hw, b.v + hd); q.g[3] = LocalToWorld(a, b.u - hw, b.v + hd);
+        q.mid = LocalToWorld(a, b.u, b.v);
+        g_quads.push_back(q);
+    }
+    for (auto& p : g_plan.paths) g_lines.push_back(Sample(a, p.u1, p.v1, p.u2, p.v2));
+    for (auto& rd : g_plan.roads) {
+        float len = fabsf(rd.u2 - rd.u1); int n = std::max(1, (int)(len / 8.0f));
+        for (int i = 0; i < n; ++i) {
+            float u0 = rd.u1 + (rd.u2 - rd.u1) * i / n, u1 = rd.u1 + (rd.u2 - rd.u1) * (i + 1) / n;
+            Cell c; c.col = IM_COL32(70, 70, 78, 200);
+            c.c[0] = LocalToWorld(a, u0, rd.v1 - rd.width / 2); c.c[1] = LocalToWorld(a, u1, rd.v1 - rd.width / 2);
+            c.c[2] = LocalToWorld(a, u1, rd.v1 + rd.width / 2); c.c[3] = LocalToWorld(a, u0, rd.v1 + rd.width / 2);
+            g_roadQuads.push_back(c);
+        }
+        g_lines.push_back(Sample(a, rd.u1, rd.v1, rd.u2, rd.v2));       // centre line
+    }
+    for (auto& s : g_plan.stops) g_stopPts.push_back(LocalToWorld(a, s.u, s.v, 1.0f));
+    for (auto& s : g_plan.crossings) g_crossPts.push_back(LocalToWorld(a, s.u, s.v, 0.6f));
+    size_t n = a.local.size();
+    for (size_t i = 0; i < n; ++i) g_outline.push_back(Sample(a, a.local[i].u, a.local[i].v, a.local[(i + 1) % n].u, a.local[(i + 1) % n].v));
+}
+
+// ---------- world drawing ----------
 ImU32 CategoryColor(const std::string& c, int alpha) {
     if (c == "LIVING")     return IM_COL32(90, 160, 255, alpha);
     if (c == "SHOP")       return IM_COL32(255, 170, 40, alpha);
@@ -102,77 +198,158 @@ ImU32 CategoryColor(const std::string& c, int alpha) {
     if (c == "HOSPITAL")   return IM_COL32(240, 80, 80, alpha);
     return IM_COL32(200, 200, 200, alpha);
 }
-
-void DrawPolyline(ImDrawList* dl, const std::vector<V3>& pts, ImU32 col, float thick) {
+bool Proj(const V3& w, ImVec2& s) {
     ImVec2 ds = ImGui::GetIO().DisplaySize;
-    bool have = false; ImVec2 prev;
+    return eng::WorldToScreen(w, ds.x, ds.y, s.x, s.y);
+}
+void DrawPolyline(ImDrawList* dl, const std::vector<V3>& pts, ImU32 col, float thick) {
+    bool have = false; ImVec2 prev, s;
     for (auto& p : pts) {
-        float sx, sy;
-        if (!eng::WorldToScreen(p, ds.x, ds.y, sx, sy)) { have = false; continue; }
-        if (have) dl->AddLine(prev, ImVec2(sx, sy), col, thick);
-        prev = ImVec2(sx, sy); have = true;
+        if (!Proj(p, s)) { have = false; continue; }
+        if (have) dl->AddLine(prev, s, col, thick);
+        prev = s; have = true;
+    }
+}
+void DrawCells(ImDrawList* dl, const std::vector<Cell>& cells) {
+    for (auto& c : cells) {
+        ImVec2 s[4]; bool ok = true;
+        for (int i = 0; i < 4 && ok; ++i) ok = Proj(c.c[i], s[i]);
+        if (ok) dl->AddQuadFilled(s[0], s[1], s[2], s[3], c.col);
+    }
+}
+
+void DrawBuilding(ImDrawList* dl, const Quad& q) {
+    const BuildingType& b = catalog::All()[q.type];
+    ImVec2 g[4]; bool ok = true;
+    for (int i = 0; i < 4 && ok; ++i) ok = Proj(q.g[i], g[i]);
+    if (!ok) return;
+    ImU32 line = q.tooFar ? IM_COL32(255, 60, 50, 255) : CategoryColor(b.category, 255);
+    float lineW = q.tooFar ? 2.5f : 1.5f;
+    ImVec2 labelAt; bool haveLabel = Proj(q.mid, labelAt);
+    float minX = std::min(std::min(g[0].x, g[1].x), std::min(g[2].x, g[3].x));
+    float maxX = std::max(std::max(g[0].x, g[1].x), std::max(g[2].x, g[3].x));
+
+    if (g_showLevel) {      // translucent box standing on the levelled pad, yellow = what happens to the ground
+        ImVec2 lo[4], hi[4];
+        for (int i = 0; i < 4 && ok; ++i) {
+            ok = Proj(V3{ q.g[i].x, q.pad, q.g[i].z }, lo[i]) && Proj(V3{ q.g[i].x, q.pad + q.h, q.g[i].z }, hi[i]);
+        }
+        if (!ok) return;
+        for (int i = 0; i < 4; ++i) {
+            int j = (i + 1) % 4;
+            dl->AddQuadFilled(lo[i], lo[j], hi[j], hi[i], CategoryColor(b.category, 60));
+            dl->AddLine(lo[i], hi[i], line, 1.0f);
+        }
+        dl->AddQuadFilled(hi[0], hi[1], hi[2], hi[3], CategoryColor(b.category, 85));
+        dl->AddQuad(hi[0], hi[1], hi[2], hi[3], line, lineW);
+        const ImU32 yellow = IM_COL32(255, 225, 40, 255);
+        dl->AddQuad(lo[0], lo[1], lo[2], lo[3], yellow, 2.0f);                 // the levelled pad
+        for (int i = 0; i < 4; ++i) dl->AddLine(lo[i], g[i], yellow, 2.0f);    // cut (ground above) or fill (ground below)
+        haveLabel = haveLabel && Proj(V3{ q.mid.x, q.pad + q.h, q.mid.z }, labelAt);
+    } else {
+        dl->AddQuadFilled(g[0], g[1], g[2], g[3], CategoryColor(b.category, 90));
+        dl->AddQuad(g[0], g[1], g[2], g[3], line, lineW);
+    }
+    ImVec2 ts = ImGui::CalcTextSize(b.name.c_str());
+    if (haveLabel && ts.x < (maxX - minX)) {
+        dl->AddText(ImVec2(labelAt.x - ts.x / 2 + 1, labelAt.y - ts.y / 2 + 1), IM_COL32(0, 0, 0, 220), b.name.c_str());
+        dl->AddText(ImVec2(labelAt.x - ts.x / 2, labelAt.y - ts.y / 2), IM_COL32(255, 255, 255, 255), b.name.c_str());
     }
 }
 
 void DrawWorld() {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    ImVec2 ds = ImGui::GetIO().DisplaySize;
-    const auto& all = catalog::All();
+    if (g_showSlope) DrawCells(dl, g_slope);
     for (auto& l : g_outline) DrawPolyline(dl, l, IM_COL32(255, 235, 80, 230), 2.5f);
-    for (auto& l : g_lines)   DrawPolyline(dl, l, IM_COL32(235, 235, 235, 220), 2.0f);
-    for (auto& q : g_quads) {
-        ImVec2 s[4]; bool ok = true;
-        for (int i = 0; i < 4 && ok; ++i) ok = eng::WorldToScreen(q.c[i], ds.x, ds.y, s[i].x, s[i].y);
-        if (!ok) continue;
-        const BuildingType& b = all[q.type];
-        dl->AddQuadFilled(s[0], s[1], s[2], s[3], CategoryColor(b.category, 90));
-        dl->AddQuad(s[0], s[1], s[2], s[3], CategoryColor(b.category, 255), 1.5f);
-        float minX = std::min(std::min(s[0].x, s[1].x), std::min(s[2].x, s[3].x));
-        float maxX = std::max(std::max(s[0].x, s[1].x), std::max(s[2].x, s[3].x));
-        ImVec2 ts = ImGui::CalcTextSize(b.name.c_str());
-        float mx, my;
-        if (ts.x < (maxX - minX) && eng::WorldToScreen(q.mid, ds.x, ds.y, mx, my)) {
-            dl->AddText(ImVec2(mx - ts.x / 2 + 1, my - ts.y / 2 + 1), IM_COL32(0, 0, 0, 220), b.name.c_str());
-            dl->AddText(ImVec2(mx - ts.x / 2, my - ts.y / 2), IM_COL32(255, 255, 255, 255), b.name.c_str());
-        }
+    DrawCells(dl, g_roadQuads);
+    for (auto& l : g_lines) DrawPolyline(dl, l, IM_COL32(235, 235, 235, 220), 2.0f);
+    for (auto& q : g_quads) DrawBuilding(dl, q);
+    ImVec2 s;
+    for (auto& c : g_crossPts) if (Proj(c, s)) {       // pedestrian crossing
+        for (int k = -2; k <= 2; ++k) dl->AddLine(ImVec2(s.x + k * 4.0f, s.y - 6), ImVec2(s.x + k * 4.0f, s.y + 6), IM_COL32(255, 255, 255, 255), 2.0f);
+    }
+    for (size_t i = 0; i < g_stopPts.size(); ++i) if (Proj(g_stopPts[i], s)) {
+        bool hot = (int)i == g_hoverStop || (int)i == g_dragStop;
+        dl->AddCircleFilled(s, hot ? 13.0f : 10.0f, IM_COL32(40, 110, 220, 255));
+        dl->AddCircle(s, hot ? 13.0f : 10.0f, IM_COL32(255, 255, 255, 255), 0, 2.0f);
+        const char* t = "Остановка";
+        ImVec2 ts = ImGui::CalcTextSize(t);
+        dl->AddRectFilled(ImVec2(s.x - ts.x / 2 - 4, s.y - 34), ImVec2(s.x + ts.x / 2 + 4, s.y - 14), IM_COL32(0, 0, 0, 170), 4);
+        dl->AddText(ImVec2(s.x - ts.x / 2, s.y - 33), IM_COL32(255, 255, 255, 255), t);
     }
 }
 
+// Drag a stop on the map: the street follows it and the district is rebuilt around the new place.
+void StopsInteraction() {
+    ImGuiIO& io = ImGui::GetIO();
+    if (g_dragStop >= 0) {
+        if (!ImGui::IsMouseDown(0) || g_dragStop >= (int)g_stops.size()) { g_dragStop = -1; return; }
+        V3 hit;
+        if (eng::ScreenToTerrain(io.MousePos.x, io.MousePos.y, io.DisplaySize.x, io.DisplaySize.y, hit)) {
+            V2 l = WorldToLocal(g_area, hit);
+            g_stops[g_dragStop] = l.u;
+            g_roadV = std::clamp(l.v, g_area.minV + 12, g_area.maxV - 12);
+            g_dirty = true;
+        }
+        return;
+    }
+    g_hoverStop = -1;
+    if (io.WantCaptureMouse) return;
+    ImVec2 s;
+    for (size_t i = 0; i < g_stopPts.size(); ++i)
+        if (Proj(g_stopPts[i], s) && fabsf(s.x - io.MousePos.x) < 16 && fabsf(s.y - io.MousePos.y) < 16) g_hoverStop = (int)i;
+    if (g_hoverStop >= 0) {
+        ImGui::SetTooltip("Перетащите остановку — район перестроится");
+        if (ImGui::IsMouseClicked(0)) g_dragStop = g_hoverStop;
+    }
+}
+
+// Outline drawing: every click adds a corner; click the first corner (or press Enter) to close.
 void Picking() {
     ImGuiIO& io = ImGui::GetIO();
     ImDrawList* dl = ImGui::GetForegroundDrawList();
-    if (ImGui::IsMouseClicked(1)) { g_pick = 0; return; }
+    const ImU32 yellow = IM_COL32(255, 235, 80, 255);
+    if (ImGui::IsMouseClicked(1)) {
+        if (g_draft.empty()) { g_pick = false; return; }
+        g_draft.pop_back();
+    }
     V3 hit;
     bool ok = !io.WantCaptureMouse && eng::ScreenToTerrain(io.MousePos.x, io.MousePos.y, io.DisplaySize.x, io.DisplaySize.y, hit);
-    const char* hint = g_pick == 1 ? "Клик — первый угол участка" : g_pick == 2 ? "Клик — второй угол (ширина)" : "Клик — глубина участка";
-    char buf[160]; snprintf(buf, sizeof(buf), "%s   (ПКМ — отмена)", hint);
+    if (ok) hit.y += 0.3f;
 
-    Area tmp;
-    if (ok && g_pick >= 2) {
-        V3 b = g_pick == 2 ? hit : g_b;
-        float dx = b.x - g_a.x, dz = b.z - g_a.z, w = sqrtf(dx * dx + dz * dz);
-        if (w > 1.0f) {
-            tmp.o = g_a; tmp.ux = dx / w; tmp.uz = dz / w; tmp.w = w;
-            float nx = -tmp.uz, nz = tmp.ux;
-            float d = g_pick == 3 ? (hit.x - g_a.x) * nx + (hit.z - g_a.z) * nz : 0;
-            if (d < 0) { nx = -nx; nz = -nz; d = -d; }
-            tmp.vx = nx; tmp.vz = nz; tmp.d = d; tmp.ok = true;
-            if (g_pick == 2) DrawPolyline(dl, Sample(tmp, 0, 0, w, 0), IM_COL32(255, 235, 80, 255), 2.5f);
-            else for (auto& l : Outline(tmp)) DrawPolyline(dl, l, IM_COL32(255, 235, 80, 255), 2.5f);
-            snprintf(buf, sizeof(buf), "%s   %.0f x %.0f м   (ПКМ — отмена)", hint, tmp.w, tmp.d);
+    std::vector<V3> line;
+    for (size_t i = 0; i < g_draft.size(); ++i) {
+        const V3& p = g_draft[i]; const V3& q = (i + 1 < g_draft.size()) ? g_draft[i + 1] : hit;
+        if (i + 1 == g_draft.size() && !ok) break;
+        int n = std::max(1, (int)(sqrtf((q.x - p.x) * (q.x - p.x) + (q.z - p.z) * (q.z - p.z)) / 10.0f));
+        for (int k = 0; k <= n; ++k) {
+            V3 w{ p.x + (q.x - p.x) * k / n, 0, p.z + (q.z - p.z) * k / n };
+            w.y = eng::TerrainHeight(w.x, w.z) + 0.3f;
+            line.push_back(w);
         }
     }
+    DrawPolyline(dl, line, yellow, 2.5f);
+    bool nearFirst = false; ImVec2 s;
+    for (size_t i = 0; i < g_draft.size(); ++i) if (Proj(g_draft[i], s)) {
+        bool first = i == 0;
+        if (first && g_draft.size() >= 3 && fabsf(s.x - io.MousePos.x) < 16 && fabsf(s.y - io.MousePos.y) < 16) nearFirst = true;
+        dl->AddCircleFilled(s, first ? (nearFirst ? 10.0f : 7.0f) : 4.5f, first ? IM_COL32(255, 120, 40, 255) : yellow);
+    }
+
+    char buf[200];
+    if (g_draft.empty()) snprintf(buf, sizeof(buf), "Клик — первая точка контура   (ПКМ — отмена)");
+    else if (g_draft.size() < 3) snprintf(buf, sizeof(buf), "Клик — следующая точка   (ПКМ — убрать последнюю)");
+    else snprintf(buf, sizeof(buf), nearFirst ? "Клик — замкнуть контур" : "Клик — точка, клик по первой точке или Enter — замкнуть   (ПКМ — убрать последнюю)");
     ImVec2 tp(io.MousePos.x + 18, io.MousePos.y + 18), ts = ImGui::CalcTextSize(buf);
     dl->AddRectFilled(ImVec2(tp.x - 5, tp.y - 3), ImVec2(tp.x + ts.x + 5, tp.y + ts.y + 3), IM_COL32(0, 0, 0, 190), 4);
     dl->AddText(tp, IM_COL32(255, 255, 255, 255), buf);
 
-    if (ok && ImGui::IsMouseClicked(0)) {
-        if (g_pick == 1) { g_a = hit; g_pick = 2; }
-        else if (g_pick == 2 && tmp.ok) { g_b = hit; g_pick = 3; }
-        else if (g_pick == 3 && tmp.ok && tmp.d > 20 && tmp.w > 20) { g_area = tmp; g_pick = 0; g_dirty = true; }
-    }
+    bool close = g_draft.size() >= 3 && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || (nearFirst && ImGui::IsMouseClicked(0)));
+    if (close) { SetArea(g_draft); g_draft.clear(); g_pick = false; return; }
+    if (ok && ImGui::IsMouseClicked(0) && g_draft.size() < 64) g_draft.push_back(hit);
 }
 
+// ---------- panel ----------
 const char* MaterialName(const std::string& m) {
     if (m == "brick") return "кирпич";
     if (m == "panels") return "панели";
@@ -208,15 +385,25 @@ void SortHouses(ImGuiTableSortSpecs* specs) {
 void TabArea() {
     ImGui::SeparatorText("Территория");
     ImGui::BeginDisabled(!eng::Ready());
-    if (ImGui::Button(g_pick ? "Отменить выбор" : "Выбрать на карте", ImVec2(190, 0))) g_pick = g_pick ? 0 : 1;
+    if (ImGui::Button(g_pick ? "Отменить рисование" : "Нарисовать на карте", ImVec2(210, 0))) { g_pick = !g_pick; g_draft.clear(); }
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (g_area.ok) {
-        ImGui::Text("%.0f x %.0f м  (%.1f га)", g_area.w, g_area.d, g_area.w * g_area.d / 10000.0f);
+        ImGui::Text("%.1f га, %d точек", g_area.sqm / 10000.0f, (int)g_area.pts.size());
         ImGui::SameLine();
-        if (ImGui::SmallButton("Сбросить")) { g_area.ok = false; g_dirty = true; }
+        if (ImGui::SmallButton("Сбросить")) { g_area.ok = false; g_dirty = g_areaChanged = true; }
     } else ImGui::TextDisabled("участок не выбран");
-    ImGui::TextDisabled("Три клика по карте: угол, ширина, глубина. ПКМ — отмена.");
+    ImGui::TextDisabled("Кликайте по карте углы района любой формы, замкните кликом по первой точке.");
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::SliderFloat("поворот застройки, °", &g_angle, -90.0f, 90.0f, "%.0f") && g_area.ok) {
+        BuildFrame(g_area, true); g_dirty = g_areaChanged = true;
+    }
+
+    ImGui::SeparatorText("Рельеф");
+    ImGui::Checkbox("показывать крутые склоны (оранжевый > 12 %, красный > 25 %)", &g_showSlope);
+    ImGui::Checkbox("показывать выравнивание: объёмные здания и жёлтые линии среза / насыпи", &g_showLevel);
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::SliderFloat("допустимый перепад под зданием, м", &g_maxDiff, 0.5f, 12.0f, "%.1f")) g_dirty = true;
 
     ImGui::SeparatorText("Население");
     ImGui::SetNextItemWidth(220);
@@ -308,16 +495,52 @@ void TabServices() {
     }
 }
 
+void TabRoads() {
+    ImGui::SeparatorText("Улица через район");
+    const char* types[] = { "без дороги (только дорожки)", "улица, 2 полосы", "проспект, 4 полосы" };
+    ImGui::SetNextItemWidth(280);
+    if (ImGui::Combo("тип дороги", &g_roadType, types, 3)) g_dirty = true;
+    ImGui::TextDisabled("Вдоль улицы идут тротуары, дорожки кварталов сходятся к переходу у остановки.");
+
+    ImGui::SeparatorText("Остановки");
+    ImGui::BeginDisabled(g_roadType == 0 || !g_area.ok);
+    int removeAt = -1;
+    for (size_t i = 0; i < g_stops.size(); ++i) {
+        ImGui::PushID((int)i);
+        ImGui::BulletText("Остановка %d", (int)i + 1);
+        if (g_stops.size() > 1) { ImGui::SameLine(); if (ImGui::SmallButton("убрать")) removeAt = (int)i; }
+        ImGui::PopID();
+    }
+    if (removeAt >= 0) { g_stops.erase(g_stops.begin() + removeAt); g_dirty = true; }
+    if (ImGui::Button("Добавить остановку") && g_stops.size() < 8) {
+        float L = g_area.minU, R = g_area.maxU;
+        PolyScan(g_area.local, g_roadV, L, R);
+        g_stops.push_back(L + (R - L) * (0.25f + 0.5f * (float)(g_stops.size() % 2)));
+        g_dirty = true;
+    }
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("Остановку (синий кружок на карте) можно перетащить мышью:\nулица пройдёт через неё, район перестроится.");
+
+    ImGui::SeparatorText("Пешая доступность");
+    ImGui::SetNextItemWidth(280);
+    if (ImGui::SliderFloat("сколько идут до остановки, м", &g_walk, 150.0f, 900.0f, "%.0f")) g_dirty = true;
+    ImGui::TextDisabled("Дома дальше этого расстояния обводятся красным.");
+}
+
 void Footer() {
     ImGui::Separator();
     const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
-    if (!g_area.ok) ImGui::TextDisabled("Выберите участок на карте.");
-    else if (g_plan.buildings.empty()) ImGui::TextColored(red, "Ничего не поместилось: отметьте дома или увеличьте участок.");
+    if (!g_area.ok) ImGui::TextDisabled("Нарисуйте участок на карте.");
+    else if (g_plan.buildings.empty()) ImGui::TextColored(red, "Ничего не поместилось: отметьте дома, увеличьте участок или допустимый перепад.");
     else {
         ImGui::Text("Домов %d  ·  мест %d из %d  ·  служб %d", g_plan.houses, g_plan.capacity, g_population, g_plan.services);
-        if (g_plan.maxWalkToShop >= 0) ImGui::Text("Дорожек %.0f м  ·  до магазина не дальше %.0f м", g_plan.pathLength, g_plan.maxWalkToShop);
-        else ImGui::Text("Дорожек %.0f м", g_plan.pathLength);
+        ImGui::Text("Дорог %.0f м  ·  дорожек %.0f м  ·  срезать %.0f м³  ·  насыпать %.0f м³", g_plan.roadLength, g_plan.pathLength, g_plan.cut, g_plan.fill);
+        if (g_plan.maxWalkToStop >= 0) {
+            if (g_plan.farHouses) ImGui::TextColored(red, "До остановки до %.0f м — %d домов дальше %.0f м, добавьте остановку.", g_plan.maxWalkToStop, g_plan.farHouses, g_walk);
+            else ImGui::Text("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м", g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));
+        } else if (g_plan.maxWalkToShop >= 0) ImGui::Text("До магазина не дальше %.0f м", g_plan.maxWalkToShop);
         if (g_plan.unplaced > 0) ImGui::TextColored(red, "Не поместилось зданий: %d — увеличьте участок.", g_plan.unplaced);
+        else if (g_plan.steepSkipped > 0) ImGui::TextDisabled("Крутые места обойдены (%d раз).", g_plan.steepSkipped);
     }
     ImGui::BeginDisabled(true);
     ImGui::Button("Построить в игре (в разработке)", ImVec2(-FLT_MIN, 0));
@@ -325,10 +548,10 @@ void Footer() {
 }
 
 void Panel() {
-    ImGui::SetNextWindowSize(ImVec2(640, 620), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(660, 680), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(70, 110), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(520, 420), ImVec2(1400, 1400));
-    if (!ImGui::Begin("##dp_panel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar)) { ImGui::End(); return; }
+    ImGui::SetNextWindowSizeConstraints(ImVec2(540, 460), ImVec2(1400, 1400));
+    if (!ImGui::Begin("##dp_panel3", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar)) { ImGui::End(); return; }
 
     // header band like the game windows: dark red strip with a centred caption
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -348,9 +571,9 @@ void Panel() {
 
     if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
 
-    float footer = ImGui::GetTextLineHeightWithSpacing() * 3 + ImGui::GetFrameHeightWithSpacing() + 14;
+    float footer = ImGui::GetTextLineHeightWithSpacing() * 4 + ImGui::GetFrameHeightWithSpacing() + 14;
     if (ImGui::BeginTabBar("##tabs")) {
-        struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices } };
+        struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads } };
         for (auto& t : tabs) {
             if (!ImGui::BeginTabItem(t.name)) continue;
             ImGui::BeginChild("##body", ImVec2(0, std::max(120.0f, ImGui::GetContentRegionAvail().y - footer)));
@@ -397,33 +620,24 @@ void ToggleButton() {
     ImGui::PopStyleVar(2);
 }
 
-// Debug aid: if DistrictPlanner.selftest exists next to the game exe, build a district in front of the
-// camera without any input and write the numbers to the log.
+// Debug aid: creating DistrictPlanner.selftest next to the game exe (even while the game runs) outlines a
+// district in front of the camera without any input and writes the numbers to the log.
 int g_selfTest = 0;
 void SelfTest() {
-    static int frames = 0;
-    if (g_selfTest == 0)
-        g_selfTest = GetFileAttributesW((GameDir() + L"DistrictPlanner.selftest").c_str()) != INVALID_FILE_ATTRIBUTES ? 1 : -1;
-    if (g_selfTest != 1 || !eng::Ready() || ++frames < 240) return;
+    static int tick = 0;
+    if (++tick % 120 != 0 || !eng::Ready()) return;
+    std::wstring flag = GameDir() + L"DistrictPlanner.selftest";
+    if (GetFileAttributesW(flag.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    DeleteFileW(flag.c_str());
     g_selfTest = 2;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
-    V3 a, b, c;
-    bool ok = eng::ScreenToTerrain(ds.x * 0.38f, ds.y * 0.50f, ds.x, ds.y, a) &&
-              eng::ScreenToTerrain(ds.x * 0.62f, ds.y * 0.50f, ds.x, ds.y, b) &&
-              eng::ScreenToTerrain(ds.x * 0.55f, ds.y * 0.74f, ds.x, ds.y, c);
-    Log("selftest: display %.0fx%.0f, hit=%d", ds.x, ds.y, (int)ok);
-    if (!ok) return;
-    float sx = 0, sy = 0;
-    bool back = eng::WorldToScreen(a, ds.x, ds.y, sx, sy);
-    Log("selftest: a=(%.1f %.1f %.1f) b=(%.1f %.1f %.1f) c=(%.1f %.1f %.1f)", a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-    Log("selftest: a back to screen %d (%.1f %.1f), expected (%.1f %.1f)", (int)back, sx, sy, ds.x * 0.38f, ds.y * 0.50f);
-    float dx = b.x - a.x, dz = b.z - a.z, w = sqrtf(dx * dx + dz * dz);
-    if (w < 1) return;
-    Area t; t.o = a; t.ux = dx / w; t.uz = dz / w; t.w = w;
-    float nx = -t.uz, nz = t.ux, d = (c.x - a.x) * nx + (c.z - a.z) * nz;
-    if (d < 0) { nx = -nx; nz = -nz; d = -d; }
-    t.vx = nx; t.vz = nz; t.d = d; t.ok = true;
-    g_area = t; g_open = true; g_population = 3000; g_dirty = true;
+    const float sx[6] = { 0.40f, 0.66f, 0.80f, 0.74f, 0.52f, 0.42f }, sy[6] = { 0.42f, 0.40f, 0.52f, 0.80f, 0.86f, 0.66f };
+    std::vector<V3> pts;
+    for (int i = 0; i < 6; ++i) { V3 p; if (eng::ScreenToTerrain(ds.x * sx[i], ds.y * sy[i], ds.x, ds.y, p)) pts.push_back(p); }
+    Log("selftest: display %.0fx%.0f, points hit %d of 6", ds.x, ds.y, (int)pts.size());
+    if (pts.size() < 6) return;
+    g_population = 3000; g_open = true; g_showLevel = true;
+    SetArea(pts);
 }
 
 } // namespace
@@ -458,26 +672,27 @@ void ApplyStyle() {
     c[ImGuiCol_NavCursor] = red;
 }
 
-bool WantsGameMouse() { return g_pick != 0; }
+bool WantsGameMouse() { return g_pick || g_dragStop >= 0 || g_hoverStop >= 0; }
 
 void Draw() {
     if (!g_inited && !catalog::All().empty()) InitDefaults();
     if (ImGui::IsKeyPressed(ImGuiKey_F8, false)) g_open = !g_open;
-
     ToggleButton();
 
     if (!g_inited) return;
-    if (!eng::Ready()) g_pick = 0;
+    if (!eng::Ready()) { g_pick = false; g_dragStop = g_hoverStop = -1; }
     SelfTest();
     if (g_open) Panel();
     if (g_dirty && (eng::Ready() || !g_area.ok)) {
         Regenerate();
-        if (g_selfTest == 2)
-            Log("plan: area %.0fx%.0f, houses %d, capacity %d, services %d, unplaced %d, paths %.0f m, walk %.0f m",
-                g_area.w, g_area.d, g_plan.houses, g_plan.capacity, g_plan.services, g_plan.unplaced, g_plan.pathLength, g_plan.maxWalkToShop);
+        if (g_selfTest == 2 && g_dragStop < 0)
+            Log("plan: %.1f ha, houses %d, capacity %d, services %d, unplaced %d, steep skips %d, roads %.0f m, paths %.0f m, cut %.0f, fill %.0f, tooFar %d, stop walk %.0f m",
+                g_area.sqm / 10000.0f, g_plan.houses, g_plan.capacity, g_plan.services, g_plan.unplaced, g_plan.steepSkipped,
+                g_plan.roadLength, g_plan.pathLength, g_plan.cut, g_plan.fill, g_plan.farHouses, g_plan.maxWalkToStop);
     }
     if (eng::Ready()) {
-        if (g_area.ok && g_open) DrawWorld();
+        if (g_area.ok && g_open) { DrawWorld(); if (!g_pick) StopsInteraction(); }
+        else g_hoverStop = g_dragStop = -1;
         if (g_pick) Picking();
     }
 }

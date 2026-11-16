@@ -4,8 +4,10 @@
 #include <windows.h>
 #include <string>
 #include <vector>
+#include <functional>
 
 struct V3 { float x, y, z; };
+struct V2 { float u, v; };
 struct M4 { float m[4][4]; };
 
 void Log(const char* fmt, ...);
@@ -23,7 +25,7 @@ namespace eng {
     void BeginFrame();                              // refresh cached matrices
     extern bool g_blockMouseButtons;                // game sees no mouse buttons
     extern bool g_blockMouseMove;                   // game sees no wheel / relative motion
-    extern bool g_hideMouse;                        // game sees the cursor far off-screen
+    extern bool g_hideMouse;                        // game sees the cursor tooFar off-screen
     extern bool g_blockKeys;                        // game sees no keyboard
 }
 
@@ -46,33 +48,49 @@ namespace catalog {
 }
 
 // ---- planner ----
+// Works in a local frame (u, v) in meters; the UI maps it to the world and supplies terrain heights.
 struct ServiceRule {
     const char* category;
     const char* label;
     bool  enabled;
     int   perResidents;     // one building per N residents
-    int   typeIndex;        // index into catalog::All(), -1 = auto
+    int   typeIndex;        // index into catalog::All(), -1 = none
 };
 struct PlanInput {
-    float width = 0, depth = 0;     // meters
+    std::vector<V2> poly;                           // district outline
     int   population = 1000;
     float gap = 8.0f;
-    std::vector<int> houseTypes;    // catalog indices
+    std::vector<int> houseTypes;                    // catalog indices
     std::vector<ServiceRule>* services = nullptr;
+    int   roadType = 1;                             // 0 none, 1 street, 2 avenue
+    float roadV = 0;                                // where the street crosses the district
+    std::vector<float> stopsU;                      // bus stops along the street
+    float walkRadius = 400;                         // how tooFar residents walk to a stop
+    float maxDiff = 3.0f;                           // allowed height difference under one building
+    std::function<float(float, float)> height;      // terrain height at (u, v); may be empty
 };
-struct Placed { int type; float u, v, w, d; bool rotated; };
+struct Placed {
+    int type; float u, v, w, d; bool rotated;
+    float pad = 0, cut = 0, fill = 0;               // levelled height, earth to remove / add (m3)
+    bool tooFar = false;                               // too tooFar from every stop
+};
 struct PathSeg { float u1, v1, u2, v2; };
+struct RoadSeg { float u1, v1, u2, v2, width; };
 struct PlanResult {
     std::vector<Placed>  buildings;
     std::vector<PathSeg> paths;
-    int capacity = 0, houses = 0, services = 0, unplaced = 0;
-    float pathLength = 0, maxWalkToShop = -1;
+    std::vector<RoadSeg> roads;
+    std::vector<V2>      stops, crossings;
+    int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0;
+    float pathLength = 0, roadLength = 0, maxWalkToShop = -1, maxWalkToStop = -1, cut = 0, fill = 0;
 };
 PlanResult MakePlan(const PlanInput& in);
+bool PolyScan(const std::vector<V2>& poly, float v, float& left, float& right);   // widest span inside at height v
+bool PolyContains(const std::vector<V2>& poly, float u, float v);
 
 // ---- ui ----
 namespace ui {
     void ApplyStyle();      // paper look matching the game windows
     void Draw();            // called once per frame between ImGui::NewFrame and Render
-    bool WantsGameMouse();  // true while picking territory on the map
+    bool WantsGameMouse();  // true while the mod uses clicks on the map (drawing the outline, dragging a stop)
 }
