@@ -76,6 +76,15 @@ struct BuildingType {
     float cx = 0, cz = 0;   // footprint centre in model coordinates (the model origin is rarely the centre)
     std::vector<Conn> conns;
     bool  needsRoad = false; // cannot work without a road for vehicles
+    // Utility loads the way the game's type loader (SOVIET64.exe 0x10e1f0) computes them, see docs/mechanics.md 4.4.
+    int   profs = 0;        // $PROFESORS_NEEDED
+    int   serve = 0;        // $CITIZEN_ABLE_SERVE
+    float fLive = 1.0f, fLiveServe = 0.2f, fLight = 1.0f, fLightServe = 0.2f;   // $ELETRIC_CONSUMPTION_*_FACTOR*
+    bool  heatBig = false;  // has $CONNECTION_HEATING_BIG
+    float heatLoad = 0;     // hot-water tank units the building asks for (game value; 50 residents = 35)
+    float powerLoad = 0;    // MW the building asks for
+    float heatCap = 0;      // heat exchanger / heat pumping station: what it can serve (1000, big 3000)
+    float powerCap = 0;     // substation 2.5, transformer 19, rail trafo 14 MW
 };
 namespace catalog {
     void Load();

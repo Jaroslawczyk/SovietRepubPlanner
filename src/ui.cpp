@@ -866,17 +866,20 @@ void TabUtils() {
         ImGui::SetNextItemWidth(200);
         if (ImGui::SliderFloat("радиус узла, м", &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
         ImGui::SetNextItemWidth(120);
-        ImGui::InputFloat("на жителя", &g_utilNorm[k], 0, 0, k == 3 ? "%.4f" : "%.2f");
-        if (ImGui::IsItemDeactivatedAfterEdit()) g_dirty = true;
-        ImGui::SameLine(); ImGui::TextDisabled(k >= 2 ? "%s (из игры, по кирпичному дому)" : "%s (прикидка)", kUtilUnit[k]);
+        if (k < 2) {
+            ImGui::InputFloat("на жителя", &g_utilNorm[k], 0, 0, "%.2f");
+            if (ImGui::IsItemDeactivatedAfterEdit()) g_dirty = true;
+            ImGui::SameLine(); ImGui::TextDisabled("%s (прикидка)", kUtilUnit[k]);
+        } else ImGui::TextDisabled(k == 2 ? "Нагрузка по формуле игры: жилой дом — жители × 0,7; службы — по рабочим и посетителям."
+                                          : "Нагрузка по формуле игры: жилой дом — жители × 0,002 МВт; службы — по рабочим и посетителям, не меньше 0,05 МВт.");
         if (g_utilBuild[k] && g_area.ok && !g_plan.buildings.empty()) {
             int nodes = (int)g_plan.utilNodes[k].size(), helpers = 0;
             for (auto& b : g_plan.buildings) if (b.net == k && b.role == 1) ++helpers;
             ImGui::Text("Узлов (%s): %d  ·  %s: %d  ·  линий %.0f м  ·  нагрузка %.0f %s", kUtilNode[k], nodes,
-                        k == 3 ? "трансформаторов" : "распределителей", helpers, g_plan.utilLen[k], people * g_utilNorm[k], kUtilUnit[k]);
+                        k == 3 ? "трансформаторов" : "распределителей", helpers, g_plan.utilLen[k], k >= 2 ? g_plan.utilDemand[k] : people * g_utilNorm[k], kUtilUnit[k]);
             if (g_plan.utilUncovered[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Вне радиуса зданий: %d.", g_plan.utilUncovered[k]);
             if (k >= 2 && nodes > 0) {
-                const float cap = k == 2 ? 1000.0f : 2.5f;
+                float cap = 0; for (auto& t : catalog::All()) { if (k == 2 && t.id == "heating_endstation_small") cap = t.heatCap; if (k == 3 && t.id == "eletric_substation") cap = t.powerCap; }
                 ImGui::Text("Спрос района %.*f %s · самый загруженный узел %.0f %% (игра предупреждает с 90 %%, ёмкость узла %g)",
                             k == 3 ? 2 : 0, g_plan.utilDemand[k], kUtilUnit[k], g_plan.utilMaxLoad[k] * 100, cap);
                 if (g_plan.utilOverloaded[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Перегружено узлов: %d.", g_plan.utilOverloaded[k]);

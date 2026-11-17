@@ -46,6 +46,30 @@ namespace catalog {
 
 const std::vector<BuildingType>& All() { return g_types; }
 
+// Heat tank and power demand / capacity, as the game's type loader (0x10e1f0) computes them:
+//  heat:  living = residents * 0.7 (0x1198b9); other = 0.7 * (workers + professors) + 0.49 * workers * able-to-serve
+//         (0x1198f9); heat exchanger / heat pumping station = 1000, or 3000 with a big heating connection (0x1197d5).
+//  power: living = residents * 0.0005 * 2, doubled again while the global flag at exe+0x9d54d4 is set (it is in a
+//         normal game: 50 residents read 0.1 MW) (0x11a0d0); other = (workers + professors) * 0.0005 * (living factor
+//         + lighting factor) + (workers + professors) * able-to-serve * 0.0005 * (both able-to-serve factors)
+//         (0x11a10a; the lighting part also needs a global > 0 at exe+0x9d5d84); at least 0.05 MW (0x11a248).
+//         Capacity: substation 2.5, transformer 19, rail trafo 14 MW (0x11a1b3).
+//  Not modelled: storage-based and vehicle loading terms (industry), heating plants (sum of production).
+static void ComputeLoads(BuildingType& b) {
+    const std::string& c = b.category;
+    int wp = b.workers + b.profs;
+    if (c == "LIVING") { b.heatLoad = b.capacity * 0.7f; b.powerLoad = b.capacity * 0.002f; }
+    else if (c == "HEATING_ENDSTATION" || c == "HEATING_SWITCH") { b.heatCap = b.heatBig ? 3000.0f : 1000.0f; }
+    else if (c == "SUBSTATION") b.powerCap = 2.5f;
+    else if (c == "TRANSFORMATOR") b.powerCap = 19.0f;
+    else if (c == "RAIL_TRAFO") b.powerCap = 14.0f;
+    else if (wp > 0) {
+        b.heatLoad = 0.7f * wp + 0.49f * b.workers * b.serve;
+        b.powerLoad = wp * 0.0005f * (b.fLive + b.fLight) + (b.serve > 0 ? wp * b.serve * 0.0005f * (b.fLiveServe + b.fLightServe) : 0.0f);
+    }
+    if (c != "SUBSTATION" && c != "TRANSFORMATOR" && c != "RAIL_TRAFO" && (b.powerLoad > 0 || c == "LIVING")) b.powerLoad = std::max(0.05f, b.powerLoad);
+}
+
 void Load() {
     g_types.clear();
     std::wstring media = GameDir() + L"media_soviet\\";
@@ -105,6 +129,13 @@ void Load() {
             }
             else if (key == "QUALITY_OF_LIVING") ls >> b.quality;
             else if (key == "WORKERS_NEEDED") ls >> b.workers;
+            else if (key == "PROFESORS_NEEDED") ls >> b.profs;
+            else if (key == "CITIZEN_ABLE_SERVE") ls >> b.serve;
+            else if (key == "ELETRIC_CONSUMPTION_LIVING_WORKER_FACTOR") ls >> b.fLive;
+            else if (key == "ELETRIC_CONSUMPTION_LIVING_WORKER_FACTOR_ABLE_SERVE") ls >> b.fLiveServe;
+            else if (key == "ELETRIC_CONSUMPTION_LIGHTING_WORKER_FACTOR") ls >> b.fLight;
+            else if (key == "ELETRIC_CONSUMPTION_LIGHTING_WORKER_FACTOR_ABLE_SERVE") ls >> b.fLightServe;
+            else if (key == "CONNECTION_HEATING_BIG") b.heatBig = true;
         }
         if (b.category.empty()) continue;
         auto bb = ReadAll(dir + stem + L".bbox");
@@ -134,6 +165,7 @@ void Load() {
             if (!dup) b.conns.push_back(cn);
         }
         for (auto& cn : b.conns) if (cn.kind == 1 && b.category != "LIVING") b.needsRoad = true;
+        ComputeLoads(b);
         auto it = names.find(nameId);
         b.name = (it != names.end() && !it->second.empty()) ? WideToUtf8(it->second) : b.id;
         g_types.push_back(b);

@@ -59,7 +59,7 @@ Item MakeItem(int type) {
 }
 }
 
-static float Demand(const BuildingType& t, float perPerson);
+float Demand(const BuildingType& t, float perPerson, int k);
 PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     PlanResult r;
     const auto& all = catalog::All();
@@ -558,7 +558,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             int reach = 0;
             for (auto& nd : r.utilNodes[k]) if (hypotf(nd.u - b.u, nd.v - b.v) <= in.utilRadius[k]) ++reach;
             if (!reach) { ++r.utilUncovered[k]; continue; }
-            float dem = Demand(all[b.type], in.utilPerPerson[k]);
+            float dem = Demand(all[b.type], in.utilPerPerson[k], k);
             r.utilDemand[k] += dem;
             for (size_t i = 0; i < r.utilNodes[k].size(); ++i)
                 if (hypotf(r.utilNodes[k][i].u - b.u, r.utilNodes[k][i].v - b.v) <= in.utilRadius[k]) load[i] += dem / reach;
@@ -574,7 +574,10 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
 }
 
 // What a building asks of a network: residents, or the workers of a service building, times the per-person norm.
-float Demand(const BuildingType& t, float perPerson) {
+// k = 2 heat, 3 power: the game's own per-type values (catalog); water and sewage: per-person guess
+float Demand(const BuildingType& t, float perPerson, int k) {
+    if (k == 2) return t.heatLoad;
+    if (k == 3) return t.powerLoad;
     int people = t.capacity > 0 ? t.capacity : std::max(1, t.workers);
     return people * perPerson;
 }
@@ -582,7 +585,12 @@ float Demand(const BuildingType& t, float perPerson) {
 // Utility nodes are few and central: a dry layout without them shows where the buildings stand, a greedy cover picks
 // the spots (the building that brings most uncovered ones into reach, radius less an allowance for the shift the
 // inserted nodes cause), then the real layout puts a node next to each chosen spot.
-PlanResult MakePlan(const PlanInput& in) {
+PlanResult MakePlan(const PlanInput& inRaw) {
+    PlanInput in = inRaw;       // node capacities from the game's formulas for the node types the plan uses
+    for (auto& t : catalog::All()) {
+        if (t.id == "heating_endstation_small" && t.heatCap > 0) in.utilNodeCap[2] = t.heatCap;
+        if (t.id == "eletric_substation" && t.powerCap > 0) in.utilNodeCap[3] = t.powerCap;
+    }
     bool any = false;
     for (int k = 0; k < 4; ++k) any = any || in.utilBuild[k];
     if (!any) return MakePlanImpl(in, nullptr);
@@ -619,7 +627,7 @@ PlanResult MakePlan(const PlanInput& in) {
             // buildings farthest from the chosen ones, so that the demand is shared out
             if (in.utilNodeCap[k] > 0 && !sites[k].empty()) {
                 float dem = 0;
-                for (size_t b = 0; b < n; ++b) dem += Demand(all[bs[b]->type], in.utilPerPerson[k]);
+                for (size_t b = 0; b < n; ++b) dem += Demand(all[bs[b]->type], in.utilPerPerson[k], k);
                 size_t need = (size_t)ceilf(dem / (0.85f * in.utilNodeCap[k])) + extra[k];
                 while (sites[k].size() < need && sites[k].size() < 60) {
                     int farIdx = -1; float farD = -1;

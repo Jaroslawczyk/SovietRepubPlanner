@@ -51,6 +51,110 @@
   Отладка: файл `DistrictPlanner.dumpload` пишет в журнал по каждому типу здания эти значения (`LOAD …`).
 - Ежетиковая работа узлов: `0x139a70` раздаёт по типам — вода `0x18d650`, канализация `0x18e0b0`, `0x5c` → `0x189050`.
 
+## Загрузчик типов зданий `0x10e1f0`
+
+- Читает `media_soviet/buildings_types/*.ini`; строка сравнивается функцией `0x84f6c0` (strcmp) с ключами, числа —
+  `0x52f0` (sscanf). Рабочая структура типа лежит на стеке с `rbp+0x1ab0`; конструктор `0x10dd30(…, rdx = структура)`.
+- Поля структуры (от `rbp`): код типа `+0x1e10`; `$WORKERS_NEEDED` `+0x22bc`; `$PROFESORS_NEEDED` `+0x22c0`;
+  `$CITIZEN_ABLE_SERVE` `+0x22c4`; `$ENGINE_SPEED` `+0x22c8`; `$VEHICLE_LOADING_FACTOR` `+0x22d4`;
+  `$VEHICLE_UNLOADING_FACTOR` `+0x22d8`; `$ELETRIC_CONSUMPTION_LOADING_FIXED` `+0x2224`; `…_UNLOADING_FIXED` `+0x2228`;
+  `$ELETRIC_CONSUMPTION_LIGHTING_WORKER_FACTOR` `+0x2234` (по умолчанию 1,0); `…_ABLE_SERVE` `+0x2238` (0,2);
+  `$ELETRIC_CONSUMPTION_LIVING_WORKER_FACTOR` `+0x223c` (1,0); `…_ABLE_SERVE` `+0x2240` (0,2); итог тепла `+0x2258`,
+  `+0x225c`; вектор подключений `+0x1da8` (первое поле записи — код подключения); склады `+0x1e50` (записи 0xE0,
+  ёмкость `+0x8c`, код ресурса `+0x90`).
+- Расчёт автоскладов: тепло `0x1196ea`…`0x119984` (запись склада тепла: код 0xE, ёмкость `+0x181c`), электричество
+  `0x119a00`…`0x11a2f0` (код 9, ёмкость `+0x149c`). Глобальные флаги расчёта: `exe+0x9d54d4` (удваивает электричество
+  жилья), `exe+0x9d5d84` (включает часть «освещение»), `exe+0x9d54c0`/`+0x9d54d0` (включают расчёт тепла).
+- У построенного здания: склады — вектор `+0x970`; `+0x10f8` → ёмкость склада электричества; `+0x1060` → склада тепла;
+  `+0x1058` — соседнее поле склада тепла.
+
+### Коды типов (`+0x1e10` в загрузчике, `тип+0x360` у здания)
+
+- `0x2` TYPE_LIVING
+- `0x3` TYPE_MINE_GRAVEL
+- `0x5` TYPE_STORAGE
+- `0x6` TYPE_FACTORY
+- `0x7` TYPE_MINE_OIL
+- `0x8` TYPE_FIELD
+- `0x9` TYPE_FARM
+- `0xb` TYPE_ENGINE
+- `0xc` TYPE_CONSTRUCTION_OFFICE
+- `0xe` TYPE_ROADDEPO
+- `0xf` TYPE_RAILDEPO
+- `0x11` TYPE_POWERPLANT
+- `0x12` TYPE_SUBSTATION
+- `0x13` TYPE_TRANSFORMATOR
+- `0x14` TYPE_CUSTOMHOUSE
+- `0x15` TYPE_CHURCH
+- `0x16` TYPE_KINO
+- `0x17` TYPE_PUB
+- `0x18` TYPE_SPORT
+- `0x19` TYPE_HOSPITAL
+- `0x1a` TYPE_FIRESTATION
+- `0x1b` TYPE_UNIVERSITY
+- `0x1c` TYPE_CONSTRUCTION_OFFICE_RAIL
+- `0x1f` TYPE_ELETRIC_EXPORT
+- `0x20` TYPE_ELETRIC_IMPORT
+- `0x21` TYPE_MONUMENT
+- `0x22` TYPE_GAS_STATION
+- `0x23` TYPE_RAIL_TRAFO
+- `0x24` TYPE_POLLUTION_METER
+- `0x25` TYPE_BROADCAST
+- `0x26` TYPE_PARKING
+- `0x27` TYPE_CITYHALL
+- `0x28` TYPE_PRODUCTION_LINE
+- `0x29` TYPE_CAR_DEALER
+- `0x2a` TYPE_SHIP_DOCK
+- `0x2b` TYPE_DISTRIBUTION_OFFICE
+- `0x2c` TYPE_CONTAINER_FACILITY
+- `0x2d` TYPE_FORKLIFT_GARAGE
+- `0x2e` TYPE_AIRPLANE_GATE
+- `0x2f` TYPE_AIRPLANE_PARKING
+- `0x30` TYPE_AIRPLANE_TOWER
+- `0x31` TYPE_GARBAGE_OFFICE
+- `0x32` TYPE_HOTEL
+- `0x33` TYPE_ATTRACTION
+- `0x34` TYPE_DISTRIBUTION_OFFICE_RAIL
+- `0x3c` TYPE_COOLING_TOWER
+- `0x46` TYPE_HEATING_PLANT
+- `0x47` TYPE_HEATING_ENDSTATION
+- `0x48` TYPE_HEATING_SWITCH
+- `0x49` TYPE_POLICE_STATION
+- `0x4a` TYPE_ORPHANAGE
+- `0x4b` TYPE_COURT_HOUSE
+- `0x4c` TYPE_PRISON
+- `0x4d` TYPE_SECRET_POLICE
+- `0x50` TYPE_PEDESTRIAN_BRIDGE
+- `0x5a` TYPE_WATER_PUMP
+- `0x5b` TYPE_WATER_ENDSTATION
+- `0x5c` TYPE_MINE_WATER
+- `0x5d` TYPE_SEWAGE_PUMP
+- `0x5e` TYPE_SEWAGE_ENDSTATION
+- `0x5f` TYPE_SEWAGE_DISCHARGE
+- `0x60` TYPE_WAITING_STATION
+- `0x61` TYPE_WATER_TREATMENT
+- `0x62` TYPE_SEWAGE_TREATMENT
+- `0x69` TYPE_TRASH_CONTAINER
+- `0x6a` TYPE_DEMOLITION_OFFICE
+- `0x6b` TYPE_FOREIGN_PIPELINE_EXPORT
+- `0x6c` TYPE_REPAIR_OFFICE
+- `0x6d` TYPE_SCRAPYARD
+- `0x12c` TYPE_TRAM_GATE
+
+### Коды подключений (первое поле записи в векторе подключений)
+
+- 7 `CONNECTION_ELETRIC_HIGH_OUTPUT_ONLY`
+- 8 `CONNECTION_ELETRIC_LOW_OUTPUT_ONLY`
+- 9 `CONNECTION_CABLEWAY`
+- 11 `CONNECTION_HEATING_SMALL`
+- 12 `CONNECTION_HEATING_BIG`
+- 15 `CONNECTION_STEAM_OUTPUT`
+- 16 `CONNECTION_BULK_OUTPUT`
+- 17 `CONNECTION_FENCE`
+- 19 `CONNECTION_WATERPIPE_OUTPUT`
+- 20 `CONNECTION_SEWAGE_OUTPUT`
+- Остальные коды подключений задаются другим способом (не через `[rsp+0x60]`) и пока не выписаны.
+
 ## Менеджеры сетей и коды
 
 | Сеть | Менеджер | тип | подтип | аргумент начала | инструмент |

@@ -731,6 +731,25 @@ static bool ReadBld(BYTE* b, BldRaw& o) {
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+// raw look at the memory behind a load pointer and which fields of the building point near it
+static void HexAround(const char* tag, BYTE* b, int off) {
+    __try {
+        BYTE* p = *(BYTE**)(b + off); if (!p) return;
+        char line[700]; int n = 0;
+        for (int i = -0x40; i < 0x60; i += 4) {
+            n += snprintf(line + n, sizeof(line) - n, "%s%g", i == 0 ? " [" : " ", *(float*)(p + i));
+            if (i == 0) n += snprintf(line + n, sizeof(line) - n, "]");
+        }
+        Log("RAW %s +0x%x -> %p:%s", tag, off, p, line);
+        n = 0;
+        for (int i = -0x40; i < 0x60; i += 4) n += snprintf(line + n, sizeof(line) - n, " %08x", *(unsigned*)(p + i));
+        Log("RAWX %s +0x%x:%s", tag, off, line);
+        for (int k = 0; k < 0x1400; k += 8) {
+            BYTE* q = *(BYTE**)(b + k);
+            if (q && q != p && q > p - 0x400 && q < p + 0x400) Log("RAWREF %s building+0x%x -> %p (target %+lld)", tag, k, q, (long long)(p - q));
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { Log("RAW %s fault", tag); }
+}
 static void DumpLoadNow() {
     BYTE** v = *(BYTE***)(gx::Base() + 0x9e6a18); BYTE** e = *(BYTE***)(gx::Base() + 0x9e6a20);
     struct Agg { int id = 0, n = 0; float p = 0, h = 0, pmin = 1e9f, pmax = -1e9f, hmin = 1e9f, hmax = -1e9f; long long pr = 0, hr = 0; int lp = 0, lh = 0; };
@@ -740,6 +759,7 @@ static void DumpLoadNow() {
         Agg& a = m[r.name]; a.id = r.id; ++a.n; a.p += r.p; a.h += r.h; a.pr = r.pr; a.hr = r.hr;
         a.pmin = std::min(a.pmin, r.p); a.pmax = std::max(a.pmax, r.p); a.hmin = std::min(a.hmin, r.h); a.hmax = std::max(a.hmax, r.h);
         a.lp = r.lp; a.lh = r.lh;
+        if (a.n == 1 && (r.id == 2 || r.id == 0x12 || r.id == 0x47)) { HexAround(r.name, *it, 0x10f8); HexAround(r.name, *it, 0x1060); }
     }
     Log("LOAD dump: %d buildings, %d types (name id count | power +0x10f8 avg min max ptr-type | heat +0x1060 avg min max ptr-type | list sizes)", (int)(e - v), (int)m.size());
     for (auto& kv : m) {
