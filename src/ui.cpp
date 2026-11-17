@@ -207,7 +207,7 @@ void Regenerate() {
     const Area& a = g_area;
     PlanInput in;
     in.poly = a.local; in.population = g_population;
-    in.gap = 10.0f - g_density * 0.085f;             // density 0 -> 10 m, 100 -> 1.5 m between buildings (aprons come on top)
+    in.gap = 10.0f - g_density * 0.095f;             // density 0 -> 10 m, 100 -> 0.5 m between building zones
     in.band = 8.0f - g_density * 0.035f;             // and 8 -> 4.5 m for the footpath strip between rows
     in.fillAll = g_fillAll;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
@@ -929,6 +929,14 @@ void CheckGaps(const InstantRun& r) {
         }
     }
     Log("gap check: %d entrances checked, %d not joined, %d built pieces", checked, (int)g_gapPts.size(), (int)segs.size());
+    {   // debug: how the built net falls apart
+        std::map<int, int> sz, roads;
+        for (size_t k = 0; k < segs.size(); ++k) { ++sz[root((int)k)]; if (segs[k].road) ++roads[root((int)k)]; }
+        std::string t;
+        for (auto& kv : sz) { char b[48]; snprintf(b, sizeof(b), " [%d pieces, %d road%s]", kv.second, roads[kv.first], kv.first == mainRoot ? ", main" : ""); t += b; }
+        Log("gap check: parts of the net:%s", t.c_str());
+        for (size_t k = 0; k < segs.size() && k < 400; ++k) if (segs[k].road) Log("gap check: road piece %.1f %.1f -> %.1f %.1f part %d", segs[k].a.x, segs[k].a.z, segs[k].b.x, segs[k].b.z, root((int)k));
+    }
     // Repair plan: one footpath per cut-off piece of net (or per lone entrance), from its point nearest to the
     // street's net, straight, not through a building of the plan. Targets: the street net's footpaths and the edge of
     // its carriageway (a footpath meeting a street joins its pavement).
@@ -937,7 +945,7 @@ void CheckGaps(const InstantRun& r) {
         for (float t = 2.5f; t < len - 1.0f; t += 1.0f) {
             V3 m{ p.x + (q.x - p.x) * t / len, 0, p.z + (q.z - p.z) * t / len };
             V2 l = WorldToLocal(g_area, m);
-            for (auto& bb : g_plan.buildings) if (fabsf(l.u - bb.u) < bb.w / 2 + 3.0f && fabsf(l.v - bb.v) < bb.d / 2 + 3.0f) return true;   // the apron too
+            for (auto& bb : g_plan.buildings) if (fabsf(l.u - bb.u) < bb.w / 2 + 3.0f && fabsf(l.v - bb.v) < bb.d / 2 + 6.0f) return true;   // the zone with its apron: the game cuts a path there
         }
         return false;
     };

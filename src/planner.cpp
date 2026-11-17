@@ -33,7 +33,7 @@ bool PolyContains(const std::vector<V2>& poly, float u, float v) {
 
 namespace {
 struct Item { int type; float w, d; bool rotated; int rot; };
-const float kApron = 9.0f, kSide = 3.0f;   // extra depth / width the game needs beyond the model's bounding box
+const float kApron = 8.0f, kSide = 1.5f;   // extra depth / width the game needs beyond the model's bounding box
 
 // A model point after "rot" quarter turns, in plan axes (model X along +u, +v, -u, -v).
 V2 Turn(int rot, float x, float z) {
@@ -216,11 +216,31 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 t.rot = (it.rot + 1) & 3; t.rotated = !it.rotated;
                 if (t.d <= vhi - vlo + 0.01f && u + t.w <= R - margin) { it = t; side = true; }
             }
+            // A utility node with vehicles (substation booth, transformer yard, heat point...) is turned so that its road
+            // connection looks at the nearest street and stands on the street side of the row: its driveway is a
+            // short straight stub. Its connections may be on a short side, so any of the four turns is allowed.
+            bool roadTurn = false; int roadRot = 0; float rfw = 0, rfd = 0, roadWant = 1;
+            if (util && all[it.type].needsRoad && roadHalf > 0) {
+                const BuildingType& t = all[it.type];
+                float pu = u + it.w / 2, pv = (vlo + vhi) / 2, nearV = roadV, bd = 1e9f;
+                for (auto& rd : r.roads) if (fabsf(rd.v1 - rd.v2) < 0.01f && fabsf(rd.v1 - pv) < bd) { bd = fabsf(rd.v1 - pv); nearV = rd.v1; }
+                roadWant = nearV < pv ? -1.0f : 1.0f;
+                for (auto& c : t.conns) if (c.kind == 1) {
+                    float l = hypotf(c.dx, c.dz);
+                    for (int rr = 0; rr < 4 && l > 0.01f; ++rr) if (Turn(rr, c.dx, c.dz).v * roadWant > 0.7f * l) { roadRot = rr; roadTurn = true; break; }
+                    break;
+                }
+                if (roadTurn) {
+                    rfw = (roadRot & 1) ? t.sz : t.sx; rfd = (roadRot & 1) ? t.sx : t.sz;
+                    it.w = rfw + kSide; it.d = rfd + 2.0f; it.rot = roadRot; it.rotated = (roadRot & 1) != 0;
+                }
+            }
             if (it.d > vhi - vlo + 0.01f) { if (util) { pending.pop_front(); continue; } break; }
             if (u + it.w > R - margin) break;
             if (u < spineU + corridor && u + it.w > spineU - corridor) { u = spineU + corridor; continue; }  // leave the spine free
             float cu = u + it.w / 2;
             float cv = north ? vlo + it.d / 2 : vhi - it.d / 2;
+            if (roadTurn) cv = roadWant < 0 ? vlo + it.d / 2 : vhi - it.d / 2;        // pressed to the street side
             if (util && all[it.type].needsRoad) {
                 // a node with vehicles only in a row facing a street: anywhere else its driveway loops round the rows
                 float gapToStreet = 1e9f;
@@ -232,7 +252,8 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             if (heightRange(cu, cv, it.w, it.d) > in.maxDiff) { u += 6; ++r.steepSkipped; continue; }   // too steep here
             Placed pb{ it.type, cu, cv, it.w - (side ? kApron : kSide), it.d - (side ? kSide : kApron), it.rotated };
             pb.rot = side ? it.rot : (it.rot + (north ? 2 : 0)) & 3;   // the entrance looks at this row's footpath
-            if (all[it.type].needsRoad && roadHalf > 0) {
+            if (roadTurn) { pb.rot = roadRot; pb.w = rfw; pb.d = rfd; pb.rotated = (roadRot & 1) != 0; }
+            else if (all[it.type].needsRoad && roadHalf > 0) {
                 // a building that needs vehicles turns its road connection toward the street (a half turn keeps the
                 // footprint), so its driveway is short and direct instead of running round the rows
                 for (auto& c : all[it.type].conns) if (c.kind == 1) {
