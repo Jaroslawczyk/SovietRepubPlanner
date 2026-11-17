@@ -1109,7 +1109,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     if (price >= 0 && (best < 0 || price < best)) { best = price; bestLine = line; }
                 }
                 if (!has) continue;
-                if (best < 0) { ++(mode ? r.noRoad : r.noPath); continue; }
+                if (best < 0) { ++(mode ? r.noRoad : r.noPath); Log("plan: no %s for '%s' at u %.0f v %.0f", mode ? "driveway" : "footpath", t.id.c_str(), b.u, b.v); continue; }
                 (mode ? r.roadPts : r.pedPts).push_back(bestLine[0]);
                 // the game refuses pieces shorter than ~9 m (road) / ~5 m (footpath): a short leg is folded into its
                 // neighbour, so the corner becomes one slanted piece

@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
     if (argc > 4) { in.houseTypes.clear(); for (int k = 4; k < argc; ++k) in.houseTypes.push_back(Find(argv[k])); }
     static std::vector<ServiceRule> svc = {
         { "SHOP", "shop", true, 2000, Find("shop_prior") }, { "KINDERGARTEN", "kg", true, 2500, Find("kindergarten") },
-        { "SCHOOL", "school", true, 3000, Find("school") } };
+        { "SCHOOL", "school", true, 3000, Find("school") }, { "GAS_STATION", "gas", true, 3000, Find("gas_station") }, { "HOSPITAL", "hosp", true, 3000, Find("hospital") } };
     in.services = &svc;
     in.roadType = 1; in.roadV = H / 2; in.stopsU = { W / 2 + 40 }; in.stopType = Find("busstop_big");
     if (in.stopType < 0) in.stopType = Find("bus_stop");
