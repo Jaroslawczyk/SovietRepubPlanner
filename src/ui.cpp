@@ -48,7 +48,7 @@ std::vector<ServiceRule> g_services = {
 };
 int   g_population = 1000;
 float g_gap = 8.0f;
-int   g_density = 50;               // 0..100: gaps between buildings and rows
+int   g_density = 75;               // 0..100: gaps between buildings and rows
 bool  g_fillAll = false;
 int   g_roadType = 1;
 float g_roadV = 0;
@@ -60,6 +60,9 @@ const char* const kUtilNode[4] = { "водораспределитель", "ка
 const char* const kUtilUnit[4] = { "ед. бака", "ед. бака", "ед. бака", "МВт" };
 const ImU32 kUtilCol[4] = { IM_COL32(70, 150, 255, 255), IM_COL32(165, 110, 55, 255), IM_COL32(245, 85, 60, 255), IM_COL32(250, 220, 60, 255) };
 bool  g_utilShow[4] = { false, false, false, false };
+bool  g_utilExisting[4] = { true, true, true, true };    // node buildings already standing nearby serve the district
+float g_polA = 0, g_polB = 0; bool g_polOk = false;   // worst air pollution cell under the district (game grid)
+int   g_rebuilds = 0; char g_rebuildNote[96] = "";
 bool  g_utilBuild[4] = { false, false, false, false };   // the network goes into the plan and gets built
 bool  g_powerUnder = false;                               // medium-voltage lines as underground cable
 float g_utilRadius[4] = { 250, 250, 380, 250 };   // the game links a building to a node closer than this (2D distance; SOVIET64.exe 0x441340, 0x441600, 0x440d90, 0x4406d0)
@@ -81,7 +84,9 @@ struct Cell { V3 c[4]; ImU32 col; };
 std::vector<Quad> g_quads;
 std::vector<Cell> g_slope, g_roadQuads;
 std::vector<std::vector<V3>> g_lines, g_outline;
-std::vector<V3> g_stopPts, g_crossPts, g_pedPts, g_roadPts;
+std::vector<V3> g_stopPts, g_crossPts, g_pedPts, g_roadPts, g_gapPts;   // gap: an entrance not joined to the street after a build
+std::vector<std::pair<V3, V3>> g_gapTried; // repair links already tried in this build (the game refused them)
+std::vector<std::pair<V3, V3>> g_gapFix;   // entrance -> nearest point of the street's footpath net
 std::vector<std::vector<V3>> g_driveLines;
 int   g_lineMode = 2;               // unused: the game only accepts press-drag-release               // how the game's line tool is driven: 0 two clicks a piece, 1 chain, 2 hold and drag
 
@@ -202,8 +207,8 @@ void Regenerate() {
     const Area& a = g_area;
     PlanInput in;
     in.poly = a.local; in.population = g_population;
-    in.gap = 14.0f - g_density * 0.11f;              // density 0 -> 14 m, 100 -> 3 m between buildings
-    in.band = 9.0f - g_density * 0.04f;              // and 9 -> 5 m for the footpath strip between rows
+    in.gap = 10.0f - g_density * 0.085f;             // density 0 -> 10 m, 100 -> 1.5 m between buildings (aprons come on top)
+    in.band = 8.0f - g_density * 0.035f;             // and 8 -> 4.5 m for the footpath strip between rows
     in.fillAll = g_fillAll;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
@@ -211,6 +216,16 @@ void Regenerate() {
     for (size_t t = 0; t < catalog::All().size(); ++t) if (kStopIds[g_stopKind][0] && catalog::All()[t].id == kStopIds[g_stopKind]) in.stopType = (int)t; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; if (k >= 2) in.utilPerPerson[k] = g_utilNorm[k]; }
     in.powerTrafo = g_powerTrafo; in.utilChain = g_utilChain;
+    {   // node buildings the player already has: they serve houses in their radius, the plan adds none there
+        static const char* nodeIds[4][3] = { { "water_substation", "", "" }, { "sewage_substation", "", "" },
+                                             { "heating_endstation_small", "heating_endstation", "heating_endstation_big" }, { "eletric_substation", "", "" } };
+        std::vector<eng::WorldBld> world; eng::ListBuildings(world);
+        for (auto& w : world)
+            for (int k = 0; k < 4; ++k) {
+                if (!g_utilExisting[k]) continue;
+                for (auto* id : nodeIds[k]) if (*id && w.id == id) { in.extNodes[k].push_back(WorldToLocal(a, w.pos)); break; }
+            }
+    }
     in.occupied = [&a](float u, float v) { return eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0; };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     {   // connections of the buildings that already stand near the district, for feeding its networks
@@ -237,6 +252,20 @@ void Regenerate() {
         if (lastN != in.extPorts.size()) { lastN = in.extPorts.size(); Log("plan: %d standing buildings, %d of their ports can feed the district", (int)world.size(), (int)lastN); }
     }
     g_plan = MakePlan(in);
+    {   // air pollution over the district: the worst cell of the game's 200 m grid under the outline
+        g_polA = g_polB = 0; g_polOk = false;
+        static bool gridLogged = false; if (!gridLogged) { gridLogged = true; eng::LogPollutionGrid(); }
+        for (float u = a.minU; u <= a.maxU; u += 50)
+            for (float v = a.minV; v <= a.maxV; v += 50) {
+                if (!PolyContains(a.local, u, v)) continue;
+                V3 w = LocalToWorld(a, u, v, 0); float pa, pb;
+                if (eng::PollutionAt(w.x, w.z, pa, pb)) { g_polOk = true; g_polA = std::max(g_polA, pa); g_polB = std::max(g_polB, pb); }
+            }
+        static float lastA = -1, lastB = -1;
+        if (g_polOk && (g_polA != lastA || g_polB != lastB)) { lastA = g_polA; lastB = g_polB; Log("pollution over the district: max %.4f / %.4f (cell floats 0 / 1)", g_polA, g_polB); }
+    }
+    if (g_rebuilds) snprintf(g_rebuildNote, sizeof(g_rebuildNote), "План пересобран (%d): %d зданий, %d отброшено как оторванные.", g_rebuilds, (int)g_plan.buildings.size(), g_plan.cutOff);
+    if (g_plan.cutOff) Log("plan: %d buildings and %d footpaths dropped - not joined to the street net", g_plan.cutOff, g_plan.cutOffPaths);
     {
         std::vector<eng::WorldBld> world; eng::ListBuildings(world);
         const auto& all = catalog::All();
@@ -309,7 +338,11 @@ void Regenerate() {
         }
     };
     for (auto& p : g_plan.drives) strip(p.u1, p.v1, p.u2, p.v2, 8.0f, IM_COL32(70, 70, 78, 200));
-    for (auto& p : g_plan.paths) strip(p.u1, p.v1, p.u2, p.v2, 2.5f, IM_COL32(205, 205, 200, 150));
+    for (size_t k = 0; k < g_plan.paths.size(); ++k) {
+        const auto& p = g_plan.paths[k];
+        if (k < g_plan.pathBuild.size() && !g_plan.pathBuild[k]) continue;      // the street's edge: nothing built
+        strip(p.u1, p.v1, p.u2, p.v2, 2.5f, IM_COL32(205, 205, 200, 150));
+    }
     for (auto& s : g_plan.pedPts) g_pedPts.push_back(LocalToWorld(a, s.u, s.v, 0.5f));
     for (auto& s : g_plan.roadPts) g_roadPts.push_back(LocalToWorld(a, s.u, s.v, 0.5f));
     for (auto& s : g_plan.stops) g_stopPts.push_back(LocalToWorld(a, s.u, s.v, 1.0f));
@@ -410,6 +443,7 @@ void DrawWorld() {
     for (auto& c : g_pedPts) if (Proj(c, s)) {          // footpath entrance of a building
         dl->AddCircleFilled(s, 4.5f, IM_COL32(60, 200, 90, 255)); dl->AddCircle(s, 4.5f, IM_COL32(20, 20, 20, 255), 0, 1.2f);
     }
+    for (auto& c : g_gapPts) if (Proj(c, s)) { dl->AddCircle(s, 11.0f, IM_COL32(220, 30, 30, 255), 0, 3.0f); }   // gap found after the build
     for (auto& c : g_roadPts) if (Proj(c, s)) {         // road connection of a building
         dl->AddRectFilled(ImVec2(s.x - 5, s.y - 5), ImVec2(s.x + 5, s.y + 5), IM_COL32(255, 150, 40, 255));
         dl->AddRect(ImVec2(s.x - 5, s.y - 5), ImVec2(s.x + 5, s.y + 5), IM_COL32(20, 20, 20, 255), 0, 0, 1.2f);
@@ -713,11 +747,13 @@ void LineButton(const char* what, const char* tool, LineJob& job) {
 // "paste area"): streets, buildings, driveways, footpaths. Buildings the game refuses because the ground is
 // uneven get their pad levelled and one more try.
 struct InstantRun {
-    int phase = 0;                      // 0 idle, 1 first batch, 2 levelling, 3 retry batch
+    int phase = 0;                      // 0 idle, 1 first batch, 2 levelling, 3 retry batch, 4 gap repair
+    int repaired = 0;                   // gap repair rounds done (up to 3, each tries other links)
     std::vector<eng::InstantJob> jobs;
     std::vector<int> plan;              // per job: index of the plan building, -1 for lines
     std::vector<int> retry;             // plan buildings waiting for levelling
     std::vector<eng::InstantJob> lineRetry;     // utility lines that failed while some buildings were still missing
+    std::vector<eng::InstantJob> built;         // road / footpath pieces the game accepted (checked in its network)
     int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0, nOk = 0, nAll = 0;
     std::string note;
 } g_inst;
@@ -779,6 +815,7 @@ eng::InstantJob InstantBuilding(const Placed& b) {
 }
 void InstantStart() {
     g_inst = InstantRun();
+    g_gapPts.clear(); g_gapTried.clear();
     std::vector<PathSeg> rd;        // streets and driveways cut at each other's ends, so they join
     for (auto& s : g_plan.roads) rd.push_back({ s.u1, s.v1, s.u2, s.v2 });
     const int nStreets = (int)rd.size();
@@ -807,7 +844,22 @@ void InstantStart() {
         }
         return false;
     };
-    for (auto& pc : Noded(g_plan.paths)) if (!alongStreet(pc.first)) InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
+    // trunk first (row footpaths and the links between rows and to the street), then the links to the entrances,
+    // so every entrance joins a line that already stands
+    {
+        const auto pieces = Noded(g_plan.paths);
+        auto isLink = [&](int src) {
+            const auto& p = g_plan.paths[src];
+            for (auto& q : g_plan.pedPts) if (fabsf(q.u - p.u1) + fabsf(q.v - p.v1) < 0.5f || fabsf(q.u - p.u2) + fabsf(q.v - p.v2) < 0.5f) return true;
+            return false;
+        };
+        for (int pass = 0; pass < 2; ++pass)
+            for (auto& pc : pieces) {
+                if (pc.second < (int)g_plan.pathBuild.size() && !g_plan.pathBuild[pc.second]) continue;
+                if (alongStreet(pc.first) || isLink(pc.second) != (pass == 1)) continue;
+                InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
+            }
+    }
     for (auto& s : g_plan.utilLines) {      // after the buildings, so the ends snap to their connections
         // manager offset, type, sub-type, start argument - as logged from the game's own tools
         const int pw = g_powerUnder ? 20 : 10;
@@ -820,6 +872,106 @@ void InstantStart() {
     if (g_inst.jobs.empty()) { g_inst.note = "Нечего строить."; return; }
     eng::QueueInstant(g_inst.jobs);
     g_inst.phase = 1;
+}
+// After a build: which entrances really reach the street over what the game accepted. The net = built streets,
+// driveways and footpaths (plus the street edges people walk on); pieces touch when an end lies on another piece.
+// Entrances outside the street's net are gaps: logged and marked on the map.
+void CheckGaps(const InstantRun& r) {
+    g_gapPts.clear(); g_gapFix.clear();
+    struct S { V3 a, b; bool road; };
+    std::vector<S> segs;
+    for (auto& j : r.built) segs.push_back({ j.a, j.b, j.kind == 1 });
+    if (segs.empty()) return;
+    auto onSeg = [](const S& s, float x, float z, float tol) {
+        float dx = s.b.x - s.a.x, dz = s.b.z - s.a.z, l2 = dx * dx + dz * dz;
+        float t = l2 > 1e-6f ? std::clamp(((x - s.a.x) * dx + (z - s.a.z) * dz) / l2, 0.0f, 1.0f) : 0.0f;
+        return hypotf(s.a.x + dx * t - x, s.a.z + dz * t - z) < tol;
+    };
+    std::vector<int> par(segs.size());
+    for (size_t k = 0; k < par.size(); ++k) par[k] = (int)k;
+    std::function<int(int)> root = [&](int x) { return par[x] == x ? x : par[x] = root(par[x]); };
+    for (size_t a = 0; a < segs.size(); ++a)
+        for (size_t b = a + 1; b < segs.size(); ++b) {
+            float tol = (segs[a].road || segs[b].road) ? (g_roadKind == 2 ? 6.5f : 4.5f) : 1.2f;   // a footpath may end at the street's edge
+            if (onSeg(segs[b], segs[a].a.x, segs[a].a.z, tol) || onSeg(segs[b], segs[a].b.x, segs[a].b.z, tol) ||
+                onSeg(segs[a], segs[b].a.x, segs[b].a.z, tol) || onSeg(segs[a], segs[b].b.x, segs[b].b.z, tol)) par[root((int)a)] = root((int)b);
+        }
+    int mainRoot = -1;
+    for (size_t k = 0; k < segs.size(); ++k) if (segs[k].road) { mainRoot = root((int)k); break; }
+    if (mainRoot < 0) {
+        std::vector<int> cnt(segs.size(), 0); for (size_t k = 0; k < segs.size(); ++k) ++cnt[root((int)k)];
+        for (size_t k = 0; k < segs.size(); ++k) if (mainRoot < 0 || cnt[root((int)k)] > cnt[mainRoot]) mainRoot = root((int)k);
+    }
+    const auto& all = catalog::All();
+    int checked = 0;
+    for (auto& b : g_plan.buildings) {
+        if (b.stop) continue;
+        for (auto& c : all[b.type].conns) {
+            if (c.kind != 0) continue;
+            float cs[4][2] = { { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 } };     // quarter turns, as the planner turns models
+            float cu = c.x * cs[b.rot & 3][0] - c.z * cs[b.rot & 3][1], cv = c.x * cs[b.rot & 3][1] + c.z * cs[b.rot & 3][0];
+            V3 w = LocalToWorld(g_area, b.ou + cu, b.ov + cv, 0);
+            if (!(eng::Occupied(LocalToWorld(g_area, b.u, b.v, 0).x, LocalToWorld(g_area, b.u, b.v, 0).z) & 1)) break;   // the building is not there
+            ++checked;
+            bool ok = false;
+            for (size_t k = 0; k < segs.size() && !ok; ++k) if (root((int)k) == mainRoot && onSeg(segs[k], w.x, w.z, 3.0f)) ok = true;
+            if (!ok) { g_gapPts.push_back(w); Log("gap: entrance of '%s' at %.1f %.1f is not joined to the street", all[b.type].id.c_str(), w.x, w.z); }
+            break;
+        }
+    }
+    Log("gap check: %d entrances checked, %d not joined, %d built pieces", checked, (int)g_gapPts.size(), (int)segs.size());
+    // Repair plan: one footpath per cut-off piece of net (or per lone entrance), from its point nearest to the
+    // street's net, straight, not through a building of the plan. Targets: the street net's footpaths and the edge of
+    // its carriageway (a footpath meeting a street joins its pavement).
+    auto blocked = [&](V3 p, V3 q) {
+        float len = hypotf(q.x - p.x, q.z - p.z);
+        for (float t = 2.5f; t < len - 1.0f; t += 1.0f) {
+            V3 m{ p.x + (q.x - p.x) * t / len, 0, p.z + (q.z - p.z) * t / len };
+            V2 l = WorldToLocal(g_area, m);
+            for (auto& bb : g_plan.buildings) if (fabsf(l.u - bb.u) < bb.w / 2 + 3.0f && fabsf(l.v - bb.v) < bb.d / 2 + 3.0f) return true;   // the apron too
+        }
+        return false;
+    };
+    std::vector<V3> targets;
+    for (size_t k = 0; k < segs.size(); ++k) {
+        if (root((int)k) != mainRoot) continue;
+        const S& sg = segs[k];
+        float len = hypotf(sg.b.x - sg.a.x, sg.b.z - sg.a.z);
+        for (float t = 0; t <= len + 0.01f; t += 4.0f) {
+            V3 p{ sg.a.x + (sg.b.x - sg.a.x) * std::min(t, len) / std::max(len, 0.01f), 0, sg.a.z + (sg.b.z - sg.a.z) * std::min(t, len) / std::max(len, 0.01f) };
+            if (!sg.road) { targets.push_back(p); continue; }
+            float nx = -(sg.b.z - sg.a.z) / std::max(len, 0.01f), nz = (sg.b.x - sg.a.x) / std::max(len, 0.01f), off = g_roadKind == 2 ? 6.0f : 4.5f;
+            targets.push_back({ p.x + nx * off, 0, p.z + nz * off });
+            targets.push_back({ p.x - nx * off, 0, p.z - nz * off });
+        }
+    }
+    std::vector<int> done;
+    for (auto& w : g_gapPts) {
+        int comp = -1;
+        for (size_t k = 0; k < segs.size(); ++k) if (onSeg(segs[k], w.x, w.z, 3.0f)) { comp = root((int)k); break; }
+        if (comp >= 0 && std::find(done.begin(), done.end(), comp) != done.end()) continue;
+        std::vector<V3> src;
+        if (comp < 0) src.push_back(w);
+        else {
+            done.push_back(comp);
+            for (size_t k = 0; k < segs.size(); ++k) {
+                if (root((int)k) != comp) continue;
+                const S& sg = segs[k]; float len = hypotf(sg.b.x - sg.a.x, sg.b.z - sg.a.z);
+                for (float t = 0; t <= len + 0.01f; t += 4.0f) src.push_back({ sg.a.x + (sg.b.x - sg.a.x) * std::min(t, len) / std::max(len, 0.01f), 0, sg.a.z + (sg.b.z - sg.a.z) * std::min(t, len) / std::max(len, 0.01f) });
+            }
+        }
+        float bd = 1e9f; V3 bs{}, bt{};
+        for (auto& p : src) for (auto& q : targets) {
+            float d = hypotf(q.x - p.x, q.z - p.z);
+            if (d < 5.5f || d >= bd || d > 120) continue;          // the game refuses footpaths under ~5 m
+            bool tried = false;
+            for (auto& tr : g_gapTried) if (hypotf(tr.first.x - p.x, tr.first.z - p.z) + hypotf(tr.second.x - q.x, tr.second.z - q.z) < 8) { tried = true; break; }
+            if (tried || blocked(p, q)) continue;
+            bd = d; bs = p; bt = q;
+        }
+        if (bd < 1e8f) g_gapFix.push_back({ bs, bt });
+        else Log("gap repair: no free straight way for the piece at %.1f %.1f", w.x, w.z);
+    }
 }
 void InstantTick() {
     InstantRun& r = g_inst;
@@ -843,9 +995,9 @@ void InstantTick() {
             if (r.phase == 1) ++r.bAll;
             if (codes[i] == -1) ++r.bOk;
             else if (r.phase == 1 && codes[i] == 10) r.retry.push_back(r.plan[i]);
-        } else if (j.kind == 1) { ++r.rAll; if (codes[i] == 1) ++r.rOk; }
+        } else if (j.kind == 1) { ++r.rAll; if (codes[i] == 1) { ++r.rOk; r.built.push_back(j); } }
         else if (j.kind == 3) { if (r.phase == 1) ++r.nAll; if (codes[i] == 1) ++r.nOk; else if (r.phase == 1) failedLines.push_back(j); }
-        else { ++r.pAll; if (codes[i] == 1) ++r.pOk; }
+        else { ++r.pAll; if (codes[i] == 1) { ++r.pOk; r.built.push_back(j); } }
     }
     if (r.phase == 1 && !r.retry.empty()) {
         r.lineRetry = failedLines;
@@ -862,9 +1014,27 @@ void InstantTick() {
         r.phase = 2;
         return;
     }
+    CheckGaps(r);
+    if (r.repaired < 3 && !g_gapFix.empty()) {
+        // repair: every entrance left out gets one straight footpath to the nearest point of the net that stands,
+        // then the check runs again
+        ++r.repaired;
+        for (auto& fx : g_gapFix) g_gapTried.push_back(fx);
+        r.jobs.clear(); r.plan.clear();
+        for (auto& fx : g_gapFix) {
+            eng::InstantJob j; j.kind = 2; j.lineType = g_pathKind - 1; j.a = fx.first; j.b = fx.second;
+            r.jobs.push_back(j); r.plan.push_back(-1);
+            Log("gap repair: footpath %.1f %.1f -> %.1f %.1f", j.a.x, j.a.z, j.b.x, j.b.z);
+        }
+        eng::QueueInstant(r.jobs);
+        r.phase = 4;
+        return;
+    }
     char t[260];
     snprintf(t, sizeof(t), "Построено (проверено по сети игры): зданий %d из %d, дорог %d из %d отрезков, дорожек %d из %d отрезков, сетей %d из %d отрезков.", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll);
-    r.note = t; r.phase = 0;
+    r.note = t;
+    if (!g_gapPts.empty()) { char g[160]; snprintf(g, sizeof(g), " Разрывы: %d вход(ов) не связаны с улицей — отмечены красным.", (int)g_gapPts.size()); r.note += g; }
+    r.phase = 0;
     Log("instant build summary: buildings %d/%d, roads %d/%d, footpaths %d/%d, utility lines %d/%d", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll);
 }
 void InstantUi() {
@@ -875,6 +1045,14 @@ void InstantUi() {
         ImGui::Button(r.phase == 2 ? "Выравниваю площадки под отклонённые здания…" : "Строю…", ImVec2(-FLT_MIN, 0));
         ImGui::EndDisabled();
         return;
+    }
+    {   // one switch for all networks; the Сети tab has each one, its node buildings and their radii
+        bool anyU = g_utilBuild[0] || g_utilBuild[1] || g_utilBuild[2] || g_utilBuild[3];
+        if (ImGui::Checkbox("строить коммуникации (вода, канализация, отопление, электричество)", &anyU)) {
+            for (int k = 0; k < 4; ++k) g_utilBuild[k] = g_utilShow[k] = anyU;
+            g_dirty = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Узлы: водораспределитель, канализационная станция, тепловой пункт, подстанция;\nпо отдельности и с радиусами — во вкладке «Сети». Уже стоящие узлы рядом учитываются.");
     }
     char t[160]; snprintf(t, sizeof(t), "Построить всё сразу — %d зданий, улицы, подъезды, дорожки", (int)g_plan.buildings.size());
     ImGui::BeginDisabled(g_plan.buildings.empty() && g_plan.paths.empty());
@@ -982,6 +1160,8 @@ void TabUtils() {
         ImGui::PopStyleColor();
         ImGui::SameLine(); ImGui::Checkbox("показывать", &g_utilShow[k]);
         if (k == 3) { ImGui::SameLine(); ImGui::Checkbox("кабель под землёй", &g_powerUnder); ImGui::SameLine(); if (ImGui::Checkbox("своя подстанция", &g_powerTrafo)) g_dirty = true; }
+        if (ImGui::Checkbox("учитывать уже стоящие узлы (свои или поставлю сам)", &g_utilExisting[k])) g_dirty = true;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Узлы этой сети, которые уже стоят рядом, обслуживают дома в своём радиусе —\nтам план новых узлов не ставит. Чтобы поставить узел самому, поставьте его и пересоберите план.");
         ImGui::SetNextItemWidth(200);
         if (ImGui::SliderFloat("радиус узла, м", &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
         ImGui::SetNextItemWidth(120);
@@ -1030,7 +1210,15 @@ void Footer() {
         if (g_plan.unplaced > 0) ImGui::TextColored(red, "Вмещается около %d жит., не влезло зданий: %d — нужен участок больше.", g_plan.capacity, g_plan.unplaced);
         else if (g_plan.steepSkipped > 0 || g_plan.busySkipped > 0) ImGui::TextDisabled("Обойдено: крутые места %d раз, существующая застройка %d раз.", g_plan.steepSkipped, g_plan.busySkipped);
     }
-    if (ImGui::Button("Пересобрать план", ImVec2(-FLT_MIN, 0)) && g_area.ok) g_dirty = g_areaChanged = true;
+    if (g_polOk) {
+        if (g_polA > 0.001f || g_polB > 0.001f) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрязнение воздуха над участком: %.3f / %.3f (сетка игры, 200 м) — жителям вредно.", g_polA, g_polB);
+        else ImGui::TextDisabled("Воздух над участком чистый (сетка загрязнения игры).");
+    }
+    if (ImGui::Button("Пересобрать план", ImVec2(-FLT_MIN, 0))) {
+        if (!g_area.ok) snprintf(g_rebuildNote, sizeof(g_rebuildNote), "Сначала нарисуйте участок на карте.");
+        else { g_dirty = g_areaChanged = true; ++g_rebuilds; g_rebuildNote[0] = 0; }
+    }
+    if (g_rebuildNote[0]) ImGui::TextDisabled("%s", g_rebuildNote);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Заново читает рельеф и расставляет здания, улицу и дорожки по всему участку.");
     static bool levelling = false;
     int pending = eng::LevelPending();
@@ -1354,6 +1542,11 @@ void Draw() {
     if (!g_inited) return;
     if (!eng::Ready()) { g_pick = false; g_dragStop = g_hoverStop = -1; }
     SelfTest();
+    {   // test helper: a file DistrictPlanner.hide closes the panel and its overlay (screenshots of the bare game)
+        static DWORD lastHide = 0;
+        if (GetTickCount() - lastHide > 1000) { lastHide = GetTickCount();
+            if (DeleteFileW((GameDir() + L"DistrictPlanner.hide").c_str())) g_open = !g_open; }
+    }
     if (g_open && !eng::ScriptActive()) Panel();        // the line script needs the real mouse over the map
     if (g_dirty && (eng::Ready() || !g_area.ok)) {
         Regenerate();

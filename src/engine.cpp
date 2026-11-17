@@ -1145,4 +1145,42 @@ bool ScreenToTerrain(float sx, float sy, float sw, float sh, V3& out) {
     return false;
 }
 
+// Air pollution: the game keeps a grid of 200 m cells (allocated at 0x4d5470, loaded from pollution.bin at 0x4d5da0):
+// pointer exe+0x9e6fb8, map size x/z floats at +0x9e6fc0/+0x9e6fc4, cells along x / z ints at +0x9e6fc8/+0x9e6fcc.
+// Cell i = row * nx + col, row along world X, col along world Z, cell centre = index * 200 - size / 2 + 100.
+// 12 bytes per cell: two floats, then two flag bytes (cell outside the map's inner bounds).
+void LogPollutionGrid() {
+    if (!gx::Supported()) return;
+    BYTE* B = gx::Base();
+    __try {
+        BYTE* grid = *(BYTE**)(B + 0x9e6fb8);
+        int nx = *(int*)(B + 0x9e6fc8), nz = *(int*)(B + 0x9e6fcc);
+        float sx = *(float*)(B + 0x9e6fc0), sz = *(float*)(B + 0x9e6fc4);
+        if (!grid) { Log("pollution grid: none"); return; }
+        float ma = 0, mb = 0; int na = 0, nb = 0, ia = -1;
+        for (int i = 0; i < nx * nz; ++i) {
+            const float* c = (const float*)(grid + (size_t)i * 12);
+            if (c[0] > 0) { ++na; if (c[0] > ma) { ma = c[0]; ia = i; } }
+            if (c[1] > 0) { ++nb; mb = std::max(mb, c[1]); }
+        }
+        Log("pollution grid: %d x %d cells over %.0f x %.0f m; float0 >0 in %d cells (max %.4f at row %d col %d), float1 >0 in %d (max %.4f)",
+            nx, nz, sx, sz, na, ma, ia >= 0 ? ia / nx : -1, ia >= 0 ? ia % nx : -1, nb, mb);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { Log("pollution grid: read failed"); }
+}
+bool PollutionAt(float x, float z, float& a, float& b) {
+    a = b = 0;
+    if (!gx::Supported()) return false;
+    BYTE* B = gx::Base();
+    __try {
+        BYTE* grid = *(BYTE**)(B + 0x9e6fb8);
+        float sx = *(float*)(B + 0x9e6fc0), sz = *(float*)(B + 0x9e6fc4);
+        int nx = *(int*)(B + 0x9e6fc8), nz = *(int*)(B + 0x9e6fcc);
+        if (!grid || nx <= 0 || nz <= 0) return false;
+        int row = (int)floorf((x + sx / 2) / 200.0f), col = (int)floorf((z + sz / 2) / 200.0f);
+        if (row < 0 || col < 0 || row >= nz || col >= nx) return false;
+        const float* c = (const float*)(grid + (size_t)(row * nx + col) * 12);
+        a = c[0]; b = c[1];
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
 } // namespace eng

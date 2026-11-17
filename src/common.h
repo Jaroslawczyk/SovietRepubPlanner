@@ -22,6 +22,10 @@ namespace eng {
     bool WorldToScreen(const V3& w, float sw, float sh, float& sx, float& sy);
     bool ScreenToTerrain(float sx, float sy, float sw, float sh, V3& out);
     float TerrainHeight(float x, float z);
+    // air pollution grid of the game (200 m cells, see docs/internals.md): the two floats of the cell at (x, z);
+    // false when the grid is not there
+    bool PollutionAt(float x, float z, float& a, float& b);
+    void LogPollutionGrid();                        // debug: size and maxima of the whole grid
     void QueueLevel(const std::vector<V3>& pts);    // flatten: each point is x, target height, z
     void LevelTick();                               // one levelling pass; call on the render thread
     int  LevelPending();                            // points still being levelled, 0 = idle
@@ -130,7 +134,8 @@ struct PlanInput {
     int   stopType = -1;
     bool  crossRoad = false;                        // a second street across the first one (crossroads in the middle)                            // catalog index of the stop building (bus, trolleybus, tram); -1 = only mark the place
     float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
-    bool  utilBuild[4] = {};                        // put this network's buildings and lines into the plan
+    bool  utilBuild[4] = {};
+    std::vector<V2> extNodes[4];                    // node buildings that already stand (local frame): they serve houses in reach                        // put this network's buildings and lines into the plan
     bool  utilChain = false;                        // also put switches and pipes between the nodes (the game bends such pipes into loops)
     bool  powerTrafo = true;                        // put a transformer for the substations too
     float utilRadius[4] = { 250, 250, 380, 250 };   // water, sewage, heating, power: how far a node serves, m (from the exe, see docs)
@@ -164,7 +169,8 @@ struct PlanResult {
     std::vector<V2>      stops, crossings;
     std::vector<PathSeg> drives;                    // driveways from the street to road connections
     std::vector<V2>      pedPts, roadPts;           // connection points that got a footpath / a driveway
-    int noPath = 0, noRoad = 0;                     // buildings left without a footpath / without a needed road
+    int noPath = 0, noRoad = 0;
+    int cutOff = 0, cutOffPaths = 0;                // buildings / footpaths dropped: not joined to the street net                     // buildings left without a footpath / without a needed road
     int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0, jobs = 0, busySkipped = 0;
     std::vector<V2> utilNodes[4];                   // substations next to the streets
     int   utilUncovered[4] = {};                    // buildings out of reach of every node

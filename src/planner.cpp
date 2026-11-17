@@ -70,7 +70,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     if (maxU - minU < 20 || maxV - minV < 20) return r;
 
     const float margin = 5.0f, band = std::clamp(in.band, 4.0f, 12.0f), gap = in.gap;
-    float corridor = 4.5f;
+    float corridor = 6.5f;      // half of the free passage kept for the footpath that joins the rows to the street
     const float crossU = (minU + maxU) / 2;
 
     // what to build: services first (they end up next to the street), then houses round-robin
@@ -333,7 +333,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     auto blocked = [&](float u, float v1, float v2) {
         if (v1 > v2) std::swap(v1, v2);
         for (auto& b : r.buildings)
-            if (fabsf(b.u - u) < b.w / 2 + 1.5f && b.v + b.d / 2 > v1 && b.v - b.d / 2 < v2) return true;
+            if (fabsf(b.u - u) < b.w / 2 + 3.5f && b.v + b.d / 2 > v1 && b.v - b.d / 2 < v2) return true;   // the game refuses a path along a building wall (its apron)
         return false;
     };
     auto link = [&](const StripInfo& a, const StripInfo& b) {
@@ -517,6 +517,55 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         }
         r.paths.insert(r.paths.end(), extra.begin(), extra.end());
 
+        // Connectivity of the plan: every building must reach the street (or, without a street, the main footpath
+        // net). Lines touch when an end of one lies on the other. A house whose entrance is in a piece cut off from
+        // the rest is dropped together with its link - no lone houses far away.
+        {
+            std::vector<PathSeg> segs = r.paths;
+            const size_t nP = segs.size();
+            for (auto& rd : r.roads) segs.push_back({ rd.u1, rd.v1, rd.u2, rd.v2 });
+            for (auto& dv : r.drives) segs.push_back(dv);
+            std::vector<int> par(segs.size());
+            for (size_t k = 0; k < par.size(); ++k) par[k] = (int)k;
+            std::function<int(int)> root = [&](int x) { return par[x] == x ? x : par[x] = root(par[x]); };
+            auto onSeg = [](const PathSeg& sg, float u, float v, float tol) {
+                float du = sg.u2 - sg.u1, dv = sg.v2 - sg.v1, l2 = du * du + dv * dv;
+                float t = l2 > 1e-6f ? std::clamp(((u - sg.u1) * du + (v - sg.v1) * dv) / l2, 0.0f, 1.0f) : 0.0f;
+                return hypotf(sg.u1 + du * t - u, sg.v1 + dv * t - v) < tol;
+            };
+            for (size_t a = 0; a < segs.size(); ++a)
+                for (size_t b = a + 1; b < segs.size(); ++b) {
+                    const float tol = (a >= nP || b >= nP) ? 7.0f : 1.0f;    // a street is wide: a pavement line touches it
+                    if (onSeg(segs[b], segs[a].u1, segs[a].v1, tol) || onSeg(segs[b], segs[a].u2, segs[a].v2, tol) ||
+                        onSeg(segs[a], segs[b].u1, segs[b].v1, tol) || onSeg(segs[a], segs[b].u2, segs[b].v2, tol)) par[root((int)a)] = root((int)b);
+                }
+            // the main net: the one holding the streets, or the biggest one
+            std::vector<int> cnt(segs.size(), 0);
+            for (size_t k = 0; k < segs.size(); ++k) ++cnt[root((int)k)];
+            int mainRoot = -1;
+            if (segs.size() > nP) mainRoot = root((int)nP);
+            else for (size_t k = 0; k < segs.size(); ++k) if (mainRoot < 0 || cnt[root((int)k)] > cnt[mainRoot]) mainRoot = root((int)k);
+            if (mainRoot >= 0) {
+                std::vector<Placed> keep;
+                for (auto& b : r.buildings) {
+                    const BuildingType& t = all[b.type];
+                    bool hasPed = false, ok = false;
+                    for (auto& c : t.conns) {
+                        if (c.kind != 0) continue;
+                        hasPed = true;
+                        V2 o = Turn(b.rot, c.x, c.z); o.u += b.ou; o.v += b.ov;
+                        for (size_t k = 0; k < segs.size() && !ok; ++k) if (root((int)k) == mainRoot && onSeg(segs[k], o.u, o.v, 2.5f)) ok = true;
+                    }
+                    if (!hasPed || ok || b.stop || b.net >= 0) { keep.push_back(b); continue; }
+                    ++r.cutOff;
+                }
+                r.buildings.swap(keep);
+                std::vector<PathSeg> np;
+                for (size_t k = 0; k < nP; ++k) { if (root((int)k) == mainRoot) np.push_back(r.paths[k]); else ++r.cutOffPaths; }
+                r.paths.swap(np);
+            }
+        }
+
         // Utility lines by the game's rules: a pipe joins two buildings only, so every node hangs on a switch and the
         // switches form a chain (the last node is fed by the previous switch); a medium-voltage wire runs from a
         // transformer output straight to a substation. The head of each chain is left for the player to feed.
@@ -626,7 +675,20 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             }
         }
     }
-    for (auto& p : r.paths) r.pathLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
+    // a footpath running along a street at the pavement distance is only the walking line: people walk on the edges
+    // of the street itself, nothing is built there
+    r.pathBuild.assign(r.paths.size(), 1);
+    for (size_t k = 0; k < r.paths.size(); ++k) {
+        const PathSeg& p = r.paths[k];
+        for (auto& rd : r.roads) {
+            bool horiz = fabsf(rd.v1 - rd.v2) < 0.01f, phoriz = fabsf(p.v1 - p.v2) < 0.01f;
+            bool vert = fabsf(rd.u1 - rd.u2) < 0.01f, pvert = fabsf(p.u1 - p.u2) < 0.01f;
+            if (!((horiz && phoriz) || (vert && pvert))) continue;
+            float off = horiz ? fabsf(p.v1 - rd.v1) : fabsf(p.u1 - rd.u1);
+            if (off > rd.width / 2 + 0.5f && off < rd.width / 2 + 3.5f) { r.pathBuild[k] = 0; break; }
+        }
+    }
+    for (size_t k = 0; k < r.paths.size(); ++k) if (r.pathBuild[k]) r.pathLength += fabsf(r.paths[k].u2 - r.paths[k].u1) + fabsf(r.paths[k].v2 - r.paths[k].v1);
     for (auto& p : r.drives) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
     for (auto& p : r.roads) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
 
@@ -668,7 +730,9 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             if (b.net >= 0 && !(k == 3 && b.net == 2)) continue;     // heat nodes draw power too
             int reach = 0;
             for (auto& nd : r.utilNodes[k]) if (hypotf(nd.u - b.u, nd.v - b.v) <= in.utilRadius[k]) ++reach;
-            if (!reach) { ++r.utilUncovered[k]; continue; }
+            bool ext = false;
+            for (auto& e : in.extNodes[k]) if (hypotf(e.u - b.u, e.v - b.v) <= in.utilRadius[k]) ext = true;
+            if (!reach) { if (!ext) ++r.utilUncovered[k]; continue; }
             float dem = Demand(all[b.type], in.utilPerPerson[k], k);
             r.utilDemand[k] += dem;
             for (size_t i = 0; i < r.utilNodes[k].size(); ++i)
@@ -720,12 +784,21 @@ PlanResult MakePlan(const PlanInput& inRaw) {
             const float R = std::max(40.0f, in.utilRadius[k] - 15.0f);
             std::vector<char> covered(n, 0);
             size_t left = n;
+            // nodes that already stand (the player's own) serve what they reach; no new node there
+            for (auto& e : in.extNodes[k])
+                for (size_t b = 0; b < n; ++b) if (!covered[b] && hypotf(bs[b]->u - e.u, bs[b]->v - e.v) <= in.utilRadius[k]) { covered[b] = 1; --left; }
             while (left > 0 && sites[k].size() < 60) {
-                int pick = -1, pickN = 0;
+                // the spot that reaches most; among equals the one nearest the middle of what is still uncovered, so
+                // a node stands in the centre of the district, not at its first house
+                float mu = 0, mv = 0; int mn = 0;
+                for (size_t b = 0; b < n; ++b) if (!covered[b]) { mu += bs[b]->u; mv += bs[b]->v; ++mn; }
+                if (mn) { mu /= mn; mv /= mn; }
+                int pick = -1, pickN = 0; float pickD = 1e9f;
                 for (size_t c = 0; c < n; ++c) {
                     int cnt = 0;
                     for (size_t b = 0; b < n; ++b) if (!covered[b] && hypotf(bs[b]->u - bs[c]->u, bs[b]->v - bs[c]->v) <= R) ++cnt;
-                    if (cnt > pickN) { pickN = cnt; pick = (int)c; }
+                    float d = hypotf(bs[c]->u - mu, bs[c]->v - mv);
+                    if (cnt > pickN || (cnt == pickN && cnt > 0 && d < pickD)) { pickN = cnt; pick = (int)c; pickD = d; }
                 }
                 if (pick < 0) break;
                 sites[k].push_back({ bs[pick]->u, bs[pick]->v });
