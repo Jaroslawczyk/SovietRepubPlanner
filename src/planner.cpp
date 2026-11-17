@@ -346,6 +346,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             r.paths.push_back({ cu, a.pathV, cu, b.pathV });
             return true;
         }
+        Log("plan: no link between footpaths v %.1f [%.1f..%.1f] and v %.1f [%.1f..%.1f], spine %.1f", a.pathV, a.l, a.r, b.pathV, b.l, b.r, spineU);
         return false;
     };
     for (int side = 0; side < 2; ++side) {
@@ -353,7 +354,10 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         StripInfo prev{}; bool havePrev = false;
         if (roadHalf > 0 && !r.roads.empty()) {
             float pv = side == 0 ? roadV + roadHalf + 2 : roadV - roadHalf - 2;     // the pavement on this side
-            prev = { pv, r.roads[0].u1, r.roads[0].u2 }; havePrev = true;
+            float ru1 = 1e9f, ru2 = -1e9f;            // the whole street, not only its first piece (stops cut it)
+            for (auto& rd : r.roads) if (fabsf(rd.v1 - roadV) < 0.01f && fabsf(rd.v2 - roadV) < 0.01f) { ru1 = std::min(ru1, std::min(rd.u1, rd.u2)); ru2 = std::max(ru2, std::max(rd.u1, rd.u2)); }
+            if (ru1 > ru2) { ru1 = r.roads[0].u1; ru2 = r.roads[0].u2; }
+            prev = { pv, ru1, ru2 }; havePrev = true;
         } else if (side == 1 && !stripsUp.empty()) { prev = stripsUp[0]; havePrev = true; }
         for (auto& st : list) {
             if (havePrev && !(in.crossRoad && roadHalf > 0)) link(prev, st);
@@ -525,6 +529,14 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             const size_t nP = segs.size();
             for (auto& rd : r.roads) segs.push_back({ rd.u1, rd.v1, rd.u2, rd.v2 });
             for (auto& dv : r.drives) segs.push_back(dv);
+            // a stop is a pass-through piece of the street: the street and its pavement lines are cut where it stands,
+            // people walk through it
+            for (auto& b : r.buildings) if (b.stop) {
+                float h = roadHalf + 2;
+                segs.push_back({ b.ou - b.w / 2 - 1, roadV - h, b.ou + b.w / 2 + 1, roadV - h });
+                segs.push_back({ b.ou - b.w / 2 - 1, roadV + h, b.ou + b.w / 2 + 1, roadV + h });
+                segs.push_back({ b.ou - b.w / 2 - 1, roadV, b.ou + b.w / 2 + 1, roadV });
+            }
             std::vector<int> par(segs.size());
             for (size_t k = 0; k < par.size(); ++k) par[k] = (int)k;
             std::function<int(int)> root = [&](int x) { return par[x] == x ? x : par[x] = root(par[x]); };
@@ -558,6 +570,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     }
                     if (!hasPed || ok || b.stop || b.net >= 0) { keep.push_back(b); continue; }
                     ++r.cutOff;
+                    Log("plan: dropped '%s' at u %.1f v %.1f (entrance not on the street net)", t.id.c_str(), b.u, b.v);
                 }
                 r.buildings.swap(keep);
                 std::vector<PathSeg> np;
@@ -779,6 +792,20 @@ PlanResult MakePlan(const PlanInput& inRaw) {
         std::vector<const Placed*> bs;
         for (auto& b : cur.buildings) if (b.net < 0 && !b.stop) bs.push_back(&b);   // stops are not in the rows: no node can follow them
         const size_t n = bs.size();
+        // A node needs a road for its vehicles: it may only follow a building of a row that faces a street, so its
+        // driveway is a short stub to that street, not a loop round the rows that cuts footpaths off.
+        std::vector<char> streetSide(n, 1);
+        {
+            bool anyStreet = false;
+            for (auto& rd : cur.roads) if (fabsf(rd.v1 - rd.v2) < 0.01f) anyStreet = true;
+            if (anyStreet)
+                for (size_t b = 0; b < n; ++b) {
+                    float gapToStreet = 1e9f;
+                    for (auto& rd : cur.roads) if (fabsf(rd.v1 - rd.v2) < 0.01f && bs[b]->u > std::min(rd.u1, rd.u2) && bs[b]->u < std::max(rd.u1, rd.u2))
+                        gapToStreet = std::min(gapToStreet, fabsf(bs[b]->v - rd.v1) - bs[b]->d / 2 - rd.width / 2);
+                    streetSide[b] = gapToStreet < 14.0f;
+                }
+        }
         for (int k = 0; k < 4; ++k) {
             if (!in.utilBuild[k]) continue;
             const float R = std::max(40.0f, in.utilRadius[k] - 15.0f);
@@ -795,6 +822,7 @@ PlanResult MakePlan(const PlanInput& inRaw) {
                 if (mn) { mu /= mn; mv /= mn; }
                 int pick = -1, pickN = 0; float pickD = 1e9f;
                 for (size_t c = 0; c < n; ++c) {
+                    if (!streetSide[c]) continue;
                     int cnt = 0;
                     for (size_t b = 0; b < n; ++b) if (!covered[b] && hypotf(bs[b]->u - bs[c]->u, bs[b]->v - bs[c]->v) <= R) ++cnt;
                     float d = hypotf(bs[c]->u - mu, bs[c]->v - mv);
@@ -813,6 +841,7 @@ PlanResult MakePlan(const PlanInput& inRaw) {
                 while (sites[k].size() < need && sites[k].size() < 60) {
                     int farIdx = -1; float farD = -1;
                     for (size_t b = 0; b < n; ++b) {
+                        if (!streetSide[b]) continue;
                         float d = 1e9f;
                         for (auto& st : sites[k]) d = std::min(d, hypotf(bs[b]->u - st.u, bs[b]->v - st.v));
                         if (d > farD) { farD = d; farIdx = (int)b; }
