@@ -183,9 +183,11 @@ struct PlanResult {
     float utilLen[4] = {};                          // their length per network, m
     int   utilNoLine[4] = {};
     float utilFeed[4] = {};                         // length of the line from an existing source, 0 = none found                       // connections that found no way or no free port
+    float normWalk[3] = { -1, -1, -1 }; int normFar[3] = { 0, 0, 0 };   // SNiP II-60-75 norms: shop 400, kindergarten 350, school 500 m
     float pathLength = 0, roadLength = 0, maxWalkToShop = -1, maxWalkToStop = -1, cut = 0, fill = 0;
 };
 PlanResult MakePlan(const PlanInput& in);
+float NormRadius(const std::string& category);
 bool PolyScan(const std::vector<V2>& poly, float v, float& left, float& right);   // widest span inside at height v
 bool PolyContains(const std::vector<V2>& poly, float u, float v);
 

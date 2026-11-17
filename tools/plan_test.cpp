@@ -51,5 +51,6 @@ int main(int argc, char** argv) {
     fclose(f);
     printf("houses %d capacity %d services %d unplaced %d noPath %d noRoad %d cutOff %d uncovered %d %d %d %d\n", r.houses, r.capacity, r.services, r.unplaced,
            r.noPath, r.noRoad, r.cutOff, r.utilUncovered[0], r.utilUncovered[1], r.utilUncovered[2], r.utilUncovered[3]);
+    printf("norm walk shop %.0f (%d far) kg %.0f (%d far) school %.0f (%d far)\n", r.normWalk[0], r.normFar[0], r.normWalk[1], r.normFar[1], r.normWalk[2], r.normFar[2]);
     return 0;
 }

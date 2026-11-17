@@ -535,7 +535,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             }
         };
         // one edge row from a to b along the side, leaving the gate free; street-side services and nodes go here
-        auto edgeRow = [&](int side, float edgeCoord, float a, float b, float gate, std::vector<Item>& svcHere, bool fill, bool street) -> float {
+        auto edgeRow = [&](int side, float edgeCoord, float a, float b, float& gate, bool gateFixed, std::vector<Item>& svcHere, bool fill, bool street) -> float {
             float t = a + 1.0f, maxD = 0;
             int fails = 0;
             while (t < b - 6) {
@@ -550,7 +550,11 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 else if (fill && hi < houses.size()) it = houses[hi];
                 else break;
                 float Fguess = roadOut ? std::max(all[it.type].sx, all[it.type].sz) : it.w - kSide;
-                if (t < gate + 7 && t + Fguess > gate - 7) { t = gate + 7; continue; }
+                if (t < gate + 7 && t + Fguess > gate - 7) {
+                    // the gate moves into the gap before this building (only a stop's gate stays where it is)
+                    if (!gateFixed && t + 7 < b) { gate = t + 6; t = gate + 7; continue; }
+                    t = gate + 7; continue;
+                }
                 if (t + Fguess > b) {
                     if (isNode) { nodeQ.pop_front(); ++unplacedSvc; continue; }
                     if (isSvc) break;
@@ -572,6 +576,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             return maxD;
         };
         // strips inside the courtyard: rows along u, footpath in the middle running the full width to the ring
+        float lastStripTop = 0;
         auto courtyard = [&](float cu0, float cu1, float cv0, float cv1, std::vector<Item>& svcHere, bool fill) {
             float v = cv0;
             while (true) {
@@ -622,6 +627,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 }
                 if (placedHere) r.paths.push_back({ cu0 - 3, pathV, cu1 + 3, pathV });
                 v += (two ? h : depth + band) + gap;
+                if (placedHere) lastStripTop = v;
             }
         };
         for (size_t bi = 0; bi < blks.size(); ++bi) {
@@ -634,6 +640,14 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             for (size_t k = 0; k < svcAll.size();) {
                 bool have = false;
                 for (auto& x : svc) if (all[x.type].category == all[svcAll[k].type].category) have = true;
+                // Soviet norm (SNiP II-60-75): a kind is not repeated while one already stands within its walking
+                // radius of this block's middle, so schools / kindergartens / shops spread to cover the whole area
+                if (!have && fill) {
+                    float R = NormRadius(all[svcAll[k].type].category);
+                    float bu = (b.u0 + b.u1) / 2, bv = (b.v0 + b.v1) / 2;
+                    if (R > 0) for (auto& p : r.buildings)
+                        if (p.type == svcAll[k].type && fabsf(p.u - bu) + fabsf(p.v - bv) < 0.6f * R) { have = true; break; }
+                }
                 if (!have || !fill) { svc.push_back(svcAll[k]); svcAll.erase(svcAll.begin() + k); } else ++k;
             }
             // gates: middle of each side, or at a stop standing on that side's street
@@ -644,11 +658,11 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 if (b.sN && fabsf(b.nv - roadV) < 0.01f && fabsf(st.ov - b.nv) < 1) { gN = st.u; stopN = true; stopEdgeN = st.v - st.d / 2 - 1; }
             }
             // edge rows: street-side services and nodes go in the row facing the main street first
-            float dS = edgeRow(0, b.v0, b.u0, b.u1, gS, svc, fill, b.sS);
-            float dN = edgeRow(1, b.v1, b.u0, b.u1, gN, svc, fill, b.sN);
+            float dS = edgeRow(0, b.v0, b.u0, b.u1, gS, stopS, svc, fill, b.sS);
+            float dN = edgeRow(1, b.v1, b.u0, b.u1, gN, stopN, svc, fill, b.sN);
             float wv0 = b.v0 + std::max(dS, 4.0f) + 2, wv1 = b.v1 - std::max(dN, 4.0f) - 2;
-            float dW = wv1 - wv0 > 20 ? edgeRow(2, b.u0, wv0, wv1, gW, svc, fill, b.sW) : 0;
-            float dE = wv1 - wv0 > 20 ? edgeRow(3, b.u1, wv0, wv1, gE, svc, fill, b.sE) : 0;
+            float dW = wv1 - wv0 > 20 ? edgeRow(2, b.u0, wv0, wv1, gW, false, svc, fill, b.sW) : 0;
+            float dE = wv1 - wv0 > 20 ? edgeRow(3, b.u1, wv0, wv1, gE, false, svc, fill, b.sE) : 0;
             // the ring
             float rv0 = b.v0 + std::max(dS, 0.0f) + 1.5f, rv1 = b.v1 - std::max(dN, 0.0f) - 1.5f;
             float ru0 = b.u0 + std::max(dW, 0.0f) + 1.5f, ru1 = b.u1 - std::max(dE, 0.0f) - 1.5f;
@@ -663,7 +677,26 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             if (b.sW) r.paths.push_back({ ru0, gW, b.wu, gW });
             if (b.sE) r.paths.push_back({ ru1, gE, b.eu, gE });
             // the courtyard
-            if (ru1 - ru0 > 30 && rv1 - rv0 > 30) courtyard(ru0 + 3, ru1 - 3, rv0 + 3, rv1 - 3, svc, fill);
+            if (ru1 - ru0 > 30 && rv1 - rv0 > 30) {
+                size_t nb0 = r.buildings.size(), np0 = r.paths.size();
+                lastStripTop = 0;
+                courtyard(ru0 + 3, ru1 - 3, rv0 + 3, rv1 - 3, svc, fill);
+                // the strips sit at the bottom of the courtyard: centre them, the spare height becomes two narrow lawns
+                // along the ring instead of one wide empty band
+                float spare = lastStripTop > 0 ? (rv1 - 3) - (lastStripTop - gap) : 0;
+                if (spare > 2) {
+                    float sh = spare / 2;
+                    bool ok = true;
+                    for (size_t k = nb0; k < r.buildings.size() && ok; ++k) {
+                        const Placed& p = r.buildings[k];
+                        if (!inside(p.u, p.v + sh, p.w, p.d) || busy(p.u, p.v + sh, p.w, p.d)) ok = false;
+                    }
+                    if (ok) {
+                        for (size_t k = nb0; k < r.buildings.size(); ++k) { r.buildings[k].v += sh; r.buildings[k].ov += sh; }
+                        for (size_t k = np0; k < r.paths.size(); ++k) { r.paths[k].v1 += sh; r.paths[k].v2 += sh; }
+                    }
+                }
+            }
             for (auto& x : svc) svcAll.push_back(x);       // did not fit: the next block takes it
         }
         r.unplaced = (int)(houses.size() - hi) + unplacedSvc + (int)svcAll.size();
@@ -993,6 +1026,38 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             }
         }
     }
+    // Junctions at least 6 m apart. The builder cuts every footpath where another one ends on it, and the game refuses
+    // pieces shorter than ~5 m: two entrance links meeting the ring 3 m apart, or one 2 m from a corner, left a short
+    // piece the game threw away - and the ring broke there. A line end that lands within 6 m of another junction (or
+    // of the host line's end) is moved onto it.
+    for (int pass = 0; pass < 3; ++pass)
+        for (size_t h = 0; h < r.paths.size(); ++h) {
+            PathSeg& H = r.paths[h];
+            float du = H.u2 - H.u1, dv = H.v2 - H.v1, L = hypotf(du, dv);
+            if (L < 1) continue;
+            struct J { float t; size_t k; int e; };
+            std::vector<J> js;
+            for (size_t k = 0; k < r.paths.size(); ++k) {
+                if (k == h) continue;
+                for (int e = 0; e < 2; ++e) {
+                    float pu = e ? r.paths[k].u2 : r.paths[k].u1, pv = e ? r.paths[k].v2 : r.paths[k].v1;
+                    float t = ((pu - H.u1) * du + (pv - H.v1) * dv) / (L * L);
+                    if (t < -0.01f || t > 1.01f) continue;
+                    if (hypotf(H.u1 + du * t - pu, H.v1 + dv * t - pv) > 0.6f) continue;
+                    js.push_back({ std::clamp(t, 0.0f, 1.0f) * L, k, e });
+                }
+            }
+            if (js.empty()) continue;
+            std::sort(js.begin(), js.end(), [](const J& a, const J& b) { return a.t < b.t; });
+            std::vector<float> fixedAt{ 0.0f, L };           // the host's own ends
+            for (auto& j : js) {
+                float best = -1, bd = 6.0f;
+                for (float x : fixedAt) if (fabsf(x - j.t) < bd && fabsf(x - j.t) > 0.05f) { bd = fabsf(x - j.t); best = x; }
+                if (best < 0) { bool same = false; for (float x : fixedAt) if (fabsf(x - j.t) <= 0.05f) same = true; if (!same) fixedAt.push_back(j.t); continue; }
+                float& eu = j.e ? r.paths[j.k].u2 : r.paths[j.k].u1; float& ev = j.e ? r.paths[j.k].v2 : r.paths[j.k].v1;
+                eu = H.u1 + du * best / L; ev = H.v1 + dv * best / L;
+            }
+        }
     // a footpath running along a street at the pavement distance is only the walking line: people walk on the edges
     // of the street itself, nothing is built there
     r.pathBuild.assign(r.paths.size(), 1);
@@ -1063,6 +1128,17 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             if (shop < 0 || dist < shop) shop = dist;
         }
         r.maxWalkToShop = std::max(r.maxWalkToShop, shop);
+        static const char* kNorm[3] = { "SHOP", "KINDERGARTEN", "SCHOOL" };
+        for (int k = 0; k < 3; ++k) {
+            float best = -1;
+            for (auto& s : r.buildings) if (all[s.type].category == kNorm[k]) {
+                float dist = fabsf(b.u - s.u) + fabsf(b.v - s.v);
+                if (best < 0 || dist < best) best = dist;
+            }
+            if (best < 0) continue;
+            r.normWalk[k] = std::max(r.normWalk[k], best);
+            if (best > NormRadius(kNorm[k])) ++r.normFar[k];
+        }
     }
 
     // Coverage: houses take water, heat and power from a node within its service radius, no line to the house itself.
@@ -1101,6 +1177,12 @@ float Demand(const BuildingType& t, float, int k) {
 // Utility nodes are few and central: a dry layout without them shows where the buildings stand, a greedy cover picks
 // the spots (the building that brings most uncovered ones into reach, radius less an allowance for the shift the
 // inserted nodes cause), then the real layout puts a node next to each chosen spot.
+// Walking radii of the Soviet micro-district norms (SNiP II-60-75, Shkvarikov 1963): kindergarten 350 m, school
+// 500 m, daily shop 300-500 m (400 used). 0 = no norm.
+float NormRadius(const std::string& cat) {
+    if (cat == "KINDERGARTEN") return 350; if (cat == "SCHOOL") return 500; if (cat == "SHOP") return 400; return 0;
+}
+
 PlanResult MakePlan(const PlanInput& inRaw) {
     PlanInput in = inRaw;       // node capacities from the game's formulas for the node types the plan uses
     for (auto& t : catalog::All()) {

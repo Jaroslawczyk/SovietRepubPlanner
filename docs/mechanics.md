@@ -308,3 +308,9 @@ STOR civ_dedina7a: [code 9 cap 0.05] [code 15 cap 0.04] [code 16 cap 0.04] [code
 - Офлайн-проверка раскладки: `tools/plan_test.bat ширина высота население [типы домов]` строит план на каталоге игры
   и рисует `build/plan.png`. **[код]**
 
+
+### Soviet micro-district norms (source: Frantseva, KIT dissertation 2024, citing SNiP II-60-75, SNiP II-K.2-62, Shkvarikov 1963)
+- Walking radii: kindergarten 350 m, school 500 m, daily services (shop, canteen, pharmacy) 300-500 m (planner uses 400); periodic services (polyclinic, post, cinema) 800-1200 m; public-transport stops 800-900 m apart, services grouped at stops ("focusing method").
+- Micro-district 6-12 thousand residents, 10-75 ha, arterial streets only on the perimeter, only dead-end driveways inside; superblock / courtyard group 1000-1500 residents; density up to 400-450 residents/ha; at least 10% green.
+- Plot norms m2 per resident: schools 2.7, kindergartens 2.8, culture 1, gardens 3, sport 1.2 (total 11); yard grounds: sport 2 m2/person 20-40 m from windows, playgrounds 0.7, green 8.
+- Planner (v0.33.0): a service kind is not repeated in a block whose middle is within 0.6 x its radius of the same kind; the summary shows the longest walk to shop / kindergarten / school and the houses beyond the norm. Offline 900x700 m, 20000 people: shop 431 m (9 houses beyond), kindergarten 456 m (33 beyond), school 539 m (2 beyond). Counts still come from residents per building, so the far houses need more kindergartens than the per-residents rule gives. NOT yet tested in game.

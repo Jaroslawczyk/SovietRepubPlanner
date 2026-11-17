@@ -786,7 +786,7 @@ struct InstantRun {
 void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2, float h1 = 0, float h2 = 0) {
     float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
     if (len < 0.5f) return;
-    int n = kind == 3 ? 1 : std::max(1, (int)ceilf(len / 60.0f));       // short pieces follow the ground; a pipe / wire stays one piece (joints turn into arcs)
+    int n = std::max(1, (int)ceilf(len / 60.0f));     // pieces of at most 60 m: the game refuses a long wire / pipe in one piece (straight start tangents keep the joints from bending)
     for (int i = 0; i < n; ++i) {
         float t0 = (float)i / n, t1 = (float)(i + 1) / n;
         eng::InstantJob j; j.kind = kind; j.lineType = lineType;
@@ -927,9 +927,16 @@ void CheckGaps(const InstantRun& r) {
     std::function<int(int)> root = [&](int x) { return par[x] == x ? x : par[x] = root(par[x]); };
     for (size_t a = 0; a < segs.size(); ++a)
         for (size_t b = a + 1; b < segs.size(); ++b) {
-            float tol = (segs[a].road || segs[b].road) ? 4.0f : 1.2f;   // a footpath joins a street only when drawn onto it
-            if (onSeg(segs[b], segs[a].a.x, segs[a].a.z, tol) || onSeg(segs[b], segs[a].b.x, segs[a].b.z, tol) ||
-                onSeg(segs[a], segs[b].a.x, segs[b].a.z, tol) || onSeg(segs[a], segs[b].b.x, segs[b].b.z, tol)) par[root((int)a)] = root((int)b);
+            bool joined;
+            if (segs[a].road || segs[b].road) {         // a footpath joins a street only when drawn onto it
+                const float tol = 4.0f;
+                joined = onSeg(segs[b], segs[a].a.x, segs[a].a.z, tol) || onSeg(segs[b], segs[a].b.x, segs[a].b.z, tol) ||
+                         onSeg(segs[a], segs[b].a.x, segs[b].a.z, tol) || onSeg(segs[a], segs[b].b.x, segs[b].b.z, tol);
+            } else {                                    // footpaths join end to end only (the game's own rule)
+                auto closeTo = [](const V3& p, const V3& q) { return hypotf(p.x - q.x, p.z - q.z) < 1.5f; };
+                joined = closeTo(segs[a].a, segs[b].a) || closeTo(segs[a].a, segs[b].b) || closeTo(segs[a].b, segs[b].a) || closeTo(segs[a].b, segs[b].b);
+            }
+            if (joined) par[root((int)a)] = root((int)b);
         }
     int mainRoot = -1;
     for (size_t k = 0; k < segs.size(); ++k) if (segs[k].road) { mainRoot = root((int)k); break; }
@@ -941,18 +948,21 @@ void CheckGaps(const InstantRun& r) {
     int checked = 0;
     for (auto& b : g_plan.buildings) {
         if (b.stop) continue;
+        if (!(eng::Occupied(LocalToWorld(g_area, b.u, b.v, 0).x, LocalToWorld(g_area, b.u, b.v, 0).z) & 1)) continue;   // the building is not there
+        // a building is joined when any of its entrances is (the link goes to the cheapest one)
+        bool has = false, ok = false; V3 first{};
         for (auto& c : all[b.type].conns) {
             if (c.kind != 0) continue;
             float cs[4][2] = { { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 } };     // quarter turns, as the planner turns models
             float cu = c.x * cs[b.rot & 3][0] - c.z * cs[b.rot & 3][1], cv = c.x * cs[b.rot & 3][1] + c.z * cs[b.rot & 3][0];
             V3 w = LocalToWorld(g_area, b.ou + cu, b.ov + cv, 0);
-            if (!(eng::Occupied(LocalToWorld(g_area, b.u, b.v, 0).x, LocalToWorld(g_area, b.u, b.v, 0).z) & 1)) break;   // the building is not there
-            ++checked;
-            bool ok = false;
+            if (!has) first = w;
+            has = true;
             for (size_t k = 0; k < segs.size() && !ok; ++k) if (root((int)k) == mainRoot && onSeg(segs[k], w.x, w.z, 3.0f)) ok = true;
-            if (!ok) { g_gapPts.push_back(w); Log("gap: entrance of '%s' at %.1f %.1f is not joined to the street", all[b.type].id.c_str(), w.x, w.z); }
-            break;
         }
+        if (!has) continue;
+        ++checked;
+        if (!ok) { g_gapPts.push_back(first); Log("gap: no entrance of '%s' at %.1f %.1f is joined to the street", all[b.type].id.c_str(), first.x, first.z); }
     }
     Log("gap check: %d entrances checked, %d not joined, %d built pieces", checked, (int)g_gapPts.size(), (int)segs.size());
     {   // debug: how the built net falls apart
@@ -979,6 +989,7 @@ void CheckGaps(const InstantRun& r) {
     for (size_t k = 0; k < segs.size(); ++k) {
         if (root((int)k) != mainRoot) continue;
         const S& sg = segs[k];
+        if (!sg.road) { targets.push_back({ sg.a.x, 0, sg.a.z }); targets.push_back({ sg.b.x, 0, sg.b.z }); continue; }   // footpaths join at piece ends only
         float len = hypotf(sg.b.x - sg.a.x, sg.b.z - sg.a.z);
         for (float t = 0; t <= len + 0.01f; t += 4.0f) {
             V3 p{ sg.a.x + (sg.b.x - sg.a.x) * std::min(t, len) / std::max(len, 0.01f), 0, sg.a.z + (sg.b.z - sg.a.z) * std::min(t, len) / std::max(len, 0.01f) };
@@ -1250,6 +1261,14 @@ void Footer() {
             if (g_plan.farHouses) ImGui::TextColored(red, "До остановки до %.0f м — %d домов дальше %.0f м, добавьте остановку.", g_plan.maxWalkToStop, g_plan.farHouses, g_walk);
             else ImGui::Text("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м", g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));
         } else if (g_plan.maxWalkToShop >= 0) ImGui::Text("До магазина не дальше %.0f м", g_plan.maxWalkToShop);
+        {   // Soviet micro-district norms (SNiP II-60-75): shop 400, kindergarten 350, school 500 m
+            static const char* kName[3] = { "магазина", "детсада", "школы" };
+            static const float kR[3] = { 400, 350, 500 };
+            for (int k = 0; k < 3; ++k) if (g_plan.normWalk[k] >= 0) {
+                if (g_plan.normFar[k]) ImGui::TextColored(red, "До %s до %.0f м: %d домов дальше нормы %.0f м", kName[k], g_plan.normWalk[k], g_plan.normFar[k], kR[k]);
+                else ImGui::Text("До %s не дальше %.0f м (норма %.0f м)", kName[k], g_plan.normWalk[k], kR[k]);
+            }
+        }
         if (g_plan.unplaced > 0) ImGui::TextColored(red, "Вмещается около %d жит., не влезло зданий: %d — нужен участок больше.", g_plan.capacity, g_plan.unplaced);
         else if (g_plan.steepSkipped > 0 || g_plan.busySkipped > 0) ImGui::TextDisabled("Обойдено: крутые места %d раз, существующая застройка %d раз.", g_plan.steepSkipped, g_plan.busySkipped);
     }
