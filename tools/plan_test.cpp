@@ -27,6 +27,8 @@ int main(int argc, char** argv) {
     in.poly = { { 0, 0 }, { W, 0 }, { W, H }, { 0, H } };
     in.population = argc > 3 ? atoi(argv[3]) : 9500;
     in.fillAll = true;
+    if (getenv("LAYOUT")) in.layout = atoi(getenv("LAYOUT"));
+    if (getenv("POP")) in.fillAll = false;
     in.gap = 1.45f; in.band = 4.85f;
     in.houseTypes = { Find("residental_brick_2") };
     if (argc > 4) { in.houseTypes.clear(); for (int k = 4; k < argc; ++k) in.houseTypes.push_back(Find(argv[k])); }

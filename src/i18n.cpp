@@ -226,6 +226,12 @@ static const char* const kPairs[][2] = {
     { "по %d отрезкам дорог", "by %d road pieces" },
     { "дорог игры рядом нет", "no game roads nearby" },
     { "Улицы обходят крутые места (> 15 %%): не проложено %.0f м.", "Streets go round steep spots (> 15 %%): %.0f m left out." },
+    { "авто (по размеру домов)", "auto (by house size)" },
+    { "деревня / пригород: дома вдоль улиц", "village / suburb: houses along streets" },
+    { "микрорайоны: кварталы с дворами", "microdistricts: blocks with courtyards" },
+    { "параллельные полосы", "parallel strips" },
+    { "тип застройки", "layout type" },
+    { "Деревня — улицы через две глубины участка, дома с обеих сторон фасадом к улице, службы раскиданы равномерно.\nМикрорайоны — для многоэтажек: кварталы, дома по краю, во дворах школы и сады.", "Village — streets two lot depths apart, houses on both sides facing the street, services spread evenly.\nMicrodistricts — for blocks of flats: blocks, houses on the edges, schools and kindergartens in the courtyards." },
     { "не изучено", "not researched" },
 };
 const char* T(const char* ru) {

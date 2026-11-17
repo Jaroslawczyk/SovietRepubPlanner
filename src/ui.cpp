@@ -65,6 +65,7 @@ float g_gap = 8.0f;
 int   g_density = 90;               // 0..100: gaps between buildings and rows
 std::vector<std::vector<V2>> g_extPaths, g_extRoadsL;   // footpaths / roads already in the game (local frame)   // footpaths already in the game (local frame)
 bool  g_cutAtTrails = false;       // cut streets at game trails they cross (tested v0.38.0: does not help, the game still refuses)
+int   g_layout = 0;                 // 0 auto, 1 village / suburb, 2 microdistricts, 3 parallel strips
 bool  g_autoHouse = true;          // the house ticked by default; the first manual tick replaces it
 bool  g_fillAll = true;    // no empty corners: houses until nothing fits
 int   g_roadType = 1;
@@ -278,6 +279,15 @@ void Regenerate() {
     in.fillAll = g_fillAll;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
+    {   int lay = g_layout;
+        if (lay == 0) {     // auto: small houses -> village streets, blocks of flats -> microdistricts
+            int n = 0, cap = 0;
+            for (int t : in.houseTypes) { cap += catalog::All()[t].capacity; ++n; }
+            lay = n && cap / n <= 20 ? 1 : 2;
+        }
+        in.layout = lay == 1 ? 2 : lay == 2 ? 1 : 0;
+        in.blocks = lay != 3;
+    }
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.crossRoad = g_crossRoad;
     for (size_t t = 0; t < catalog::All().size(); ++t) if (kStopIds[g_stopKind][0] && catalog::All()[t].id == kStopIds[g_stopKind]) in.stopType = (int)t; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; if (k >= 2) in.utilPerPerson[k] = g_utilNorm[k]; }
@@ -771,6 +781,11 @@ void TabArea() {
     ImGui::SetNextItemWidth(220);
     if (ImGui::SliderInt(T("плотность застройки, %"), &g_density, 0, 100)) g_dirty = true;
     ImGui::SetItemTooltip(T("Сжимает промежутки между зданиями (14 → 3 м) и полосы дорожек между рядами (9 → 5 м).\nНа большой плотности игре может не хватить места под площадки у входов."));
+    {   const char* lays[] = { T("авто (по размеру домов)"), T("деревня / пригород: дома вдоль улиц"), T("микрорайоны: кварталы с дворами"), T("параллельные полосы") };
+        ImGui::SetNextItemWidth(320);
+        if (ImGui::Combo(T("тип застройки"), &g_layout, lays, IM_ARRAYSIZE(lays))) g_dirty = true;
+        ImGui::SetItemTooltip(T("Деревня — улицы через две глубины участка, дома с обеих сторон фасадом к улице, службы раскиданы равномерно.\nМикрорайоны — для многоэтажек: кварталы, дома по краю, во дворах школы и сады."));
+    }
     if (ImGui::Checkbox(T("застроить весь участок"), &g_fillAll)) g_dirty = true;
     ImGui::SetItemTooltip(T("Дома ставятся, пока помещаются, без оглядки на число жителей выше."));
 
@@ -1794,7 +1809,15 @@ void SelfTest() {
     {   // prefer a free, fairly flat 300 m square near the view: earlier test districts may still stand in front of the camera
         V3 c{ 0, 0, 0 }; for (auto& q : pts) { c.x += q.x / 6; c.z += q.z / 6; }
         bool found = false;
-        for (int ring = 0; ring < 30 && !found; ++ring)
+        std::vector<V3> linePts;      // roads, footpaths and trails already in the game: the test square keeps clear of them
+        for (int mo : { 0xf7a0, 0xf968, 0xf7a8, 0xf908, 0xf8b0 }) {
+            std::vector<std::vector<V3>> L; eng::ListNetLines(mo, L);
+            for (auto& l : L) for (size_t k = 0; k < l.size(); ++k) {
+                linePts.push_back(l[k]);
+                if (k + 1 < l.size()) for (float t = 0.2f; t < 1; t += 0.2f) linePts.push_back({ l[k].x + (l[k + 1].x - l[k].x) * t, 0, l[k].z + (l[k + 1].z - l[k].z) * t });
+            }
+        }
+        for (int ring = 0; ring < 25 && !found; ++ring)
             for (int a = -ring; a <= ring && !found; ++a) for (int b = -ring; b <= ring && !found; ++b) {
                 if (std::max(abs(a), abs(b)) != ring) continue;
                 float x0 = c.x + a * side / 2, z0 = c.z + b * side / 2, lo = 1e9f, hi = -1e9f; bool ok = true;
@@ -1802,6 +1825,8 @@ void SelfTest() {
                     if (eng::Occupied(x0 + x, z0 + z)) ok = false;
                     float h = eng::TerrainHeight(x0 + x, z0 + z); lo = std::min(lo, h); hi = std::max(hi, h);
                 }
+                for (auto& q : linePts) if (ok && q.x > x0 - 25 && q.x < x0 + side + 25 && q.z > z0 - 25 && q.z < z0 + side + 25) ok = false;
+                if (fabsf(x0) > 7500 || fabsf(z0) > 7500 || fabsf(x0 + side) > 7500 || fabsf(z0 + side) > 7500) ok = false;   // z -8970 was past the map border (code 5)
                 if (!ok || hi - lo > 12 || lo < 1) continue;
                 pts = { { x0, 0, z0 }, { x0 + side, 0, z0 }, { x0 + side, 0, z0 + side }, { x0, 0, z0 + side } };
                 for (auto& q : pts) q.y = eng::TerrainHeight(q.x, q.z);
@@ -1813,7 +1838,8 @@ void SelfTest() {
     g_crossRoad = stMode == 3;
     {   // test district: only a building that is unlocked from the start, no services
         const auto& all = catalog::All();
-        for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = all[i].id == "residental_brick_2";
+        for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = stMode == 4 ? (all[i].id == "civ_dedina1a" || all[i].id == "civ_dedina1b") : all[i].id == "residental_brick_2";
+        g_layout = stMode == 4 ? 1 : 0;   // 4 = village test
         for (auto& sv : g_services) sv.enabled = stMode >= 2 && sv.typeIndex >= 0;
         for (int k = 0; k < 4; ++k) { g_utilBuild[k] = g_utilShow[k] = true; }
     }

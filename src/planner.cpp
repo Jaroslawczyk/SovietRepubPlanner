@@ -181,7 +181,135 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     if (sites) for (int k = 0; k < 4; ++k) siteDone[k].assign(sites[k].size(), 0);
     int utilGrp[4] = {};
 
-    if (!in.blocks) {
+    if (in.layout == 2) {
+        // ===== Village / suburb =====
+        // Parallel streets one "two lots deep" apart, cross streets every streetSpacing; every street is lined on both
+        // sides with buildings facing it (front yard, entrance link straight to the street). Utility nodes go to their
+        // chosen spots, services to the lot farthest from any other of the same kind (even coverage, the first one
+        // next to the stop), houses fill the remaining lots street by street from the main street outwards.
+        const float hw = roadHalf > 0 ? roadHalf : 1.5f;          // no street: footpath lanes instead
+        const float front = kApron + 1.5f, back = 3.0f;         // front yard (the game keeps ~9 m before an entrance free; links shorter than ~5 m are refused), half the back yard
+        std::vector<Item> houses, svcs;
+        for (auto& it : items) (all[it.type].category == "LIVING" ? houses : svcs).push_back(it);
+        float maxD0 = 8;
+        for (auto& h : houses) maxD0 = std::max(maxD0, h.d - kApron);
+        const float P = 2 * (front + maxD0 + back) + 2 * hw;    // distance between neighbouring parallel streets
+        const float crossSp = std::clamp(in.streetSpacing > 0 ? in.streetSpacing : 200.0f, 100.0f, 400.0f);
+        std::vector<float> hvs{ roadV };
+        for (float v = roadV + P; v < maxV - front - 4; v += P) hvs.push_back(v);
+        for (float v = roadV - P; v > minV + front + 4; v -= P) hvs.push_back(v);
+        std::vector<float> vus;
+        for (float u = crossU; u < maxU - 30; u += crossSp) vus.push_back(u);
+        for (float u = crossU - crossSp; u > minU + 30; u -= crossSp) vus.push_back(u);
+        for (auto& x : vus) for (auto& st : r.stops) if (fabsf(x - st.u) < 35) x = st.u + (x >= st.u ? 35.0f : -35.0f);
+        struct Lane { float v, L, R; };
+        std::vector<Lane> lanes;
+        for (float v : hvs) {
+            float L, R;
+            if (!PolyScan(in.poly, v, L, R) || R - L < 30) continue;
+            lanes.push_back({ v, L, R });
+            if (v == roadV && roadHalf > 0) continue;            // the main street is already there
+            if (roadHalf > 0) r.roads.push_back({ L, v, R, v, hw * 2 });
+            else r.paths.push_back({ L, v, R, v });
+            if (roadHalf > 0) { r.paths.push_back({ L, v - hw - 2, R, v - hw - 2 }); r.paths.push_back({ L, v + hw + 2, R, v + hw + 2 }); }
+        }
+        if (roadHalf == 0 && !lanes.empty()) {                   // the main lane too when there is no street at all
+            bool have = false; for (auto& p : r.paths) if (fabsf(p.v1 - roadV) < 0.5f && fabsf(p.v2 - roadV) < 0.5f) have = true;
+            float L, R; if (!have && PolyScan(in.poly, roadV, L, R)) r.paths.push_back({ L, roadV, R, roadV });
+        }
+        {   std::vector<V2> tp; for (auto& q : in.poly) tp.push_back({ q.v, q.u });
+            for (float u : vus) {
+                float B, T;
+                if (!PolyScan(tp, u, B, T) || T - B < 30) continue;
+                std::vector<float> cuts{ B };
+                for (auto& ln : lanes) if (ln.v > B + 5 && ln.v < T - 5 && u > ln.L && u < ln.R) cuts.push_back(ln.v);
+                cuts.push_back(T); std::sort(cuts.begin(), cuts.end());
+                for (size_t k = 0; k + 1 < cuts.size(); ++k) if (cuts[k + 1] - cuts[k] > 12) {
+                    if (roadHalf > 0) r.roads.push_back({ u, cuts[k], u, cuts[k + 1], hw * 2 });
+                    else r.paths.push_back({ u, cuts[k], u, cuts[k + 1] });
+                }
+                if (roadHalf > 0) { r.paths.push_back({ u - hw - 2, B, u - hw - 2, T }); r.paths.push_back({ u + hw + 2, B, u + hw + 2, T }); }
+            }
+        }
+        std::sort(lanes.begin(), lanes.end(), [&](const Lane& a, const Lane& b) { return fabsf(a.v - roadV) < fabsf(b.v - roadV); });
+        auto inside = [&](float cu, float cv, float w, float d) {
+            return PolyContains(in.poly, cu - w / 2, cv - d / 2) && PolyContains(in.poly, cu + w / 2, cv - d / 2) &&
+                   PolyContains(in.poly, cu - w / 2, cv + d / 2) && PolyContains(in.poly, cu + w / 2, cv + d / 2);
+        };
+        auto overlaps = [&](float cu, float cv, float w, float d) {
+            for (auto& b : r.buildings)
+                if (fabsf(cu - b.u) < (w + b.w) / 2 + kSide && fabsf(cv - b.v) < (d + b.d) / 2 + kSide) return true;
+            for (auto& rd : r.roads) {
+                float lu = std::min(rd.u1, rd.u2) - rd.width / 2 - 1, hu = std::max(rd.u1, rd.u2) + rd.width / 2 + 1;
+                float lv = std::min(rd.v1, rd.v2) - rd.width / 2 - 1, hv = std::max(rd.v1, rd.v2) + rd.width / 2 + 1;
+                if (cu + w / 2 > lu && cu - w / 2 < hu && cv + d / 2 > lv && cv - d / 2 < hv) return true;
+            }
+            return false;
+        };
+        // one building on lane ln, side +1 (north of the street, entrance facing -v) or -1, its middle at u
+        auto tryAt = [&](const Item& it, const Lane& ln, int side, float u, int net, int role, int grp, bool commit) {
+            float w0 = it.w - kSide, d0 = it.d - kApron;
+            float cv = ln.v + side * (hw + front + d0 / 2);
+            if (u - w0 / 2 < ln.L + margin || u + w0 / 2 > ln.R - margin) return false;
+            if (!inside(u, cv, w0, d0) || overlaps(u, cv, w0, d0) || busy(u, cv, w0, d0) || heightRange(u, cv, w0, d0) > in.maxDiff) return false;
+            if (!commit) return true;
+            Placed pb{ it.type, u, cv, w0, d0, it.rotated };
+            pb.rot = side > 0 ? (it.rot + 2) & 3 : it.rot;
+            V2 off = Turn(pb.rot, all[it.type].cx, all[it.type].cz);
+            pb.ou = u - off.u; pb.ov = cv - off.v;
+            pb.net = (signed char)net; pb.role = (signed char)role; pb.grp = (short)grp;
+            r.buildings.push_back(pb);
+            return true;
+        };
+        // the free lot nearest to a point, or the one with the best score
+        auto placeBest = [&](const Item& it, const std::function<float(float, float)>& score, int net, int role, int grp) {
+            float best = -1e18f; const Lane* bl = nullptr; int bs = 0; float bu = 0;
+            for (auto& ln : lanes) for (int side = -1; side <= 1; side += 2)
+                for (float u = ln.L + margin + it.w / 2; u < ln.R - margin - it.w / 2; u += 6) {
+                    float cv = ln.v + side * (hw + front + (it.d - kApron) / 2);
+                    float sc = score(u, cv);
+                    if (sc <= best) continue;
+                    if (tryAt(it, ln, side, u, net, role, grp, false)) { best = sc; bl = &ln; bs = side; bu = u; }
+                }
+            return bl && tryAt(it, *bl, bs, bu, net, role, grp, true);
+        };
+        // utility nodes at their spots
+        int unplacedSvc = 0;
+        if (sites) for (int k = 0; k < 4; ++k) {
+            if (!in.utilBuild[k] || utilType[k][0] < 0) continue;
+            for (size_t s = 0; s < sites[k].size(); ++s) {
+                V2 st = sites[k][s]; short g = (short)utilGrp[k]++;
+                auto nearSite = [&](float u, float v) { return -hypotf(u - st.u, v - st.v); };
+                if (!placeBest(MakeItem(utilType[k][0]), nearSite, k, 0, g)) { ++r.unplaced; continue; }
+                if (k == 3 && in.powerTrafo && utilType[3][1] >= 0 && g % 6 == 0) placeBest(MakeItem(utilType[3][1]), nearSite, 3, 1, g);
+            }
+        }
+        // services: farthest from the same kind; the first of a kind as close to the stop / centre as possible
+        V2 centre = r.stops.empty() ? V2{ crossU, roadV } : r.stops[0];
+        for (auto& it : svcs) {
+            const std::string& cat = all[it.type].category;
+            auto score = [&](float u, float v) {
+                float dmin = 1e9f;
+                for (auto& b : r.buildings) if (all[b.type].category == cat) dmin = std::min(dmin, hypotf(u - b.u, v - b.v));
+                float dc = hypotf(u - centre.u, v - centre.v);
+                return dmin > 1e8f ? -dc : dmin - 0.05f * dc;
+            };
+            if (!placeBest(it, score, -1, 0, 0)) ++unplacedSvc;
+        }
+        // houses: lane by lane, both sides, from the main street outwards
+        size_t hi = 0; int cap = 0;
+        for (auto& ln : lanes) for (int side = -1; side <= 1 && hi < houses.size(); side += 2) {
+            float u = ln.L + margin;
+            int fails = 0;
+            while (hi < houses.size() && u < ln.R - margin && (in.fillAll || cap < in.population)) {
+                const Item& it = houses[hi];
+                float cu = u + (it.w - kSide) / 2;
+                if (tryAt(it, ln, side, cu, -1, 0, 0, true)) { cap += all[it.type].capacity; ++hi; u = cu + (it.w - kSide) / 2 + std::max(gap, 2.0f); fails = 0; }
+                else { u += 3; if (++fails > 400) break; }
+            }
+        }
+        r.unplaced += (int)(houses.size() - hi) + unplacedSvc;
+    } else if (!in.blocks) {
     size_t i = 0;
     // one row of buildings between vlo and vhi, facing the path at pathV
     auto placeRow = [&](float vlo, float vhi, bool north, float pathV, size_t limit, float& rowL, float& rowR) {

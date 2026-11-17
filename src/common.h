@@ -137,6 +137,7 @@ struct PlanInput {
     float band = 7.0f;                              // strip of a footpath between two rows of buildings, m
     bool  fillAll = false;
     int   servicePop = 0;                           // residents the services are counted for (0 = population)
+    int   layout = 1;                               // 0 parallel strips, 1 microdistricts (blocks), 2 village / suburb: houses on both sides of every street
     bool  blocks = true;                            // microdistricts: street grid, houses round each block, courtyards (false = old parallel strips)                          // build up the whole area: houses until nothing fits
     std::vector<int> houseTypes;                    // catalog indices
     std::vector<float> houseWeights;                // share of each type among the houses (any scale); empty = equal
