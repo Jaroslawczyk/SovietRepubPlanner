@@ -1005,17 +1005,22 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         V2 n = Turn(b.rot, c.dx, c.dz); float nl = hypotf(n.u, n.v);
                         if (nl < 0.01f) continue;
                         n.u /= nl; n.v /= nl;
-                        float bestT = 1e9f;
+                        float bestT = 1e9f, crossT = 0;
                         for (auto& rd : r.roads) {
                             float r2u = rd.u2 - rd.u1, r2v = rd.v2 - rd.v1, den = n.u * r2v - n.v * r2u;
                             if (fabsf(den) < 1e-6f) continue;
                             float tt = ((rd.u1 - o.u) * r2v - (rd.v1 - o.v) * r2u) / den, q = ((rd.u1 - o.u) * n.v - (rd.v1 - o.v) * n.u) / den;
                             if (tt <= 0 || tt > 40 || q < 0 || q > 1) continue;
                             float sn = std::max(0.3f, fabsf(den) / std::max(0.01f, hypotf(r2u, r2v)));
-                            bestT = std::min(bestT, tt - (rd.width / 2 + in.linkEndOff) / sn);   // ends 2 m off the planned edge: ending on it or inside was refused (the real road with pavements is wider), the game snap joins it
+                            float nearT = tt - (rd.width / 2 + in.linkEndOff) / sn;   // 2 m off the planned edge: ending on the road or at its edge is refused
+                            if (nearT < bestT) { bestT = nearT; crossT = tt + (rd.width / 2 + in.linkEndOff) / sn; }
                         }
                         if (bestT > 5.5f && bestT < 40) {
                             extra.push_back({ o.u, o.v, o.u + n.u * bestT, o.v + n.v * bestT });
+                            // ...and on across the street to the pavement on the far side: a footpath that only reaches a
+                            // road is not joined to it, one that crosses it gets a crossing and joins the road network
+                            // (DistrictPlanner.jointest, v0.43.0: road lists grew only for the crossing footpath)
+                            if (in.crossLinks) extra.push_back({ o.u + n.u * bestT, o.v + n.v * bestT, o.u + n.u * crossT, o.v + n.v * crossT });
                             r.pedPts.push_back(o); done = true; ++r.straightLinks; break;
                         }
                     }

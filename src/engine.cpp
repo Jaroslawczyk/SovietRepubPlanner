@@ -678,8 +678,11 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
             // +0x298/+0x2b0 for a free-standing piece, +0x260/+0x278/+0x2d0 when it joins existing ends). A refused
             // piece only clears the preview (+0x410, +0x638) - the node count alone missed joined pieces.
             size_t c0 = NetSize(m);
+            void* rm = *(void**)(G + 0xf7a0);
+            size_t rr0 = mgrOffset == 0xf968 && rm ? NetSize(rm) : 0;
             ((PCommit_t)(Base() + 0x518a10))(m, 0, 0, 0, 0, 0, 0);
             size_t c1 = NetSize(m);
+            if (mgrOffset == 0xf968 && rm) { size_t rr1 = NetSize(rm); if (rr1 != rr0) Log("FOOTPATH JOINED THE ROAD: road lists %zu -> %zu", rr0, rr1); }
             r = c1 > c0 ? 1 : 0;
             static int nl3 = 0, nl3p = 0;
             if ((mgrOffset == 0xf968 ? nl3p++ : nl3++) < 40) Log("COMMIT mgr+0x%x lists %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, c0, c1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);

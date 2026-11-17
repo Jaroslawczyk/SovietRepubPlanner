@@ -365,6 +365,7 @@ void Regenerate() {
         in.ringRoad = g_ringRoad;
         { FILE* f = _wfopen((GameDir() + L"DistrictPlanner.linkoff").c_str(), L"r"); if (f) { fscanf(f, "%f", &in.linkEndOff); fclose(f); } }
         in.straightLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.nostraight").c_str()) == INVALID_FILE_ATTRIBUTES;
+        in.crossLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.crosslinks").c_str()) != INVALID_FILE_ATTRIBUTES;   // experiment switch
     }
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.crossRoad = g_crossRoad;
     for (size_t t = 0; t < catalog::All().size(); ++t) if (kStopIds[g_stopKind][0] && catalog::All()[t].id == kStopIds[g_stopKind]) in.stopType = (int)t; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
@@ -1211,6 +1212,28 @@ eng::InstantJob InstantBuilding(const Placed& b) {
     j.rot = g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + b.rot * kPi / 2);
     return j;
 }
+// Experiment (flag file DistrictPlanner.jointest, after a selftest has set the area): one road along u through the
+// middle of the area, then footpaths at right angles from 16 m away ending at different distances from the road axis.
+// The log tells which were built and whether the road network changed (= a joint / crossing was made).
+void JoinTest(int part) {     // part 1: only the road, 2: only the footpaths, 0: both
+    g_inst = InstantRun();
+    float cu = (g_area.minU + g_area.maxU) / 2, cv = (g_area.minV + g_area.maxV) / 2;
+    int rk = g_roadKind; { FILE* f = _wfopen((GameDir() + L"DistrictPlanner.roadkind").c_str(), L"r"); if (f) { fscanf(f, "%d", &rk); fclose(f); } }
+    Log("jointest: road kind %d", rk);
+    if (part != 2) {   // road pieces end exactly where the footpaths will cross it (a node at each crossing)
+        float xs[8] = { cu - 60, cu - 50, cu - 30, cu - 10, cu + 10, cu + 30, cu + 50, cu + 60 };
+        for (int k = 0; k + 1 < 8; ++k) InstantLine(1, rk, xs[k], cv, xs[k + 1], cv);
+    }
+    const float ends[6] = { 6.0f, 5.0f, 4.2f, 3.0f, 0.0f, -8.0f };
+    for (int k = 0; k < 6 && part != 1; ++k) {
+        float u = cu - 50 + k * 20;
+        InstantLine(2, g_pathKind - 1, u, cv + 16, u, cv + ends[k]);
+        Log("jointest: footpath %d ends %.1f m from the road axis", k, ends[k]);
+    }
+    g_inst.phase = 1;
+    eng::QueueInstant(g_inst.jobs);
+}
+
 void InstantStart() {
     g_inst = InstantRun();
     g_gapPts.clear(); g_gapTried.clear();
@@ -1974,6 +1997,9 @@ void SelfTest() {
         int m = 1; FILE* f = _wfopen(smFlag.c_str(), L"r"); if (f) { fscanf(f, "%d", &m); fclose(f); }
         DeleteFileW(smFlag.c_str()); eng::SetPathSnapMode(m);
     }
+    if (DeleteFileW((GameDir() + L"DistrictPlanner.jointest").c_str()) && g_area.ok && eng::InstantSupported()) JoinTest(0);
+    if (DeleteFileW((GameDir() + L"DistrictPlanner.jointest1").c_str()) && g_area.ok && eng::InstantSupported()) JoinTest(1);
+    if (DeleteFileW((GameDir() + L"DistrictPlanner.jointest2").c_str()) && g_area.ok && eng::InstantSupported()) JoinTest(2);
     std::wstring inFlag = GameDir() + L"DistrictPlanner.instant";      // debug: place the first N plan buildings by direct game calls
     if (GetFileAttributesW(inFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
         DeleteFileW(inFlag.c_str());
@@ -2017,7 +2043,7 @@ void SelfTest() {
                 if (k + 1 < l.size()) for (float t = 0.2f; t < 1; t += 0.2f) linePts.push_back({ l[k].x + (l[k + 1].x - l[k].x) * t, 0, l[k].z + (l[k + 1].z - l[k].z) * t });
             }
         }
-        for (int ring = 0; ring < 25 && !found; ++ring)
+        for (int ring = 0; ring < 45 && !found; ++ring)
             for (int a = -ring; a <= ring && !found; ++a) for (int b = -ring; b <= ring && !found; ++b) {
                 if (std::max(abs(a), abs(b)) != ring) continue;
                 float x0 = c.x + a * side / 2, z0 = c.z + b * side / 2, lo = 1e9f, hi = -1e9f; bool ok = true;
