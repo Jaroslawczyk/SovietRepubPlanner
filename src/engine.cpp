@@ -576,10 +576,36 @@ bool g_straightLines = true;   // set the start direction of every line piece (d
 // road snap itself (the dispatcher calls it with r8b = 0 and 1.0 at [rsp+0x38]); the building tool calls it with
 // r8b = 1 (0x2bd2ce), which also catches the middle of a road piece - a driveway then makes a T-junction
 typedef void (*RoadSnap_t)(void*, int, unsigned char, UINT64, unsigned char, unsigned char, unsigned char, float, unsigned char, unsigned char);
+// The connection snaps look for buildings only in a candidate list at G+0x11dc0..0x11dc8 that the building update
+// (0x139a70) refills every tick - the buildings in view. A line end at a building out of view (or not yet in the list)
+// finds nothing. For the duration of a snap the list is replaced by the buildings standing near the point.
+typedef V3* (*NodeVec2_t)(void*, V3*);
+static BYTE* g_near[256];
+static int NearBuildings(const V3& p, float radius) {
+    static NodeVec2_t gp = nullptr;
+    if (!gp) gp = (NodeVec2_t)GetProcAddress(GetModuleHandleW(L"C3DDLL64.dll"), "?GetPosition@C3D_NODE@@QEAA?AVC3DVECTOR3@@XZ");
+    if (!gp) return 0;
+    BYTE** v = *(BYTE***)(Base() + 0x9e6a18); BYTE** e = *(BYTE***)(Base() + 0x9e6a20);
+    int n = 0;
+    for (BYTE** it = v; it && it < e && n < 256; ++it) {
+        if (!*it || !*(BYTE**)(*it + 0x318)) continue;
+        V3 q{}; gp(*it + 0x320, &q);
+        if (fabsf(q.x - p.x) < radius && fabsf(q.z - p.z) < radius) g_near[n++] = *it;
+    }
+    return n;
+}
+static void SnapNear(BYTE* G, void* m, int mgrOffset, int type, int sub);
 static void SnapAt(BYTE* G, void* m, int mgrOffset, int type, int sub) {
     if (mgrOffset == 0xf968 && g_pathSnapMode == 1) ((PathSnap_t)(Base() + 0x3d4a80))(G, 0, 1, 0, 0, 0);
     else if (mgrOffset == 0xf7a0 && g_pathSnapMode == 1) ((RoadSnap_t)(Base() + 0x3c4790))(G, 0, 1, 0, 0, 0, 0, 1.0f, 0, 0);
     else ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub);
+}
+static void SnapNear(BYTE* G, void* m, int mgrOffset, int type, int sub) {
+    int n = NearBuildings(*(V3*)(G + 0xf6c), 80.0f);
+    BYTE** lst = (BYTE**)(G + 0x11dc0);
+    BYTE* save0 = lst[0]; BYTE* save1 = lst[1]; BYTE* save2 = lst[2];
+    if (n > 0) { lst[0] = (BYTE*)g_near; lst[1] = (BYTE*)(g_near + n); lst[2] = (BYTE*)(g_near + n); }
+    __try { SnapAt(G, m, mgrOffset, type, sub); } __finally { lst[0] = save0; lst[1] = save1; lst[2] = save2; }
 }
 typedef void* (*PStart_t)(void*, V3*, UINT64, unsigned char, int, UINT64, V3*);
 typedef void* (*PUpdate_t)(void*, V3*, int, int, unsigned char, unsigned char, unsigned char, UINT64, unsigned char, unsigned char);
@@ -593,18 +619,25 @@ static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolNa
     // the snap reads the current tool when it meets a building connection (a null tool faults at exe+0x3c7712)
     void* st = *(void**)(G + 0xd428); void* tool = nullptr;
     if (toolName && FindTool(toolName, &tool)) *(void**)(G + 0xd428) = tool;
-    int r = -200; volatile int stage = 0;
+    int r = -200; volatile int stage = 0; V3 a0{}, b0{};
     __try {
-        *(V3*)(G + 0xf6c) = a; SnapAt(G, m, mgrOffset, type, sub); a = *(V3*)(G + 0xf6c);
+        a0 = a; b0 = b;
+        *(V3*)(G + 0xf6c) = a; SnapNear(G, m, mgrOffset, type, sub); a = *(V3*)(G + 0xf6c);
         V3 out{}; stage = 1;
         ((PStart_t)(Base() + 0x4fbfd0))(m, &a, (UINT64)(unsigned)sub, 0, arg, 0, &out);
         // start tangent: start (0x4fbfd0, 0x4fc350) copies the direction of the existing piece it attaches to into
         // mgr+0x328, and the update bends the new piece to continue it - that is what made arcs and loops. A zero
         // vector there (what start writes when nothing is attached) gives a straight piece.
         if (g_straightLines) *(V3*)((BYTE*)m + 0x328) = V3{ 0, 0, 0 };
-        stage = 2; *(V3*)(G + 0xf6c) = b; SnapAt(G, m, mgrOffset, type, sub); b = *(V3*)(G + 0xf6c);
+        stage = 2; *(V3*)(G + 0xf6c) = b; SnapNear(G, m, mgrOffset, type, sub); b = *(V3*)(G + 0xf6c);
         stage = 3; ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
         void* p428 = *(void**)((BYTE*)m + 0x428); void* p430 = *(void**)((BYTE*)m + 0x430);
+        if (mgrOffset != 0xf7a0 && mgrOffset != 0xf968) {
+            static int nlog = 0;
+            if (nlog++ < 40) Log("LINE mgr+0x%x type %d sub %d arg %d: a %.1f %.1f %.1f -> %.1f %.1f %.1f, b %.1f %.1f %.1f -> %.1f %.1f %.1f, preview %p %p, snap objs %p %p %p %p",
+                mgrOffset, type, sub, arg, a0.x, a0.y, a0.z, a.x, a.y, a.z, b0.x, b0.y, b0.z, b.x, b.y, b.z, p428, p430,
+                *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690));
+        }
         stage = 4;
         if (p430 && p428 != p430) { ((PCommit_t)(Base() + 0x518a10))(m, 0, 0, 0, 0, 0, 0); r = 1; }
         else { ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
@@ -710,7 +743,8 @@ static void GameThreadTick() {
                                 code == -100 ? "no such build tool" : code == -300 ? "CRASH caught" : "refused by the game", code);
             k += 3;         // a building is heavier than a line
         } else {
-            V3 a{ j.a.x, TerrainHeight(j.a.x, j.a.z), j.a.z }, b{ j.b.x, TerrainHeight(j.b.x, j.b.z), j.b.z };
+            // ends at a building sit at its connection point's height (wires on poles 5-7 m up, pipes 2-4 m down)
+            V3 a{ j.a.x, TerrainHeight(j.a.x, j.a.z) + j.ha, j.a.z }, b{ j.b.x, TerrainHeight(j.b.x, j.b.z) + j.hb, j.b.z };
             // networks seen in the game's own calls: roads G+0xf7a0 (type -1 mud, 0 gravel, 1 asphalt, 2 asphalt with pavements), footpaths G+0xf968,
             // pipes G+0xfaf0 (type 20; sub 0/1 water small/big, 5/6 sewage), heating G+0xfa98 (type 10; sub 0 small, 1 big),
             // medium voltage G+0xfa20 and high voltage G+0xfa18 (type = start argument = 10 overhead, 20 underground); the start argument is -20 elsewhere
@@ -726,6 +760,34 @@ static void GameThreadTick() {
     }
 }
 void DebugDumpTools() { g_dumpTools = true; }
+typedef V3* (*NodeVec_t)(void*, V3*);
+static bool ReadWorldBld(BYTE* b, NodeVec_t gp, NodeVec_t gr, char* nm, V3& pos, float& yaw) {
+    __try {
+        BYTE* t = *(BYTE**)(b + 0x318); if (!t) return false;
+        strncpy(nm, (const char*)t, 63); nm[63] = 0;
+        V3 p{}, r{}; gp(b + 0x320, &p); gr(b + 0x320, &r);
+        pos = p; yaw = r.y;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void ListBuildings(std::vector<WorldBld>& out) {
+    out.clear();
+    if (!gx::Supported()) return;
+    static NodeVec_t gp = nullptr, gr = nullptr;
+    if (!gp) {
+        HMODULE c3d = GetModuleHandleW(L"C3DDLL64.dll");
+        gp = (NodeVec_t)GetProcAddress(c3d, "?GetPosition@C3D_NODE@@QEAA?AVC3DVECTOR3@@XZ");
+        gr = (NodeVec_t)GetProcAddress(c3d, "?GetRotation@C3D_NODE@@QEAA?AVC3DVECTOR3@@XZ");
+        if (!gp || !gr) { Log("ListBuildings: C3D_NODE getters not found"); return; }
+    }
+    BYTE** v = *(BYTE***)(gx::Base() + 0x9e6a18); BYTE** e = *(BYTE***)(gx::Base() + 0x9e6a20);
+    for (BYTE** it = v; it && it < e; ++it) {
+        char nm[64]; WorldBld w;
+        if (!*it || !ReadWorldBld(*it, gp, gr, nm, w.pos, w.yaw)) continue;
+        w.id = strncmp(nm, "MIRRORZ_", 8) == 0 ? std::string(nm + 8) : std::string(nm);
+        out.push_back(w);
+    }
+}
 // Debug: per building type, the values the game uses for node load (power +0x10f8, heat +0x1060 are pointers to floats).
 void DebugDumpLoad() { g_dumpLoad = true; }
 void LogDarkness() {

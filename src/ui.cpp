@@ -1,5 +1,6 @@
 // In-game panel: free-form territory outline, house / service / road settings, and the plan preview
 // (slopes, levelling, street, stops, footpaths, buildings) drawn over the terrain.
+#include <map>
 #include "common.h"
 #include "imgui.h"
 #include <cfloat>
@@ -27,6 +28,8 @@ float g_angle = 0;                  // extra rotation of the building grid, degr
 
 std::vector<char> g_houseSel;       // per catalog index
 std::vector<int> g_houseShare;      // per catalog index: weight of the type among the houses
+int   g_stopKind = 0;               // index into kStopIds
+const char* const kStopIds[] = { "busstop", "busstop_t", "muddy_busstop", "tram_stop_small", "tram_stop_big", "" };
 int   g_roadKind = 1;               // street surface for instant building: 0 gravel, 1 asphalt
 int   g_pathKind = 1;               // footpath: 0 dirt trail, 1 gravel, 2 asphalt
 std::vector<ServiceRule> g_services = {
@@ -79,6 +82,9 @@ std::vector<std::vector<V3>> g_driveLines;
 int   g_lineMode = 2;               // unused: the game only accepts press-drag-release               // how the game's line tool is driven: 0 two clicks a piece, 1 chain, 2 hold and drag
 
 // ---------- geometry helpers ----------
+V2 Turn2(int rot, float x, float z) {   // the planner's quarter turn (model X along +u, +v, -u, -v)
+    switch (rot & 3) { case 0: return { x, z }; case 1: return { -z, x }; case 2: return { -x, -z }; default: return { z, -x }; }
+}
 V3 LocalToWorld(const Area& a, float u, float v, float lift = 0.3f) {
     V3 p{ a.o.x + a.ux * u + a.vx * v, 0, a.o.z + a.uz * u + a.vz * v };
     p.y = eng::TerrainHeight(p.x, p.z) + lift;
@@ -194,12 +200,66 @@ void Regenerate() {
     in.poly = a.local; in.population = g_population; in.gap = g_gap;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
-    in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
+    in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops;
+    for (size_t t = 0; t < catalog::All().size(); ++t) if (kStopIds[g_stopKind][0] && catalog::All()[t].id == kStopIds[g_stopKind]) in.stopType = (int)t; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; if (k >= 2) in.utilPerPerson[k] = g_utilNorm[k]; }
     in.powerTrafo = g_powerTrafo; in.utilChain = g_utilChain;
     in.occupied = [&a](float u, float v) { return eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0; };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
+    {   // connections of the buildings that already stand near the district, for feeding its networks
+        std::vector<eng::WorldBld> world; eng::ListBuildings(world);
+        std::map<std::string, int> byId;
+        const auto& all = catalog::All();
+        for (size_t t = 0; t < all.size(); ++t) byId[all[t].id] = (int)t;
+        float cu = (a.minU + a.maxU) / 2, cv = (a.minV + a.maxV) / 2;
+        for (auto& w : world) {
+            auto it = byId.find(w.id); if (it == byId.end()) continue;
+            const BuildingType& t = all[it->second];
+            float c = cosf(w.yaw), sn = sinf(w.yaw);
+            for (auto& cn : t.conns) {
+                if (cn.kind != 3 && cn.kind != 4 && cn.kind != 6 && cn.kind != 7 && cn.kind != 9 && cn.kind != 11) continue;
+                // model -> world: X along (cos yaw, -sin yaw), Z along (sin yaw, cos yaw) - the inverse of how the plan
+                // turns a building for the build cursor (rotation = -plan angle)
+                V3 p{ w.pos.x + cn.x * c + cn.z * sn, w.pos.y, w.pos.z - cn.x * sn + cn.z * c };
+                V2 l = WorldToLocal(a, p);
+                if (fabsf(l.u - cu) > 2500 || fabsf(l.v - cv) > 2500) continue;
+                in.extPorts.push_back({ cn.kind, l.u, l.v, w.pos.y + cn.y - eng::TerrainHeight(p.x, p.z) });
+            }
+        }
+        static size_t lastN = (size_t)-1;
+        if (lastN != in.extPorts.size()) { lastN = in.extPorts.size(); Log("plan: %d standing buildings, %d of their ports can feed the district", (int)world.size(), (int)lastN); }
+    }
     g_plan = MakePlan(in);
+    {
+        std::vector<eng::WorldBld> world; eng::ListBuildings(world);
+        const auto& all = catalog::All();
+        if (GetFileAttributesW((GameDir() + L"DistrictPlanner.portcheck").c_str()) != INVALID_FILE_ATTRIBUTES) {
+            DeleteFileW((GameDir() + L"DistrictPlanner.portcheck").c_str());
+            // debug: compare where our own placed nodes' ports should be (plan) with the formula on the standing building
+            for (auto& b : g_plan.buildings) {
+                if (b.net < 0) continue;
+                const BuildingType& t = all[b.type];
+                V3 o = LocalToWorld(a, b.ou, b.ov, 0);
+                { float bd = 1e9f; const eng::WorldBld* bw = nullptr;
+                  for (auto& w : world) if (w.id == t.id) { float d = fabsf(w.pos.x - o.x) + fabsf(w.pos.z - o.z); if (d < bd) { bd = d; bw = &w; } }
+                  Log("PORTNEAR %s plan origin %.1f %.1f nearest same-id %.1f m at %.1f %.1f yaw %.3f", t.id.c_str(), o.x, o.z, bd, bw ? bw->pos.x : 0, bw ? bw->pos.z : 0, bw ? bw->yaw : 0); }
+                for (auto& w : world) {
+                    if (w.id != t.id || fabsf(w.pos.x - o.x) + fabsf(w.pos.z - o.z) > 40) continue;
+                    float c = cosf(w.yaw), sn = sinf(w.yaw);
+                    for (auto& cn : t.conns) {
+                        if (cn.kind < 2) continue;
+                        V2 pl = Turn2(b.rot, cn.x, cn.z);
+                        V3 want = LocalToWorld(a, b.ou + pl.u, b.ov + pl.v, 0);
+                        V3 f1{ w.pos.x + cn.x * c + cn.z * sn, 0, w.pos.z - cn.x * sn + cn.z * c };
+                        V3 f2{ w.pos.x + cn.x * c - cn.z * sn, 0, w.pos.z + cn.x * sn + cn.z * c };
+                        Log("PORT %s kind %d yaw %.3f plan rot %d: want %.1f %.1f | f1 %.1f %.1f | f2 %.1f %.1f | origin plan %.1f %.1f world %.1f %.1f",
+                            t.id.c_str(), cn.kind, w.yaw, b.rot, want.x, want.z, f1.x, f1.z, f2.x, f2.z, o.x, o.z, w.pos.x, w.pos.z);
+                    }
+                }
+            }
+        }
+    }
+
 
     const auto& all = catalog::All();
     for (auto& b : g_plan.buildings) {
@@ -636,7 +696,7 @@ struct InstantRun {
     int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0, nOk = 0, nAll = 0;
     std::string note;
 } g_inst;
-void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2) {
+void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2, float h1 = 0, float h2 = 0) {
     float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
     if (len < 0.5f) return;
     int n = kind == 3 ? 1 : std::max(1, (int)ceilf(len / 60.0f));       // short pieces follow the ground; a pipe / wire stays one piece (joints turn into arcs)
@@ -645,6 +705,8 @@ void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2)
         eng::InstantJob j; j.kind = kind; j.lineType = lineType;
         j.a = LocalToWorld(g_area, u1 + (u2 - u1) * t0, v1 + (v2 - v1) * t0, 0);
         j.b = LocalToWorld(g_area, u1 + (u2 - u1) * t1, v1 + (v2 - v1) * t1, 0);
+        if (i == 0) j.ha = h1;
+        if (i == n - 1) j.hb = h2;
         g_inst.jobs.push_back(j); g_inst.plan.push_back(-1);
     }
 }
@@ -697,23 +759,25 @@ void InstantStart() {
     const int nStreets = (int)rd.size();
     rd.insert(rd.end(), g_plan.drives.begin(), g_plan.drives.end());
     const auto roadPieces = Noded(rd);
-    // streets go in whole (straight, cut only by length); driveways are cut where they meet each other and end on the
-    // street, where the road snap joins them to the middle of the street piece
-    for (int k = 0; k < nStreets; ++k) InstantLine(1, g_roadKind, rd[k].u1, rd[k].v1, rd[k].u2, rd[k].v2);
+    // order: buildings (stops included), then streets - whole, cut only by length and at the stops, whose road
+    // connections they snap to - then driveways (cut where they meet each other, joined to the middle of the street),
+    // footpaths, and last the utility lines
     for (size_t i = 0; i < g_plan.buildings.size(); ++i) {
         const Placed& b = g_plan.buildings[i];
         V3 w = LocalToWorld(g_area, b.u, b.v, 0);
         if (eng::Occupied(w.x, w.z) & 1) continue;      // already there
         g_inst.jobs.push_back(InstantBuilding(b)); g_inst.plan.push_back((int)i);
     }
+    for (int k = 0; k < nStreets; ++k) InstantLine(1, g_roadKind, rd[k].u1, rd[k].v1, rd[k].u2, rd[k].v2);
     for (auto& pc : roadPieces) if (pc.second >= nStreets) InstantLine(1, g_roadKind, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
     for (auto& pc : Noded(g_plan.paths)) InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
     for (auto& s : g_plan.utilLines) {      // after the buildings, so the ends snap to their connections
         // manager offset, type, sub-type, start argument - as logged from the game's own tools
         const int pw = g_powerUnder ? 20 : 10;
-        const int net[4][4] = { { 0xfaf0, 20, 0, -20 }, { 0xfaf0, 20, 5, -20 }, { 0xfa98, 10, 0, -20 }, { 0xfa20, pw, 0, pw } };
+        // net 4: high voltage (feed of the district's own transformer)
+        const int net[5][4] = { { 0xfaf0, 20, 0, -20 }, { 0xfaf0, 20, 5, -20 }, { 0xfa98, 10, 0, -20 }, { 0xfa20, pw, 0, pw }, { 0xfa18, 10, 0, 10 } };
         size_t from = g_inst.jobs.size();
-        InstantLine(3, net[s.net][1], s.u1, s.v1, s.u2, s.v2);
+        InstantLine(3, net[s.net][1], s.u1, s.v1, s.u2, s.v2, s.h1, s.h2);
         for (size_t k = from; k < g_inst.jobs.size(); ++k) { g_inst.jobs[k].mgr = net[s.net][0]; g_inst.jobs[k].sub = net[s.net][2]; g_inst.jobs[k].arg = net[s.net][3]; }
     }
     if (g_inst.jobs.empty()) { g_inst.note = "Нечего строить."; return; }
@@ -827,6 +891,21 @@ void TabRoads() {
     ImGui::TextDisabled("Вдоль улицы идут тротуары, дорожки кварталов сходятся к переходу у остановки.");
 
     ImGui::SeparatorText("Остановки");
+    {
+        const auto& all = catalog::All();
+        auto nameOf = [&](const char* id) -> std::string { for (auto& t : all) if (t.id == id) return t.name; return id; };
+        std::string cur = kStopIds[g_stopKind][0] ? nameOf(kStopIds[g_stopKind]) : std::string("только отметить место");
+        ImGui::SetNextItemWidth(280);
+        if (ImGui::BeginCombo("вид остановки", cur.c_str())) {
+            for (int k = 0; k < 6; ++k) {
+                std::string nm = kStopIds[k][0] ? nameOf(kStopIds[k]) : std::string("только отметить место");
+                if (ImGui::Selectable(nm.c_str(), k == g_stopKind)) { g_stopKind = k; g_dirty = true; }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip("Остановка ставится прямо на улицу: дорога проходит сквозь неё.\n"
+                              "Троллейбусной нужна контактная сеть, трамвайной — рельсы на улице:\nвыберите им подходящее покрытие улицы ниже.");
+    }
     ImGui::BeginDisabled(g_roadType == 0 || !g_area.ok);
     int removeAt = -1;
     for (size_t i = 0; i < g_stops.size(); ++i) {
@@ -1121,6 +1200,7 @@ void SelfTest() {
         if (nm[0]) eng::DebugSetTool(nm);
     }
     if (GetFileAttributesW((GameDir() + L"DistrictPlanner.darkness").c_str()) != INVALID_FILE_ATTRIBUTES) eng::LogDarkness();
+    if (GetFileAttributesW((GameDir() + L"DistrictPlanner.replan").c_str()) != INVALID_FILE_ATTRIBUTES) { DeleteFileW((GameDir() + L"DistrictPlanner.replan").c_str()); g_dirty = true; }
     std::wstring dlFlag = GameDir() + L"DistrictPlanner.dumpload";
     if (GetFileAttributesW(dlFlag.c_str()) != INVALID_FILE_ATTRIBUTES) { DeleteFileW(dlFlag.c_str()); eng::DebugDumpLoad(); }
     std::wstring stFlag = GameDir() + L"DistrictPlanner.straight";

@@ -121,13 +121,13 @@ void Load() {
         std::string line;
         // connections: the keyword, then its points on the next lines (bare "x y z" or $CONNECTION_ADVANCED_POINT);
         // the first point is the outer end, where a footpath / road joins
-        std::vector<std::vector<V2>> connPts; std::vector<int> connKind; bool collecting = false;
+        std::vector<std::vector<V2>> connPts; std::vector<std::vector<float>> connY; std::vector<int> connKind; bool collecting = false;
         while (std::getline(ss, line)) {
             size_t s = line.find_first_not_of(" \t");
             if (s == std::string::npos) continue;
             if (line[s] != '$') {
                 float x, y, z;
-                if (collecting && sscanf(line.c_str() + s, "%f %f %f", &x, &y, &z) == 3) connPts.back().push_back({ x, z });
+                if (collecting && sscanf(line.c_str() + s, "%f %f %f", &x, &y, &z) == 3) { connPts.back().push_back({ x, z }); connY.back().push_back(y); }
                 else if (line.find("$CONNECTION") != std::string::npos && line.find("ADVANCED_POINT") == std::string::npos) collecting = false;
                 continue;
             }
@@ -135,7 +135,7 @@ void Load() {
             std::string key; ls >> key;
             if (key == "CONNECTION_ADVANCED_POINT") {
                 float x, y, z;
-                if (collecting && (ls >> x >> y >> z)) connPts.back().push_back({ x, z });
+                if (collecting && (ls >> x >> y >> z)) { connPts.back().push_back({ x, z }); connY.back().push_back(y); }
                 continue;
             }
             collecting = false;
@@ -143,9 +143,10 @@ void Load() {
                      : key == "CONNECTION_ROAD" || key == "CONNECTION_ROAD_ALLOWPASS" || key == "CONNECTION_ROAD_INPUT" || key == "CONNECTION_ROAD_OUTPUT" ? 1
                      : key == "CONNECTION_WATERPIPE_INPUT" ? 2 : key == "CONNECTION_WATERPIPE_OUTPUT" ? 3
                      : key == "CONNECTION_SEWAGE_INPUT" ? 4 : key == "CONNECTION_SEWAGE_OUTPUT" ? 5
-                     : key == "CONNECTION_HEATING_SMALL" ? 6
-                     : key == "CONNECTION_ELETRIC_LOW_INPUT" ? 8 : key == "CONNECTION_ELETRIC_LOW_OUTPUT" ? 9 : -1;
-            if (kind >= 0) { connPts.emplace_back(); connKind.push_back(kind); collecting = true; continue; }
+                     : key == "CONNECTION_HEATING_SMALL" ? 6 : key == "CONNECTION_HEATING_BIG" ? 7
+                     : key == "CONNECTION_ELETRIC_LOW_INPUT" ? 8 : key == "CONNECTION_ELETRIC_LOW_OUTPUT" ? 9
+                     : key == "CONNECTION_ELETRIC_HIGH_INPUT" ? 10 : key == "CONNECTION_ELETRIC_HIGH_OUTPUT" ? 11 : -1;
+            if (kind >= 0) { connPts.emplace_back(); connY.emplace_back(); connKind.push_back(kind); collecting = true; continue; }
             if (key == "NAME") ls >> nameId;
             else if (key.rfind("TYPE_", 0) == 0) { if (b.category.empty()) b.category = key.substr(5); }
             else if (key == "STORAGE") {
@@ -197,7 +198,7 @@ void Load() {
         for (size_t c = 0; c < connPts.size(); ++c) {
             auto& pts = connPts[c];
             if (pts.empty()) continue;
-            Conn cn{ connKind[c], pts[0].u, pts[0].v, 0, 0 };
+            Conn cn{ connKind[c], pts[0].u, pts[0].v, 0, 0, connY[c][0] };
             if (pts.size() > 1) { cn.dx = pts[0].u - pts[1].u; cn.dz = pts[0].v - pts[1].v; }
             // wire points are a row of insulators, not an inner / outer pair
             if (cn.kind >= 8 || fabsf(cn.dx) + fabsf(cn.dz) < 0.05f) { cn.dx = cn.x - b.cx; cn.dz = cn.z - b.cz; }

@@ -37,7 +37,7 @@ namespace eng {
     bool InstantSupported();                        // direct build calls exist for this game build
     // one direct call into the game: kind 0 = building "type" at a turned by rot, 1 = road a->b, 2 = footpath a->b
     // kind 3 = a utility line a->b: mgr = offset of the network manager in the game state, lineType / sub / arg as the game's own tool passes them
-    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; int mgr = 0, sub = 0, arg = -20; };
+    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; int mgr = 0, sub = 0, arg = -20; float ha = 0, hb = 0; };
     void QueueInstant(const std::vector<InstantJob>& jobs);
     bool InstantBusy();
     void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed
@@ -48,6 +48,10 @@ namespace eng {
     void SetStraightLines(bool on);                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
     void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
+    // buildings already standing in the game (engine list exe+0x9e6a18): ini name, position, yaw (radians, same
+    // sense as the build cursor rotation)
+    struct WorldBld { std::string id; V3 pos; float yaw; };
+    void ListBuildings(std::vector<WorldBld>& out);
     void StopAutoBuild();
     bool ScriptActive();                            // a line script is driving the real mouse
     bool AutoBuildActive();
@@ -63,7 +67,7 @@ namespace eng {
 // ---- building catalog ----
 // Where a footpath (kind 0) or a road (kind 1) joins the building: model coordinates, direction pointing outwards.
 // Utilities: 2 water in, 3 water out, 4 sewage in, 5 sewage out, 6 heating (small pipe), 8 power in, 9 power out (medium voltage).
-struct Conn { int kind; float x, z, dx, dz; };
+struct Conn { int kind; float x, z, dx, dz; float y = 0; };   // y: height of the connection point above the model origin
 struct BuildingType {
     std::string id;         // ini file name without extension
     std::string name;       // localized, UTF-8
@@ -119,6 +123,9 @@ struct PlanInput {
     int   roadType = 1;                             // 0 none, 1 street, 2 avenue
     float roadV = 0;                                // where the street crosses the district
     std::vector<float> stopsU;                      // bus stops along the street
+    struct ExtPort { int kind; float u, v, h; };        // a connection of a building that already stands (local frame)
+    std::vector<ExtPort> extPorts;                  // the planner feeds each network from the nearest fitting one
+    int   stopType = -1;                            // catalog index of the stop building (bus, trolleybus, tram); -1 = only mark the place
     float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
     bool  utilBuild[4] = {};                        // put this network's buildings and lines into the plan
     bool  utilChain = false;                        // also put switches and pipes between the nodes (the game bends such pipes into loops)
@@ -141,8 +148,9 @@ struct Placed {
     bool tooFar = false;                               // too tooFar from every stop
     signed char net = -1, role = 0;                 // utility building: network 0..3; role 0 = node serving houses, 1 = switch / transformer
     short grp = 0;                                  // node and its switch share a number
+    bool stop = false;                              // a stop the street runs through
 };
-struct UtilSeg { int net; float u1, v1, u2, v2; };
+struct UtilSeg { int net; float u1, v1, u2, v2; float h1 = 0, h2 = 0; };   // h: height of the end above the ground (connection point)
 struct PathSeg { float u1, v1, u2, v2; };
 struct RoadSeg { float u1, v1, u2, v2, width; };
 struct PlanResult {
@@ -161,7 +169,8 @@ struct PlanResult {
     int   utilOverloaded[4] = {};                   // nodes above 90 %
     std::vector<UtilSeg> utilLines;                 // pipes / wires between the utility buildings
     float utilLen[4] = {};                          // their length per network, m
-    int   utilNoLine[4] = {};                       // connections that found no way or no free port
+    int   utilNoLine[4] = {};
+    float utilFeed[4] = {};                         // length of the line from an existing source, 0 = none found                       // connections that found no way or no free port
     float pathLength = 0, roadLength = 0, maxWalkToShop = -1, maxWalkToStop = -1, cut = 0, fill = 0;
 };
 PlanResult MakePlan(const PlanInput& in);

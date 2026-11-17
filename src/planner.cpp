@@ -105,11 +105,40 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     if (roadHalf > 0) {
         float L, R;
         if (PolyScan(in.poly, roadV, L, R) && R - L > 30) {
-            r.roads.push_back({ L, roadV, R, roadV, roadHalf * 2 });
-            r.paths.push_back({ L, roadV - roadHalf - 2, R, roadV - roadHalf - 2 });    // pavements
-            r.paths.push_back({ L, roadV + roadHalf + 2, R, roadV + roadHalf + 2 });
-            for (float su : in.stopsU) r.stops.push_back({ std::clamp(su, L + 10, R - 10), roadV });
+            for (float su : in.stopsU) r.stops.push_back({ std::clamp(su, L + 20, R - 20), roadV });
             roadBand = roadHalf + 6;
+            // Stops are pass-through buildings: the road runs through them (two ROAD_ALLOWPASS connections on the
+            // model's X axis), the shelters stand beside it. The stop sits on the street axis, the street and the
+            // pavements are cut where it stands, and its own footpath entrances are linked like any building's.
+            std::vector<std::pair<float, float>> roadGap, walkGap;
+            if (in.stopType >= 0) {
+                const BuildingType& st = all[in.stopType];
+                float hl = 0;
+                for (auto& c : st.conns) if (c.kind == 1) hl = std::max(hl, fabsf(c.x));
+                if (hl < 5) hl = st.sx / 2;
+                for (auto& sp : r.stops) {
+                    Placed pb{ in.stopType, sp.u + st.cx, roadV + st.cz, st.sx, st.sz, false };
+                    pb.rot = 0; pb.ou = sp.u; pb.ov = roadV; pb.stop = true;
+                    r.buildings.push_back(pb);
+                    roadGap.push_back({ sp.u - hl, sp.u + hl });
+                    walkGap.push_back({ sp.u + st.cx - st.sx / 2 - 1, sp.u + st.cx + st.sx / 2 + 1 });
+                }
+                roadBand = std::max(roadBand, st.sz / 2 + fabsf(st.cz) + 1.5f);
+            }
+            auto cutLine = [](float a, float b, std::vector<std::pair<float, float>> gaps, std::vector<std::pair<float, float>>& out) {
+                std::sort(gaps.begin(), gaps.end());
+                float u = a;
+                for (auto& g : gaps) { if (g.first > u + 1) out.push_back({ u, std::min(g.first, b) }); u = std::max(u, g.second); }
+                if (b > u + 1) out.push_back({ u, b });
+            };
+            std::vector<std::pair<float, float>> pieces;
+            cutLine(L, R, roadGap, pieces);
+            for (auto& pc : pieces) r.roads.push_back({ pc.first, roadV, pc.second, roadV, roadHalf * 2 });
+            pieces.clear(); cutLine(L, R, walkGap, pieces);
+            for (auto& pc : pieces) {                                                     // pavements
+                r.paths.push_back({ pc.first, roadV - roadHalf - 2, pc.second, roadV - roadHalf - 2 });
+                r.paths.push_back({ pc.first, roadV + roadHalf + 2, pc.second, roadV + roadHalf + 2 });
+            }
         } else roadHalf = 0;
     }
     float spineU = r.stops.empty() ? (minU + maxU) / 2 : r.stops[0].u;
@@ -419,7 +448,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         for (auto& b : r.buildings) {
             const BuildingType& t = all[b.type];
             for (int mode = 0; mode < 2; ++mode) {
-                if (mode == 1 && !t.needsRoad) continue;
+                if (mode == 1 && (!t.needsRoad || b.stop)) continue;
                 bool has = false; float best = -1; std::vector<V2> line, bestLine;
                 int tried = 0;
                 for (auto& c : t.conns) {
@@ -452,6 +481,12 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             };
             auto pipe = [&](int net, const Placed* A, const Conn* ca, const Placed* B, const Conn* cb) {
                 if (!A || !B || !ca || !cb) { ++r.utilNoLine[net]; return; }
+                if (net == 3) {     // a wire goes over everything on poles: always one straight piece, port to port
+                    V2 p = Turn(A->rot, ca->x, ca->z), q = Turn(B->rot, cb->x, cb->z);
+                    p.u += A->ou; p.v += A->ov; q.u += B->ou; q.v += B->ov;
+                    r.utilLines.push_back({ net, p.u, p.v, q.u, q.v, ca->y, cb->y }); r.utilLen[net] += hypotf(q.u - p.u, q.v - p.v);
+                    return;
+                }
                 V2 p = Turn(A->rot, ca->x, ca->z), pn = Turn(A->rot, ca->dx, ca->dz);
                 V2 q = Turn(B->rot, cb->x, cb->z), qn = Turn(B->rot, cb->dx, cb->dz);
                 p.u += A->ou; p.v += A->ov; q.u += B->ou; q.v += B->ov;
@@ -467,7 +502,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         float cu = p.u + (q.u - p.u) * s / len, cv = p.v + (q.v - p.v) * s / len;
                         if (block[(size_t)cj(cv) * W + ci(cu)] & 4) clear = false;
                     }
-                    if (clear) { r.utilLines.push_back({ net, p.u, p.v, q.u, q.v }); r.utilLen[net] += len; return; }
+                    if (clear) { r.utilLines.push_back({ net, p.u, p.v, q.u, q.v, ca->y, cb->y }); r.utilLen[net] += len; return; }
                 }
                 size_t gc = (size_t)cj(qo.v) * W + ci(qo.u);
                 goal[gc] |= 4;
@@ -479,7 +514,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 for (size_t k = 0; k + 1 < line.size(); ++k) {
                     float len = hypotf(line[k + 1].u - line[k].u, line[k + 1].v - line[k].v);
                     if (len < 0.05f) continue;
-                    r.utilLines.push_back({ net, line[k].u, line[k].v, line[k + 1].u, line[k + 1].v });
+                    r.utilLines.push_back({ net, line[k].u, line[k].v, line[k + 1].u, line[k + 1].v, k == 0 ? ca->y : 0.0f, k + 2 == line.size() ? cb->y : 0.0f });
                     r.utilLen[net] += len;
                 }
             };
@@ -487,6 +522,22 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 std::vector<const Placed*> nodes, helps;
                 for (auto& b : r.buildings) if (b.net == k) (b.role ? helps : nodes).push_back(&b);
                 if (k == 3) {
+                    if (!in.extPorts.empty()) {
+                        auto nearest = [&](int want, V2 at, float& d) -> const PlanInput::ExtPort* {
+                            const PlanInput::ExtPort* b = nullptr; d = 3000;
+                            for (auto& e : in.extPorts) if (e.kind == want && hypotf(e.u - at.u, e.v - at.v) < d) { d = hypotf(e.u - at.u, e.v - at.v); b = &e; }
+                            return b;
+                        };
+                        if (!helps.empty()) {
+                            for (auto* h : helps) if (const Conn* hc = port(*h, 10, 0)) {
+                                V2 hp = Turn(h->rot, hc->x, hc->z); hp.u += h->ou; hp.v += h->ov; float d;
+                                if (auto* e = nearest(11, hp, d)) { r.utilLines.push_back({ 4, e->u, e->v, hp.u, hp.v, e->h, hc->y }); r.utilFeed[3] = std::max(r.utilFeed[3], d); }
+                            }
+                        } else for (auto* n : nodes) if (const Conn* nc = port(*n, 8, 0)) {
+                            V2 np = Turn(n->rot, nc->x, nc->z); np.u += n->ou; np.v += n->ov; float d;
+                            if (auto* e = nearest(9, np, d)) { r.utilLines.push_back({ 3, e->u, e->v, np.u, np.v, e->h, nc->y }); r.utilFeed[3] = std::max(r.utilFeed[3], d); }
+                        }
+                    }
                     std::vector<int> used(helps.size(), 0);
                     for (auto* n : nodes) {
                         int best = -1; float bd = 1e9f;
@@ -502,6 +553,20 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 }
                 const int nodeKind = k == 0 ? 2 : k == 1 ? 5 : 6, downKind = k == 0 ? 3 : k == 1 ? 4 : 6, upKind = nodeKind;
                 const int upNth = k == 2 ? 2 : 0;
+                // feed from what already stands: the head of the chain (the first switch's upstream port, or the first
+                // node's port when there are no switches) gets one straight line from the nearest existing building
+                // that has the matching port - water output, sewage input, heating
+                if (!nodes.empty() && !in.extPorts.empty()) {
+                    const Placed* head = nodes[0]; int hk = nodeKind, hn = 0;
+                    for (auto* h : helps) if (h->grp == nodes[0]->grp) { head = h; hk = upKind; hn = upNth; }
+                    if (const Conn* hc = port(*head, hk, hn)) {
+                        V2 hp = Turn(head->rot, hc->x, hc->z); hp.u += head->ou; hp.v += head->ov;
+                        const int want = k == 0 ? 3 : k == 1 ? 4 : 6;
+                        const PlanInput::ExtPort* best = nullptr; float bd = 1500;
+                        for (auto& e : in.extPorts) if ((e.kind == want || (k == 2 && e.kind == 7)) && hypotf(e.u - hp.u, e.v - hp.v) < bd) { bd = hypotf(e.u - hp.u, e.v - hp.v); best = &e; }
+                        if (best) { r.utilLines.push_back({ k, best->u, best->v, hp.u, hp.v, best->h, hc->y }); r.utilLen[k] += bd; r.utilFeed[k] = bd; }
+                    }
+                }
                 const Placed* prev = nullptr; int prevPort = 0;
                 for (auto* n : nodes) {
                     const Placed* H = nullptr;
@@ -602,7 +667,7 @@ PlanResult MakePlan(const PlanInput& inRaw) {
     for (int pass = 0; pass < 6; ++pass) {
         std::vector<V2> sites[4];
         std::vector<const Placed*> bs;
-        for (auto& b : cur.buildings) if (b.net < 0) bs.push_back(&b);
+        for (auto& b : cur.buildings) if (b.net < 0 && !b.stop) bs.push_back(&b);   // stops are not in the rows: no node can follow them
         const size_t n = bs.size();
         for (int k = 0; k < 4; ++k) {
             if (!in.utilBuild[k]) continue;
