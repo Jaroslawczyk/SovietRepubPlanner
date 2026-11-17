@@ -221,6 +221,10 @@ static const char* const kPairs[][2] = {
     { "%s\n%d жит. · %.0fx%.0f м · %s", "%s\n%d res. · %.0fx%.0f m · %s" },
     { "Выбрано домов: %d", "Houses selected: %d" },
     { "Дороги игры: %d концов улиц подведено к ним, %d отрезков плана уже построено.", "Game roads: %d street ends joined to them, %d plan pieces already built." },
+    { "выровнять сетку по дорогам игры", "align the grid to game roads" },
+    { "Улицы плана идут вдоль дорог, которые уже есть в игре, главная улица ложится на самую длинную из них.", "Plan streets follow roads already in the game, the main street lies on the longest of them." },
+    { "по %d отрезкам дорог", "by %d road pieces" },
+    { "дорог игры рядом нет", "no game roads nearby" },
     { "не изучено", "not researched" },
 };
 const char* T(const char* ru) {

@@ -24,6 +24,8 @@ struct Area {
     std::vector<V2> local;
     float minU = 0, maxU = 0, minV = 0, maxV = 0, sqm = 0;
 } g_area;
+bool  g_alignRoads = true;          // the grid follows roads already in the game
+int   g_alignedTo = 0;              // road pieces the grid was aligned to (0 = outline)
 float g_angle = 0;                  // extra rotation of the building grid, degrees
 
 std::vector<char> g_houseSel;       // per catalog index
@@ -134,7 +136,40 @@ void BuildFrame(Area& a, bool resetRoad) {
         if (len > bestLen) { bestLen = len; best = i; }
     }
     const V3& p = a.pts[best]; const V3& q = a.pts[(best + 1) % n];
-    float ang = atan2f(q.z - p.z, q.x - p.x) + g_angle * kPi / 180.0f;
+    float ang = atan2f(q.z - p.z, q.x - p.x);
+    // game roads inside the outline (or up to 40 m from it): the grid takes their main direction, the street their line
+    std::vector<std::pair<V3, V3>> segs;
+    if (g_alignRoads) {
+        std::vector<std::vector<V3>> lines; eng::ListNetLines(0xf7a0, lines);
+        Area probe = a; probe.ux = 1; probe.uz = 0; probe.vx = 0; probe.vz = 1; probe.o = a.pts[0];
+        std::vector<V2> poly; for (auto& w : a.pts) poly.push_back(WorldToLocal(probe, w));
+        auto inside = [&](const V3& w) {
+            V2 l = WorldToLocal(probe, w);
+            if (PolyContains(poly, l.u, l.v)) return true;
+            for (size_t i = 0; i < poly.size(); ++i) {
+                const V2& x = poly[i]; const V2& y = poly[(i + 1) % poly.size()];
+                float du = y.u - x.u, dv = y.v - x.v, l2 = du * du + dv * dv;
+                float t = l2 > 0 ? std::clamp(((l.u - x.u) * du + (l.v - x.v) * dv) / l2, 0.0f, 1.0f) : 0.0f;
+                float eu = x.u + du * t - l.u, ev = x.v + dv * t - l.v;
+                if (eu * eu + ev * ev < 1600) return true;
+            }
+            return false;
+        };
+        for (auto& L : lines) for (size_t k = 0; k + 1 < L.size(); ++k)
+            if (inside(L[k]) || inside(L[k + 1])) segs.push_back({ L[k], L[k + 1] });
+        double c = 0, sn = 0, total = 0;     // mean of 4 x angle: directions 90 degrees apart count as one grid
+        for (auto& sg : segs) {
+            float dx = sg.second.x - sg.first.x, dz = sg.second.z - sg.first.z, len = sqrtf(dx * dx + dz * dz);
+            float t = 4 * atan2f(dz, dx); c += len * cos(t); sn += len * sin(t); total += len;
+        }
+        if (total > 60 && sqrt(c * c + sn * sn) > 0.35 * total) {
+            float road = (float)atan2(sn, c) / 4;
+            float d = remainderf(road - ang, kPi / 2);     // the grid axis nearest to the outline's long side
+            ang += d;
+            g_alignedTo = (int)segs.size();
+        } else g_alignedTo = 0;
+    } else g_alignedTo = 0;
+    ang += g_angle * kPi / 180.0f;
     a.ux = cosf(ang); a.uz = sinf(ang); a.vx = -a.uz; a.vz = a.ux; a.o = a.pts[0];
     a.local.clear();
     a.minU = a.minV = 1e9f; a.maxU = a.maxV = -1e9f;
@@ -147,6 +182,20 @@ void BuildFrame(Area& a, bool resetRoad) {
     a.sqm = fabsf(s) / 2;
     if (resetRoad) {
         g_roadV = (a.minV + a.maxV) / 2;
+        if (g_alignedTo) {     // the main street goes along the longest game road parallel to the grid
+            std::map<int, float> byV; std::map<int, float> sumV;
+            for (auto& sg : segs) {
+                V2 x = WorldToLocal(a, sg.first), y = WorldToLocal(a, sg.second);
+                float du = y.u - x.u, dv = y.v - x.v, len = sqrtf(du * du + dv * dv);
+                if (len < 1 || fabsf(dv) > 0.18f * len) continue;
+                float v = (x.v + y.v) / 2;
+                if (v < a.minV + 15 || v > a.maxV - 15) continue;
+                int key = (int)floorf(v / 12); byV[key] += len; sumV[key] += len * v;
+            }
+            float best = 0; int bk = 0;
+            for (auto& kv : byV) if (kv.second > best) { best = kv.second; bk = kv.first; }
+            if (best > 60) g_roadV = sumV[bk] / best;
+        }
         float L, R;
         g_stops.assign(1, PolyScan(a.local, g_roadV, L, R) ? (L + R) / 2 : (a.minU + a.maxU) / 2);
     }
@@ -697,6 +746,9 @@ void TabArea() {
     } else ImGui::TextDisabled(T("участок не выбран"));
     ImGui::TextDisabled(T("Кликайте по карте углы района любой формы, замкните кликом по первой точке."));
     ImGui::SetNextItemWidth(220);
+    if (ImGui::Checkbox(T("выровнять сетку по дорогам игры"), &g_alignRoads) && g_area.ok) { BuildFrame(g_area, true); g_dirty = g_areaChanged = true; }
+    ImGui::SetItemTooltip(T("Улицы плана идут вдоль дорог, которые уже есть в игре, главная улица ложится на самую длинную из них."));
+    if (g_alignRoads && g_area.ok) { ImGui::SameLine(); if (g_alignedTo) ImGui::TextDisabled(T("по %d отрезкам дорог"), g_alignedTo); else ImGui::TextDisabled(T("дорог игры рядом нет")); }
     if (ImGui::SliderFloat(T("поворот застройки, °"), &g_angle, -90.0f, 90.0f, "%.0f") && g_area.ok) {
         BuildFrame(g_area, true); g_dirty = g_areaChanged = true;
     }
