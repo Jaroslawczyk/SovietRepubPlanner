@@ -207,7 +207,15 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 for (auto& hp : helpers) queued.push_back(hp);
             }
             const bool util = !pending.empty();
-            const Item it = util ? pending.front().it : items[i];
+            Item it = util ? pending.front().it : items[i];
+            bool side = false;      // turned a quarter: entrance along the row, the footpath link is routed round it
+            if (it.d > vhi - vlo + 0.01f || u + it.w > R - margin) {
+                // dense packing: the end of a row (or a shallow strip) still takes the building turned a quarter
+                Item t = it;
+                t.w = it.d - kApron + kSide; t.d = it.w - kSide + kApron;
+                t.rot = (it.rot + 1) & 3; t.rotated = !it.rotated;
+                if (t.d <= vhi - vlo + 0.01f && u + t.w <= R - margin) { it = t; side = true; }
+            }
             if (it.d > vhi - vlo + 0.01f) { if (util) { pending.pop_front(); continue; } break; }
             if (u + it.w > R - margin) break;
             if (u < spineU + corridor && u + it.w > spineU - corridor) { u = spineU + corridor; continue; }  // leave the spine free
@@ -215,8 +223,8 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             float cv = north ? vlo + it.d / 2 : vhi - it.d / 2;
             if (busy(cu, cv, it.w, it.d)) { u += 6; ++r.busySkipped; continue; }                        // something is already built here
             if (heightRange(cu, cv, it.w, it.d) > in.maxDiff) { u += 6; ++r.steepSkipped; continue; }   // too steep here
-            Placed pb{ it.type, cu, cv, it.w - kSide, it.d - kApron, it.rotated };
-            pb.rot = (it.rot + (north ? 2 : 0)) & 3;                // the entrance looks at this row's footpath
+            Placed pb{ it.type, cu, cv, it.w - (side ? kApron : kSide), it.d - (side ? kSide : kApron), it.rotated };
+            pb.rot = side ? it.rot : (it.rot + (north ? 2 : 0)) & 3;   // the entrance looks at this row's footpath
             if (all[it.type].needsRoad && roadHalf > 0) {
                 // a building that needs vehicles turns its road connection toward the street (a half turn keeps the
                 // footprint), so its driveway is short and direct instead of running round the rows
@@ -488,6 +496,18 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 if (!has) continue;
                 if (best < 0) { ++(mode ? r.noRoad : r.noPath); continue; }
                 (mode ? r.roadPts : r.pedPts).push_back(bestLine[0]);
+                // the game refuses pieces shorter than ~9 m (road) / ~5 m (footpath): a short leg is folded into its
+                // neighbour, so the corner becomes one slanted piece
+                {   const float minL = mode ? 10.0f : 5.5f;
+                    for (bool again = true; again && bestLine.size() > 2;) {
+                        again = false;
+                        for (size_t k = 1; k + 1 < bestLine.size(); ++k) {
+                            float l1 = hypotf(bestLine[k].u - bestLine[k - 1].u, bestLine[k].v - bestLine[k - 1].v);
+                            float l2 = hypotf(bestLine[k + 1].u - bestLine[k].u, bestLine[k + 1].v - bestLine[k].v);
+                            if (l1 < minL || l2 < minL) { bestLine.erase(bestLine.begin() + k); again = true; break; }
+                        }
+                    }
+                }
                 for (size_t k = 0; k + 1 < bestLine.size(); ++k) {
                     PathSeg sg{ bestLine[k].u, bestLine[k].v, bestLine[k + 1].u, bestLine[k + 1].v };
                     if (fabsf(sg.u2 - sg.u1) + fabsf(sg.v2 - sg.v1) < 0.05f) continue;

@@ -604,6 +604,12 @@ static void SnapNearRaw(BYTE* G, void* m, int mgrOffset, int type, int sub);
 // A snap may pull an end several metres onto something else (a pavement end onto the street axis, a driveway corner
 // back onto the building). An end is accepted only where the plan put it: moved by at most 1.5 m; otherwise the point
 // stays and what the snap attached is cleared.
+static size_t NetSize(void* m) {
+    static const int offs[] = { 0x260, 0x278, 0x298, 0x2b0, 0x2d0 };
+    size_t n = 0;
+    for (int o : offs) { BYTE* b = *(BYTE**)((BYTE*)m + o); BYTE* e = *(BYTE**)((BYTE*)m + o + 8); if (b && e > b) n += (size_t)(e - b) / 8; }
+    return n;
+}
 static void SnapNear(BYTE* G, void* m, int mgrOffset, int type, int sub) {
     V3 want = *(V3*)(G + 0xf6c);
     SnapNearRaw(G, m, mgrOffset, type, sub);
@@ -625,7 +631,7 @@ typedef void* (*PStart_t)(void*, V3*, UINT64, unsigned char, int, UINT64, V3*);
 typedef void* (*PUpdate_t)(void*, V3*, int, int, unsigned char, unsigned char, unsigned char, UINT64, unsigned char, unsigned char);
 typedef void* (*PCommit_t)(void*, UINT64, UINT64, UINT64, unsigned char, unsigned char, unsigned char);
 typedef void* (*PCancel_t)(void*);
-static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolName, V3 a, V3 b) {
+static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolName, V3 a, V3 b) {
     BYTE* G = Game();
     void* m = *(void**)(G + mgrOffset);
     if (!m) return -100;
@@ -645,6 +651,13 @@ static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolNa
         // vector there (what start writes when nothing is attached) gives a straight piece.
         if (g_straightLines) *(V3*)((BYTE*)m + 0x328) = V3{ 0, 0, 0 };
         stage = 2; *(V3*)(G + 0xf6c) = b; SnapNear(G, m, mgrOffset, type, sub); b = *(V3*)(G + 0xf6c);
+        // a short piece out of an entrance: the end snaps back onto the same connection and the piece has no length
+        // (the game refuses it). Then the end stays where the plan put it, on the footpath / street.
+        if (fabsf(b.x - a.x) + fabsf(b.z - a.z) < 1.0f && fabsf(b0.x - a.x) + fabsf(b0.z - a.z) > 1.5f) {
+            b = b0;
+            *(void**)(G + 0xf648) = nullptr; *(void**)(G + 0xf650) = nullptr; *(void**)(G + 0xf680) = nullptr;
+            *(void**)(G + 0xf690) = nullptr; *(void**)(G + 0xf6a0) = nullptr;
+        }
         stage = 3; ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
         void* p428 = *(void**)((BYTE*)m + 0x428); void* p430 = *(void**)((BYTE*)m + 0x430);
         {   static int nl2 = 0;
@@ -661,16 +674,45 @@ static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolNa
         if (p430 && p428 != p430) {
             // the real test: the manager's node list (mgr+0x298..0x2a0) grows when the game accepts the piece
             size_t n0 = (size_t)(*(BYTE**)((BYTE*)m + 0x2a0) - *(BYTE**)((BYTE*)m + 0x298)) / 8;
+            // Proof that the game accepted the piece: one of the network's own lists grows (new node pair at
+            // +0x298/+0x2b0 for a free-standing piece, +0x260/+0x278/+0x2d0 when it joins existing ends). A refused
+            // piece only clears the preview (+0x410, +0x638) - the node count alone missed joined pieces.
+            size_t c0 = NetSize(m);
             ((PCommit_t)(Base() + 0x518a10))(m, 0, 0, 0, 0, 0, 0);
-            size_t n1 = (size_t)(*(BYTE**)((BYTE*)m + 0x2a0) - *(BYTE**)((BYTE*)m + 0x298)) / 8;
-            r = 1;   // the node count is logged only: a piece that continues an existing end may not add nodes, so it is no proof
+            size_t c1 = NetSize(m);
+            r = c1 > c0 ? 1 : 0;
             static int nl3 = 0;
-            if (nl3++ < 80) Log("COMMIT mgr+0x%x nodes %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, n0, n1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);
+            if (nl3++ < 80) Log("COMMIT mgr+0x%x lists %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, c0, c1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);
         }
         else { ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
     } __except (CrashInfo(GetExceptionInformation(), "line", stage)) { r = -300; }
     *(V3*)(G + 0xf6c) = sp; *(void**)(G + 0xd428) = st;
     return r;
+}
+
+// A refused piece is tried again as two halves (a long piece over uneven ground or across another line is refused
+// whole). Retrying without the end snaps was tried and dropped: an unattached driveway end comes out as a loop.
+static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolName, V3 a, V3 b) {
+    int r = LineRaw1(mgrOffset, type, sub, arg, toolName, a, b);
+    if (r != 0) return r;
+    // the game refuses pieces shorter than about 9 m (roads) / 5 m (footpaths): a short link that meets a line at a
+    // right angle is drawn to a point further along that line instead (a slanted join of the minimum length)
+    float len = hypotf(b.x - a.x, b.z - a.z), need = mgrOffset == 0xf7a0 ? 10.0f : 5.5f;
+    if (len > 0.5f && len < need && (mgrOffset == 0xf7a0 || mgrOffset == 0xf968)) {
+        float px = -(b.z - a.z) / len, pz = (b.x - a.x) / len, k = sqrtf(need * need - len * len);
+        for (int sgn = 1; sgn >= -1; sgn -= 2) {
+            V3 c{ b.x + px * k * sgn, b.y, b.z + pz * k * sgn };
+            r = LineRaw1(mgrOffset, type, sub, arg, toolName, a, c);
+            Log("retry slanted (%.1f m -> %.1f m): %d", len, need, r);
+            if (r == 1) return r;
+        }
+        return 0;
+    }
+    V3 m{ (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2 };
+    int r1 = LineRaw1(mgrOffset, type, sub, arg, toolName, a, m);
+    int r2 = LineRaw1(mgrOffset, type, sub, arg, toolName, m, b);
+    Log("retry in halves: %d %d", r1, r2);
+    return (r1 == 1 && r2 == 1) ? 1 : 0;
 }
 
 // Logging detours on the path tool functions, to learn their arguments from the game's own use.
