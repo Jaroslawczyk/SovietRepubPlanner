@@ -31,11 +31,13 @@ bool PolyContains(const std::vector<V2>& poly, float u, float v) {
 
 namespace {
 struct Item { int type; float w, d; bool rotated; };
+const float kApron = 9.0f, kSide = 3.0f;   // extra depth / width the game needs beyond the model's bounding box
 
 Item MakeItem(int type) {
     const BuildingType& b = catalog::All()[type];
     Item it{ type, b.sx, b.sz, false };
     if (it.d > it.w) { std::swap(it.w, it.d); it.rotated = true; }   // long side along the path
+    it.w += kSide; it.d += kApron;   // room for the entrance apron / construction zone the game adds around a building
     return it;
 }
 }
@@ -117,7 +119,7 @@ PlanResult MakePlan(const PlanInput& in) {
             float cv = north ? vlo + it.d / 2 : vhi - it.d / 2;
             if (busy(cu, cv, it.w, it.d)) { u += 6; ++r.busySkipped; continue; }                        // something is already built here
             if (heightRange(cu, cv, it.w, it.d) > in.maxDiff) { u += 6; ++r.steepSkipped; continue; }   // too steep here
-            r.buildings.push_back({ it.type, cu, cv, it.w, it.d, it.rotated });
+            r.buildings.push_back({ it.type, cu, cv, it.w - kSide, it.d - kApron, it.rotated });
             r.paths.push_back({ cu, pathV, cu, north ? pathV + band / 2 : pathV - band / 2 });
             rowL = std::min(rowL, cu); rowR = std::max(rowR, cu);
             u += it.w + gap; ++i; ++placed;

@@ -28,6 +28,8 @@ namespace eng {
     int  Occupied(float x, float z);                // 1 = an existing building here, 2 = an existing engine path
     bool OccupancyReady();
     bool CursorActive();                            // the player has a building selected in the game's build menu
+    float CursorRot();                              // its rotation, radians
+    std::string SelectedType(DWORD* tick);          // ini name of the building picked last in the game menu
     std::string CursorTypeName();                   // engine identifier of that building type
     void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh);
     void StopAutoBuild();

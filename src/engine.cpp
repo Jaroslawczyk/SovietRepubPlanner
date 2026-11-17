@@ -72,6 +72,12 @@ float TerrainHeight(float x, float z);
 static std::atomic<DWORD> g_curTick{ 0 };
 static int g_curType = -1; static V3 g_curPos{}; static float g_curRot = 0;
 static float g_abW = 1920, g_abH = 1080;
+static int g_abRetry = 0;
+static std::atomic<DWORD> g_rotTick{ 0 }, g_typeTick{ 0 };
+static std::atomic<float> g_lastRot{ 0 };
+static char g_lastTypeName[96] = "";
+float CursorRot();
+bool CursorActive();
 static std::atomic<int> g_dbgSet{ 0 }, g_dbgClear{ 0 }, g_dbgPoll{ 0 };
 
 #define MB_HOOK(name, orig) static bool name(void* s) { if (g_abActive) return false; return g_blockMouseButtons ? false : orig(s); }
@@ -84,7 +90,8 @@ static bool h_KeyDown(void* s, int k)  { return g_blockKeys ? false : o_KeyDown(
 static bool h_KeyPress(void* s, int k) { return g_blockKeys ? false : o_KeyPress(s, k); }
 static V3* h_MouseRel(void* s, V3* out) {
     V3* r = o_MouseRel(s, out);
-    if (g_blockMouseMove && r) { r->x = r->y = r->z = 0; }
+    // Zeroing this while the cursor is over the panel made the camera drift; only the auto-builder needs it.
+    if (g_abActive && r) { r->x = r->y = r->z = 0; }
     return r;
 }
 
@@ -108,6 +115,7 @@ static float h_AxisValue(void* s, char* name, int* a, float b, float c) {
       if (name && !known && seen.size() < 80) { seen.push_back(name); float v = o_AxisValue(s, name, a, b, c); Log("AXIS '%s' a=%d b=%.3f c=%.3f -> %.3f", name, a ? *a : -999, b, c, v); } }
     { float v = o_AxisValue(s, name, a, b, c); static int n = 0; if (v != 0 && n < 40 && name) { ++n; Log("AXISVAL '%s' = %.4f", name, v); } }
     if (g_abActive) {
+        if (name && strcmp(name, "BUILDING_ROTATE") == 0) { float v = g_abAxis; if (v != 0) g_abAxisSent = true; return v; }
         return 0.0f;                         // no zoom / camera motion while the mod is placing buildings
     }
     return g_blockMouseMove ? 0.0f : o_AxisValue(s, name, a, b, c);   // camera zoom / rotation axes
@@ -126,7 +134,7 @@ static void h_EditToHeight(void* s, V3* a, V3* b, float f1, float f2, float f3, 
 static float WrapPi(float a) { while (a > 3.14159265f) a -= 6.2831853f; while (a < -3.14159265f) a += 6.2831853f; return a; }
 static void AutoNext(bool ok) {
     if (ok) ++g_abDone; else ++g_abFailed;
-    ++g_abIdx; g_abPhase = 0; g_abTicks = 0; g_abStable = 0; g_abRotTries = 0; g_abAxis = 0; g_abClick = false;
+    ++g_abIdx; g_abPhase = 10; g_abTicks = 0; g_abStable = 0; g_abRotTries = 0; g_abRetry = 0; g_abAxis = 0; g_abClick = false;
     g_abLeft = (int)(g_abJobs.size() - g_abIdx);
     if (g_abIdx >= g_abJobs.size()) { g_abActive = false; Log("autobuild: finished, placed %d, failed %d", (int)g_abDone, (int)g_abFailed); }
     else g_abAim = g_abJobs[g_abIdx].pos;
@@ -147,6 +155,20 @@ static void AutoTick() {
     }
     g_abSpoofX = sx; g_abSpoofY = sy;
     switch (g_abPhase) {
+    case 10: {                               // turn the building: the game reports its angle every frame, the mod
+        if (!CursorActive()) {               // feeds the rotation axis (1000 units = 1 rad) until it matches the plan
+            if (g_abTicks > 240) { Log("autobuild: no building is selected in the game's build menu, stopped"); g_abActive = false; g_abAxis = 0; }
+            break;
+        }
+        if (g_abAxis != 0) { if (g_abAxisSent || g_abTicks > 30) { g_abAxis = 0; g_abTicks = 0; } break; }
+        if (g_abTicks < 4) break;            // let the game apply the previous pulse
+        float diff = WrapPi(job.rot - CursorRot());
+        if (fabsf(diff) < 0.012f || ++g_abRotTries > 30) {
+            if (g_abRotTries > 30) Log("autobuild: target %d - rotation still off by %.3f rad", (int)g_abIdx, diff);
+            g_abPhase = 0; g_abTicks = 0; break;
+        }
+        g_abAxis = diff * 1000.0f; g_abAxisSent = false; g_abTicks = 0;
+        break; }
     case 0:                                  // aim: let the game move its cursor to the spot
         g_abClick = false;
         if (g_abTicks >= 25) { g_abPhase = 1; g_abTicks = 0; g_abClick = true; }
@@ -157,9 +179,9 @@ static void AutoTick() {
     case 2:                                  // did a building appear?
         if (g_abTicks >= 25) {
             bool ok = (Occupied(job.pos.x, job.pos.z) & 1) != 0;
-            Log("autobuild: target %d at (%.0f %.0f), screen (%.0f %.0f), try %d -> %s", (int)g_abIdx, job.pos.x, job.pos.z, sx, sy, g_abRotTries, ok ? "placed" : "not placed");
+            Log("autobuild: target %d at (%.0f %.0f), screen (%.0f %.0f), rot %.3f (wanted %.3f), try %d -> %s", (int)g_abIdx, job.pos.x, job.pos.z, sx, sy, CursorRot(), job.rot, g_abRetry, ok ? "placed" : "not placed");
             if (ok) AutoNext(true);
-            else if (g_abRotTries++ == 0) { g_abPhase = 3; g_abTicks = 0; g_abClick = true; }
+            else if (g_abRetry++ == 0) { g_abPhase = 3; g_abTicks = 0; g_abClick = true; }
             else AutoNext(false);
         }
         break;
@@ -331,20 +353,19 @@ int Occupied(float x, float z) {
 }
 bool OccupancyReady() { return g_bld != nullptr; }
 
-bool CursorActive() { return GetTickCount() - g_curTick < 400; }
-std::string CursorTypeName() {
-    typedef char* (*TypeName_t)(void*, int);
-    static TypeName_t f;
-    if (!f) f = (TypeName_t)GetProcAddress(GetModuleHandleW(L"C3DDLL64.dll"), "?EditorGetTypeIndexIdentifier@C3D_BUILDING@@QEAAPEADH@Z");
-    if (!f || !g_bld || !CursorActive() || g_curType < 0) return {};
-    char* n = f(g_bld, g_curType);
-    return n ? std::string(n) : std::string();
+bool CursorActive() { return GetTickCount() - g_rotTick < 500; }      // the game is showing a building to place
+float CursorRot() { return g_lastRot; }
+// Building picked last in the game's build menu (ini name) and when; empty if nothing was picked since the map loaded.
+std::string SelectedType(DWORD* tick) {
+    if (tick) *tick = g_typeTick;
+    return g_typeTick ? std::string(g_lastTypeName) : std::string();
 }
+std::string CursorTypeName() { return SelectedType(nullptr); }
 void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh) {
     std::lock_guard<std::mutex> l(g_abMx);
     g_abJobs.clear();
     for (size_t i = 0; i < pos.size(); ++i) g_abJobs.push_back({ pos[i], rot[i] });
-    g_abIdx = 0; g_abPhase = 0; g_abTicks = 0; g_abStable = 0; g_abRotTries = 0; g_abAxis = 0; g_abClick = false;
+    g_abIdx = 0; g_abPhase = 10; g_abTicks = 0; g_abStable = 0; g_abRotTries = 0; g_abRetry = 0; g_abAxis = 0; g_abClick = false;
     g_abDone = 0; g_abFailed = 0; g_abLeft = (int)g_abJobs.size(); g_abW = sw; g_abH = sh;
     if (g_abJobs.empty()) return;
     g_abAim = g_abJobs[0].pos;
@@ -356,6 +377,23 @@ bool AutoBuildActive() {
     return g_abActive;
 }
 void AutoBuildStats(int& done, int& failed, int& left) { done = g_abDone; failed = g_abFailed; left = g_abLeft; }
+
+// Diagnostics / feedback: what the game asks the building manager about while a building is being placed.
+typedef int   (*RotStep_t)(void*, float);
+typedef void* (*RotMat_t)(void*, void*, int);
+typedef int   (*TypeIdx_t)(void*, char*);
+typedef void* (*TypeByName_t)(void*, char*, bool);
+typedef void* (*TypeByIdx_t)(void*, int);
+static RotStep_t o_RotStep; static RotMat_t o_RotMat; static TypeIdx_t o_TypeIdx, o_TypeIdxNoLog;
+static TypeByName_t o_TypeByName; static TypeByIdx_t o_TypeByIdx;
+static std::atomic<int> g_nRotStep{ 0 }, g_nRotMat{ 0 }, g_nTypeIdx{ 0 }, g_nTypeName{ 0 }, g_nTypeByIdx{ 0 };
+static std::atomic<int> g_lastStep{ -1 }, g_lastStepFromRot{ -1 }, g_lastTypeIdx{ -1 };
+static int h_RotStep(void* s, float rot) { int r = o_RotStep(s, rot); g_rotTick = GetTickCount(); g_lastRot = rot; g_lastStepFromRot = r; ++g_nRotStep; return r; }
+static void* h_RotMat(void* s, void* out, int step) { g_lastStep = step; ++g_nRotMat; return o_RotMat(s, out, step); }
+static int h_TypeIdx(void* s, char* n) { int r = o_TypeIdx(s, n); g_typeTick = GetTickCount(); if (n) strncpy(g_lastTypeName, n, 95); g_lastTypeIdx = r; ++g_nTypeIdx; return r; }
+static int h_TypeIdxNoLog(void* s, char* n) { int r = o_TypeIdxNoLog(s, n); g_typeTick = GetTickCount(); if (n) strncpy(g_lastTypeName, n, 95); g_lastTypeIdx = r; ++g_nTypeIdx; return r; }
+static void* h_TypeByName(void* s, char* n, bool b) { if (n) strncpy(g_lastTypeName, n, 95); ++g_nTypeName; return o_TypeByName(s, n, b); }
+static void* h_TypeByIdx(void* s, int i) { g_lastTypeIdx = i; ++g_nTypeByIdx; return o_TypeByIdx(s, i); }
 
 struct IatHook { const char* name; void* hook; void** orig; };
 static IatHook g_hooks[] = {
@@ -376,6 +414,12 @@ static IatHook g_hooks[] = {
     { "?CommonInterfaceGetAxisValue@C3D_INPUT@@QEAAMPEADPEAHMM@Z", h_AxisValue, (void**)&o_AxisValue },
     { "?EditToHeight@C3D_TERRAIN@@QEAAXVC3DVECTOR3@@0MMM_N@Z", h_EditToHeight, (void**)&o_EditToHeight },
     { "?EditorSetCursorSingle@C3D_BUILDING@@QEAAXHVC3DVECTOR3@@M_NM1@Z", h_SetCursorSingle, (void**)&o_SetCursorSingle },
+    { "?GetRotationStepFromRotation@C3D_BUILDING@@QEAAHM@Z", h_RotStep, (void**)&o_RotStep },
+    { "?GetRotationStepMatrix@C3D_BUILDING@@QEAA?AVC3DMATRIX@@H@Z", h_RotMat, (void**)&o_RotMat },
+    { "?GetTypeIndex@C3D_BUILDING@@QEAAHPEAD@Z", h_TypeIdx, (void**)&o_TypeIdx },
+    { "?GetTypeIndexNoLog@C3D_BUILDING@@QEAAHPEAD@Z", h_TypeIdxNoLog, (void**)&o_TypeIdxNoLog },
+    { "?GetType@C3D_BUILDING@@QEAAPEAUTYPE@1@PEAD_N@Z", h_TypeByName, (void**)&o_TypeByName },
+    { "?GetType@C3D_BUILDING@@QEAAPEAUTYPE@1@H@Z", h_TypeByIdx, (void**)&o_TypeByIdx },
     { "?AddCursorBuildings@C3D_BUILDING@@QEAAXXZ", h_AddCursor, (void**)&o_AddCursor },
     { "?EditorClearCursor@C3D_BUILDING@@QEAAXXZ", h_ClearCursor, (void**)&o_ClearCursor },
     { "?EditLevel@C3D_TERRAIN@@QEAAXVC3DVECTOR3@@MMM_N@Z", h_EdLevel, (void**)&o_EdLevel },
@@ -448,9 +492,11 @@ static bool Invert(const M4& in, M4& out) {
 
 void BeginFrame() {
     if (g_abActive) AutoTick();
-    { static DWORD last = 0; static int n = 0; DWORD now = GetTickCount();
-      if (now - last > 3000 && n < 60) { last = now; int a = g_dbgSet.exchange(0), b = g_dbgClear.exchange(0);
-        if (a || b) { ++n; Log("cursor calls in 3 s: set %d, clear %d, type %d, rot %.3f", a, b, g_curType, g_curRot); } } }
+    { static DWORD last = 0; static int n = 0; static char prev[200] = ""; DWORD now = GetTickCount();
+      if (now - last > 2000 && n < 150) { last = now;
+        int a = g_nRotStep.exchange(0), b = g_nRotMat.exchange(0), c = g_nTypeIdx.exchange(0), d = g_nTypeName.exchange(0), e = g_nTypeByIdx.exchange(0);
+        char key[200]; snprintf(key, sizeof(key), "rot %.4f step %d/%d type %d '%s' act %d%d%d%d%d", g_lastRot.load(), g_lastStepFromRot.load(), g_lastStep.load(), g_lastTypeIdx.load(), g_lastTypeName, a > 0, b > 0, c > 0, d > 0, e > 0);
+        if (strcmp(key, prev) != 0) { ++n; strcpy(prev, key); Log("DIAG %s | calls rotStep %d rotMat %d typeIdx %d typeName %d typeByIdx %d", key, a, b, c, d, e); } } }
     g_matOk = false;
     if (!g_camera) return;
     if (!f_ViewGetMatrix) {

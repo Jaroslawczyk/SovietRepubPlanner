@@ -54,7 +54,7 @@ float g_utilRadius[4] = { 200, 200, 250, 150 };
 float g_utilNorm[4] = { 0.12f, 0.12f, 0.9f, 0.25f };   // per resident; rough guesses, editable in the panel
 std::vector<std::vector<V3>> g_utilLines[4];
 std::vector<V3> g_utilPts[4];
-float g_buildRotSign = 1.0f;       // sign between the plan angle and the game cursor rotation
+float g_buildRotSign = -1.0f;       // sign between the plan angle and the game cursor rotation
 float g_streetGap = 250.0f;        // parallel streets every N metres, 0 = off
 bool  g_showSlope = true, g_showLevel = false;
 bool  g_dirty = true, g_areaChanged = false, g_inited = false;
@@ -643,46 +643,75 @@ void Footer() {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("Землю под зданиями плана сразу ставит на высоту площадок. "
                           "Бесплатно, без техники; отменить нельзя — сохранитесь заранее.");
-    // Building in the game: the player selects the same building in the game's own build menu and turns it the
-    // way the plan shows; the mod then drives the game's cursor to every spot of the plan and clicks.
-    if (eng::AutoBuildActive()) {
-        int done, failed, left; eng::AutoBuildStats(done, failed, left);
-        char b[128]; snprintf(b, sizeof(b), "Стоп  ·  поставлено %d, не вышло %d, осталось %d", done, failed, left);
-        if (ImGui::Button(b, ImVec2(-FLT_MIN, 0))) eng::StopAutoBuild();
-    } else if (!g_plan.buildings.empty()) {
+    // Building in the game. The game's own build tool does the work: the player picks a building in the game's
+    // build menu, the mod notices which one, turns it as the plan says, puts the game's cursor on every spot of
+    // that type and clicks; then it asks for the next type.
+    {
+        static bool seq = false, seqRunning = false;
+        static int seqType = -1; static DWORD seqSince = 0;
+        static std::vector<int> seqDone;
         const auto& all = catalog::All();
-        static int sel = -1;
-        std::vector<int> types;
-        for (auto& b : g_plan.buildings) if (std::find(types.begin(), types.end(), b.type) == types.end()) types.push_back(b.type);
-        if (std::find(types.begin(), types.end(), sel) == types.end()) sel = types[0];
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.48f);
-        if (ImGui::BeginCombo("##abtype", all[sel].name.c_str())) {
-            for (int t : types) {
-                char label[200]; snprintf(label, sizeof(label), "%s##ab%d", all[t].name.c_str(), t);
-                if (ImGui::Selectable(label, t == sel)) sel = t;
+        auto lower = [](std::string v) { for (auto& ch : v) ch = (char)tolower((unsigned char)ch); return v; };
+        auto spots = [&](int type, std::vector<V3>& pos, std::vector<float>& rot) {
+            for (auto& b : g_plan.buildings) {
+                if (b.type != type) continue;
+                V3 w = LocalToWorld(g_area, b.u, b.v, 0);
+                if (eng::Occupied(w.x, w.z) & 1) continue;              // already built
+                pos.push_back(w);
+                rot.push_back(g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + (b.rotated ? kPi / 2 : 0)));
             }
-            ImGui::EndCombo();
-        }
-        std::vector<V3> pos; std::vector<float> rot;
+        };
+        auto start = [&](int type) {
+            std::vector<V3> pos; std::vector<float> rot; spots(type, pos, rot);
+            if (pos.empty()) return false;
+            ImVec2 ds = ImGui::GetIO().DisplaySize;
+            eng::StartAutoBuild(pos, rot, ds.x, ds.y);
+            return true;
+        };
+        std::vector<int> types; int total = 0;      // types that still have free spots, in plan order
         for (auto& b : g_plan.buildings) {
-            if (b.type != sel) continue;
-            V3 w = LocalToWorld(g_area, b.u, b.v, 0);
-            if (eng::Occupied(w.x, w.z) & 1) continue;                  // already built
-            pos.push_back(w); rot.push_back(0);
+            if (std::find(types.begin(), types.end(), b.type) != types.end()) continue;
+            if (std::find(seqDone.begin(), seqDone.end(), b.type) != seqDone.end()) continue;
+            std::vector<V3> pos; std::vector<float> rot; spots(b.type, pos, rot);
+            if (!pos.empty()) { types.push_back(b.type); total += (int)pos.size(); }
         }
-        ImGui::SameLine();
-        char b[160];
-        if (pos.empty()) snprintf(b, sizeof(b), "Все уже стоят");
-        else snprintf(b, sizeof(b), "Поставить в игре — %d шт.", (int)pos.size());
-        ImGui::BeginDisabled(pos.empty());
-        if (ImGui::Button(b, ImVec2(-FLT_MIN, 0))) { ImVec2 ds = ImGui::GetIO().DisplaySize; eng::StartAutoBuild(pos, rot, ds.x, ds.y); }
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("1. В игровом меню строительства выберите это же здание.\n"
-                              "2. Поверните его (колесо мыши, R) так, как стоят здания на плане.\n"
-                              "3. Поставьте камеру так, чтобы весь участок был на экране, и не двигайте её.\n"
-                              "Мод сам наведёт игровой курсор и кликнет в каждом месте плана; платит игра как обычно.\n"
-                              "На неровном месте мод удерживает кнопку, чтобы игра выровняла площадку, и пробует ещё раз.");
+
+        if (eng::AutoBuildActive()) {
+            int done, failed, left; eng::AutoBuildStats(done, failed, left);
+            char t[160]; snprintf(t, sizeof(t), "Стоп  ·  поставлено %d, не вышло %d, осталось %d", done, failed, left);
+            if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) { eng::StopAutoBuild(); seq = false; }
+        } else if (seq) {
+            if (seqRunning) { seqRunning = false; seqDone.push_back(seqType); seqType = -1; }      // one type finished
+            else if (types.empty()) seq = false;
+            else {
+                if (std::find(types.begin(), types.end(), seqType) == types.end()) { seqType = types[0]; seqSince = GetTickCount(); }
+                ImGui::TextColored(ImVec4(0.573f, 0.176f, 0.149f, 1), "Выберите в меню стройки игры: %s", all[seqType].name.c_str());
+                ImGui::SetItemTooltip("Обычно мод сам замечает выбор и начинает ставить. Если не заметил — нажмите «Уже выбрано — ставить».");
+                DWORD tick = 0;
+                std::string cur = lower(eng::SelectedType(&tick));
+                bool cursor = eng::CursorActive();
+                if (cursor && tick > seqSince && cur == lower(all[seqType].id)) { if (start(seqType)) seqRunning = true; }
+                float w3 = (ImGui::GetContentRegionAvail().x - 16) / 3;
+                ImGui::BeginDisabled(!cursor);
+                if (ImGui::Button("Уже выбрано — ставить", ImVec2(w3 * 1.4f, 0))) { if (start(seqType)) seqRunning = true; }
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                if (ImGui::Button("Пропустить", ImVec2(w3 * 0.8f, 0))) { seqDone.push_back(seqType); seqType = -1; }
+                ImGui::SameLine();
+                if (ImGui::Button("Стоп", ImVec2(-FLT_MIN, 0))) seq = false;
+            }
+        } else if (!types.empty() || !seqDone.empty()) {
+            char t[160];
+            if (types.empty()) snprintf(t, sizeof(t), "Повторить для пропущенных и не вставших зданий");
+            else snprintf(t, sizeof(t), "Построить в игре всё по очереди — %d зданий", total);
+            if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) { seq = !types.empty(); seqRunning = false; seqType = -1; seqDone.clear(); }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Поставьте камеру так, чтобы весь участок был на экране, и не двигайте её.\n"
+                                  "Мод по очереди называет здание — выберите его в игровом меню строительства.\n"
+                                  "Дальше он сам поворачивает здание как на плане, наводит игровой курсор и кликает\n"
+                                  "во всех местах этого типа, затем называет следующее. Платит игра как обычно.\n"
+                                  "На неровном месте мод удерживает кнопку, чтобы игра выровняла площадку.");
+        } else if (!g_plan.buildings.empty()) ImGui::TextDisabled("Все здания плана уже стоят в игре.");
     }
 }
 
@@ -710,7 +739,7 @@ void Panel() {
 
     if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
 
-    float footer = ImGui::GetTextLineHeightWithSpacing() * 5 + ImGui::GetFrameHeightWithSpacing() * 3 + 14;
+    float footer = ImGui::GetTextLineHeightWithSpacing() * 6 + ImGui::GetFrameHeightWithSpacing() * 3 + 14;
     if (ImGui::BeginTabBar("##tabs")) {
         struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads }, { "Сети", TabUtils } };
         for (auto& t : tabs) {
@@ -796,7 +825,12 @@ void SelfTest() {
     for (int i = 0; i < 6; ++i) { V3 p; if (eng::ScreenToTerrain(ds.x * sx[i], ds.y * sy[i], ds.x, ds.y, p)) pts.push_back(p); }
     Log("selftest: display %.0fx%.0f, points hit %d of 6", ds.x, ds.y, (int)pts.size());
     if (pts.size() < 6) return;
-    g_population = 3000; g_open = true; g_showLevel = true;
+    g_population = 600; g_open = true; g_showLevel = false;
+    {   // test district: only a building that is unlocked from the start, no services
+        const auto& all = catalog::All();
+        for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = all[i].id == "residental_brick_2";
+        for (auto& sv : g_services) sv.enabled = false;
+    }
     SetArea(pts);
 }
 
