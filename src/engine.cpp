@@ -568,6 +568,14 @@ static int CrashInfo(EXCEPTION_POINTERS* ep, const char* what, int stage) {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 typedef void (*Snap_t)(void*, void*, int, int);
+// footpath snap itself (the dispatcher 0x21ba40 calls it with r8b = 0); the game's own building tool calls it with
+// r8b = 1 when it links an entrance to a nearby footpath, which also catches the middle of a footpath piece
+typedef void (*PathSnap_t)(void*, int, unsigned char, UINT64, unsigned char, unsigned char);
+int g_pathSnapMode = 1;     // 0 = like the area paste (ends only), 1 = like the building tool (middle of pieces too)
+static void SnapAt(BYTE* G, void* m, int mgrOffset, int type, int sub) {
+    if (mgrOffset == 0xf968 && g_pathSnapMode == 1) ((PathSnap_t)(Base() + 0x3d4a80))(G, 0, 1, 0, 0, 0);
+    else ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub);
+}
 typedef void* (*PStart_t)(void*, V3*, UINT64, unsigned char, int, UINT64, V3*);
 typedef void* (*PUpdate_t)(void*, V3*, int, int, unsigned char, unsigned char, unsigned char, UINT64, unsigned char, unsigned char);
 typedef void* (*PCommit_t)(void*, UINT64, UINT64, UINT64, unsigned char, unsigned char, unsigned char);
@@ -582,10 +590,10 @@ static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolNa
     if (toolName && FindTool(toolName, &tool)) *(void**)(G + 0xd428) = tool;
     int r = -200; volatile int stage = 0;
     __try {
-        *(V3*)(G + 0xf6c) = a; ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub); a = *(V3*)(G + 0xf6c);
+        *(V3*)(G + 0xf6c) = a; SnapAt(G, m, mgrOffset, type, sub); a = *(V3*)(G + 0xf6c);
         V3 out{}; stage = 1;
         ((PStart_t)(Base() + 0x4fbfd0))(m, &a, (UINT64)(unsigned)sub, 0, arg, 0, &out);
-        stage = 2; *(V3*)(G + 0xf6c) = b; ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub); b = *(V3*)(G + 0xf6c);
+        stage = 2; *(V3*)(G + 0xf6c) = b; SnapAt(G, m, mgrOffset, type, sub); b = *(V3*)(G + 0xf6c);
         stage = 3; ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
         void* p428 = *(void**)((BYTE*)m + 0x428); void* p430 = *(void**)((BYTE*)m + 0x430);
         stage = 4;
@@ -708,6 +716,7 @@ static void GameThreadTick() {
     }
 }
 void DebugDumpTools() { g_dumpTools = true; }
+void SetPathSnapMode(int m) { gx::g_pathSnapMode = m; Log("footpath snap mode %d", m); }
 void DebugSetTool(const char* name) { strncpy(g_dbgTool, name, sizeof(g_dbgTool) - 1); g_dbgToolSet = true; }
 void InstallPathLogging() { gx::InstallPathLogging(); }
 

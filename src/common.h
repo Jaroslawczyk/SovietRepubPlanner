@@ -42,6 +42,7 @@ namespace eng {
     bool InstantBusy();
     void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed
     void DebugDumpTools();
+    void SetPathSnapMode(int mode);                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
     void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
     void StopAutoBuild();
@@ -103,7 +104,7 @@ struct PlanInput {
     bool  utilBuild[4] = {};                        // put this network's buildings and lines into the plan
     bool  utilChain = false;                        // also put switches and pipes between the nodes (the game bends such pipes into loops)
     bool  powerTrafo = true;                        // put a transformer for the substations too
-    float utilRadius[4] = { 140, 170, 160, 140 };   // water, sewage, heating, power: how far a node serves, m
+    float utilRadius[4] = { 250, 250, 380, 250 };   // water, sewage, heating, power: how far a node serves, m (from the exe, see docs)
     float walkRadius = 400;                         // how tooFar residents walk to a stop
     float maxDiff = 3.0f;                           // allowed height difference under one building
     std::function<bool(float, float)> occupied;     // something already stands at (u, v); may be empty

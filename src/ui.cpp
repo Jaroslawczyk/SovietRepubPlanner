@@ -55,7 +55,7 @@ const ImU32 kUtilCol[4] = { IM_COL32(70, 150, 255, 255), IM_COL32(165, 110, 55, 
 bool  g_utilShow[4] = { false, false, false, false };
 bool  g_utilBuild[4] = { false, false, false, false };   // the network goes into the plan and gets built
 bool  g_powerUnder = false;                               // medium-voltage lines as underground cable
-float g_utilRadius[4] = { 140, 170, 160, 140 };   // seen working in the game at least this far (sewage 174 m, heat 162 m, power 141 m); the real limit is unknown
+float g_utilRadius[4] = { 250, 250, 380, 250 };   // the game links a building to a node closer than this (2D distance; SOVIET64.exe 0x441340, 0x441600, 0x440d90, 0x4406d0)
 bool  g_powerTrafo = true;
 bool  g_utilChain = false;      // switches and pipes between the nodes of one network
 float g_utilNorm[4] = { 0.12f, 0.12f, 0.9f, 0.25f };   // per resident; rough guesses, editable in the panel
@@ -853,7 +853,7 @@ void TabUtils() {
     ImGui::TextWrapped("По правилам игры: дома берут воду, тепло и свет от узла в радиусе обслуживания, к самим домам линии не нужны. "
                        "Труба соединяет только два здания, поэтому узлы висят на распределителях, а те идут цепочкой; провод среднего "
                        "напряжения идёт от трансформатора прямо к подстанции (до 6 на трансформатор). Начало каждой цепочки и "
-                       "высокую сторону трансформатора подключаете вы — к своему источнику. Радиусы в игре не подписаны: проверьте их и поправьте здесь.");
+                       "высокую сторону трансформатора подключаете вы — к своему источнику. Радиусы взяты из кода игры: вода, канализация и электричество 250 м, отопление 380 м (по прямой).");
     ImGui::Spacing();
     int people = g_plan.capacity;
     for (int k = 0; k < 4; ++k) {
@@ -1105,6 +1105,11 @@ void SelfTest() {
         DeleteFileW(tlFlag.c_str());
         eng::InstallPathLogging();
         if (nm[0]) eng::DebugSetTool(nm);
+    }
+    std::wstring smFlag = GameDir() + L"DistrictPlanner.snapmode";     // debug: footpath snap mode for A/B tests
+    if (GetFileAttributesW(smFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        int m = 1; FILE* f = _wfopen(smFlag.c_str(), L"r"); if (f) { fscanf(f, "%d", &m); fclose(f); }
+        DeleteFileW(smFlag.c_str()); eng::SetPathSnapMode(m);
     }
     std::wstring inFlag = GameDir() + L"DistrictPlanner.instant";      // debug: place the first N plan buildings by direct game calls
     if (GetFileAttributesW(inFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
