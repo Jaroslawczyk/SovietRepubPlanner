@@ -545,6 +545,10 @@ const char* MaterialName(const std::string& m) {
 std::vector<int> g_houseOrder;      // catalog indices of residential buildings in display order
 bool g_onlySelected = false;
 
+// Building volume, m3: the game prices construction from the model (walls, roof), so the volume per resident is the
+// honest yardstick of how much material and work a home costs.
+float HouseVolume(const BuildingType& b) { return b.sx * b.sz * std::max(3.0f, b.height); }
+int  g_resMin = 0, g_resMax = 1000; int g_matFilter = 0;   // house list filter: residents range, wall material
 void SortHouses(ImGuiTableSortSpecs* specs) {
     const auto& all = catalog::All();
     if (g_houseOrder.empty())
@@ -555,11 +559,12 @@ void SortHouses(ImGuiTableSortSpecs* specs) {
     std::stable_sort(g_houseOrder.begin(), g_houseOrder.end(), [&](int x, int y) {
         const BuildingType& a = all[asc ? x : y]; const BuildingType& b = all[asc ? y : x];
         switch (col) {
-            case 1: return a.capacity < b.capacity;
-            case 2: return a.sx * a.sz < b.sx * b.sz;
-            case 3: return a.quality < b.quality;
-            case 4: return a.material < b.material;
-            case 5: return a.style < b.style;
+            case 2: return a.capacity < b.capacity;
+            case 3: return a.sx * a.sz < b.sx * b.sz;
+            case 4: return a.quality < b.quality;
+            case 5: return a.material < b.material;
+            case 6: return a.style < b.style;
+            case 7: return HouseVolume(a) / std::max(1, a.capacity) < HouseVolume(b) / std::max(1, b.capacity);
             default: return a.name < b.name;
         }
     });
@@ -611,13 +616,30 @@ void TabHouses() {
     ImGui::SetNextItemWidth(200);
     ImGui::InputTextWithHint("##filter", "поиск по названию", g_filter, sizeof(g_filter));
     ImGui::SameLine(); ImGui::Checkbox("только выбранные", &g_onlySelected);
+    // filter: how many residents, which wall material (the material decides what the building site needs)
+    ImGui::SetNextItemWidth(220);
+    ImGui::DragIntRange2("жителей в доме", &g_resMin, &g_resMax, 1.0f, 0, 1000, "от %d", "до %d");
+    static const char* mats[] = { "любой материал", "кирпич", "панели", "дерево" };
+    static const char* matKeys[] = { "", "brick", "panel", "wood" };
+    ImGui::SameLine(); ImGui::SetNextItemWidth(150); ImGui::Combo("##mat", &g_matFilter, mats, IM_ARRAYSIZE(mats));
+    auto passes = [&](const BuildingType& b) {
+        if (b.capacity < g_resMin || b.capacity > g_resMax) return false;
+        if (g_matFilter > 0 && b.material.find(matKeys[g_matFilter]) == std::string::npos) return false;
+        return true;
+    };
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Выбрать по фильтру")) {
+        for (int i : g_houseOrder) if (passes(catalog::All()[i])) g_houseSel[i] = 1; else g_houseSel[i] = 0;
+        g_dirty = true;
+    }
+    ImGui::SetItemTooltip("Отмечает все дома, подходящие под фильтр, и снимает остальные.");
     ImGui::SameLine();
     if (ImGui::SmallButton("Снять все")) { std::fill(g_houseSel.begin(), g_houseSel.end(), 0); g_dirty = true; }
     const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                                   ImGuiTableFlags_Sortable | ImGuiTableFlags_Resizable;
     int shareSum = 0;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) shareSum += std::max(0, g_houseShare[i]);
-    if (ImGui::BeginTable("houses", 7, flags, ImVec2(0, ImGui::GetContentRegionAvail().y))) {
+    if (ImGui::BeginTable("houses", 8, flags, ImVec2(0, ImGui::GetContentRegionAvail().y))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("Дом", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Доля", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, 112);
@@ -626,12 +648,14 @@ void TabHouses() {
         ImGui::TableSetupColumn("Кач.", ImGuiTableColumnFlags_WidthFixed, 46);
         ImGui::TableSetupColumn("Материал", ImGuiTableColumnFlags_WidthFixed, 78);
         ImGui::TableSetupColumn("Стиль", ImGuiTableColumnFlags_WidthFixed, 96);
+        ImGui::TableSetupColumn("м³ на жит.", ImGuiTableColumnFlags_WidthFixed, 74);
         ImGui::TableHeadersRow();
         ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs();
         if (g_houseOrder.empty() || (specs && specs->SpecsDirty)) { SortHouses(specs); if (specs) specs->SpecsDirty = false; }
         for (int i : g_houseOrder) {
             const BuildingType& b = all[i];
             if (g_onlySelected && !g_houseSel[i]) continue;
+            if (!passes(b)) continue;
             if (g_filter[0] && b.name.find(g_filter) == std::string::npos && b.id.find(g_filter) == std::string::npos) continue;
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -652,6 +676,8 @@ void TabHouses() {
             ImGui::TableNextColumn(); if (b.quality > 0) ImGui::Text("%.2f", b.quality); else ImGui::TextDisabled("-");
             ImGui::TableNextColumn(); ImGui::TextUnformatted(MaterialName(b.material));
             ImGui::TableNextColumn(); ImGui::TextUnformatted(b.style.empty() ? "-" : b.style.c_str());
+            ImGui::TableNextColumn(); ImGui::Text("%.0f", HouseVolume(b) / std::max(1, b.capacity));
+            ImGui::SetItemTooltip("Объём здания на одного жителя — чем меньше, тем дешевле стройка на человека\n(игра считает стоимость по стенам и крыше модели).");
         }
         ImGui::EndTable();
     }
@@ -1357,7 +1383,9 @@ void Panel() {
 
     if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
 
-    float footer = ImGui::GetTextLineHeightWithSpacing() * 6 + ImGui::GetFrameHeightWithSpacing() * 3 + 14;
+    // the summary and the build buttons below the tabs grew past a fixed height and were cut off: they get their own
+    // scrolling area, about 40 % of the window
+    float footer = std::max(180.0f, ImGui::GetContentRegionAvail().y * 0.42f);
     if (ImGui::BeginTabBar("##tabs")) {
         struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads }, { "Сети", TabUtils } };
         for (auto& t : tabs) {
@@ -1369,7 +1397,9 @@ void Panel() {
         }
         ImGui::EndTabBar();
     }
+    ImGui::BeginChild("##footer", ImVec2(0, 0), ImGuiChildFlags_None);
     Footer();
+    ImGui::EndChild();
     ImGui::End();
 }
 

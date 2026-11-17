@@ -77,7 +77,10 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     std::vector<Item> items;
     if (in.services) for (auto& s : *in.services) {
         if (!s.enabled || s.typeIndex < 0) continue;
-        int n = (int)ceilf((float)in.population / (float)std::max(1, s.perResidents));
+        // as many as the district's real number of residents asks for (with "fill the whole area" that is what
+        // fits, not the number typed in)
+        int base = in.servicePop > 0 ? in.servicePop : in.population;
+        int n = (int)ceilf((float)base / (float)std::max(1, s.perResidents));
         for (int i = 0; i < std::max(1, n); ++i) items.push_back(MakeItem(s.typeIndex));
     }
     int cap = 0;
@@ -178,6 +181,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     if (sites) for (int k = 0; k < 4; ++k) siteDone[k].assign(sites[k].size(), 0);
     int utilGrp[4] = {};
 
+    if (!in.blocks) {
     size_t i = 0;
     // one row of buildings between vlo and vhi, facing the path at pathV
     auto placeRow = [&](float vlo, float vhi, bool north, float pathV, size_t limit, float& rowL, float& rowR) {
@@ -346,16 +350,6 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     }
     r.unplaced = (int)(items.size() - i);
 
-    // the last node of a pipe network hangs on the previous switch, so its own switch is not needed
-    {
-        int lastGrp[4] = { -1, -1, -1, -1 };
-        for (auto& b : r.buildings) if (b.net >= 0 && b.role == 0) lastGrp[b.net] = std::max(lastGrp[b.net], (int)b.grp);
-        r.buildings.erase(std::remove_if(r.buildings.begin(), r.buildings.end(), [&](const Placed& b) {
-            return b.net >= 0 && b.net < 3 && b.role == 1 && b.grp >= lastGrp[b.net]; }), r.buildings.end());
-        for (int k = 0; k < 4; ++k) r.utilNodes[k].clear();
-        for (auto& b : r.buildings) if (b.net >= 0 && b.role == 0) r.utilNodes[b.net].push_back({ b.u, b.v });
-    }
-
     // Links between neighbouring strips (and the street): a short footpath across, placed as close to the stop
     // as possible where it stays inside both footpaths' extents and does not run through a building.
     auto blocked = [&](float u, float v1, float v2) {
@@ -412,6 +406,279 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         }
     } else if (roadHalf > 0 && !r.roads.empty() && (!stripsUp.empty() || !stripsDown.empty()))
         r.crossings.push_back({ spineU, roadV });
+    } else {
+        // ===== Microdistricts =====
+        // A grid of streets cuts the area into blocks. Each block: houses along its edges with their backs to the
+        // streets and the entrances to the courtyard, a ring footpath in the courtyard, gates through the edge rows
+        // from the ring to every street, and the inside of the courtyard filled with strips (services first: school,
+        // kindergarten...), each strip's footpath joining the ring. Services are dealt out over the blocks so that
+        // the same kind never stands twice side by side.
+        const float S = in.streetSpacing >= 80 ? in.streetSpacing : 1e6f;
+        const float hw = roadHalf;
+        const float inset = 3.0f;                       // from the street's edge to the backs of the houses
+        std::vector<float> hvs, vus;                    // horizontal streets (v), vertical streets (u)
+        if (hw > 0) {
+            hvs.push_back(roadV);
+            for (float v = roadV + S; v < maxV - 0.6f * S; v += S) hvs.push_back(v);
+            for (float v = roadV - S; v > minV + 0.6f * S; v -= S) hvs.push_back(v);
+            std::sort(hvs.begin(), hvs.end());
+            for (float u = crossU; u < maxU - 0.6f * S; u += S) vus.push_back(u);
+            for (float u = crossU - S; u > minU + 0.6f * S; u -= S) vus.push_back(u);
+            if (!in.crossRoad && S > 1e5f) vus.clear();
+            std::sort(vus.begin(), vus.end());
+            for (auto& x : vus) for (auto& st : r.stops) if (fabsf(x - st.u) < 35) x = st.u + (x >= st.u ? 35.0f : -35.0f);
+            for (float v : hvs) {
+                if (v == roadV) continue;
+                float L, R;
+                if (!PolyScan(in.poly, v, L, R) || R - L < 30) continue;
+                r.roads.push_back({ L, v, R, v, hw * 2 });
+                r.paths.push_back({ L, v - hw - 2, R, v - hw - 2 }); r.paths.push_back({ L, v + hw + 2, R, v + hw + 2 });   // pavements: walking lines only
+            }
+            std::vector<V2> tp; for (auto& q : in.poly) tp.push_back({ q.v, q.u });
+            for (float u : vus) {
+                float B, T;
+                if (!PolyScan(tp, u, B, T) || T - B < 30) continue;
+                std::vector<float> cuts{ B };
+                for (auto& rd : r.roads) if (fabsf(rd.v1 - rd.v2) < 0.01f && rd.v1 > B + 5 && rd.v1 < T - 5 && u > std::min(rd.u1, rd.u2) && u < std::max(rd.u1, rd.u2)) cuts.push_back(rd.v1);
+                cuts.push_back(T); std::sort(cuts.begin(), cuts.end());
+                for (size_t k = 0; k + 1 < cuts.size(); ++k) if (cuts[k + 1] - cuts[k] > 10) r.roads.push_back({ u, cuts[k], u, cuts[k + 1], hw * 2 });
+                r.paths.push_back({ u - hw - 2, B, u - hw - 2, T }); r.paths.push_back({ u + hw + 2, B, u + hw + 2, T });
+            }
+        }
+        // the blocks, nearest to the middle of the main street first
+        struct Blk { float u0, u1, v0, v1; bool sS, sN, sW, sE; float sv, nv, wu, eu; };
+        std::vector<Blk> blks;
+        {
+            std::vector<float> ub{ minU }, vb{ minV };
+            for (float u : vus) ub.push_back(u);
+            ub.push_back(maxU);
+            for (float v : hvs) vb.push_back(v);
+            vb.push_back(maxV);
+            auto edge = [&](float s, bool isStreetMain) { return isStreetMain ? roadBand + 1.0f : hw + inset; };
+            for (size_t a = 0; a + 1 < ub.size(); ++a)
+                for (size_t c = 0; c + 1 < vb.size(); ++c) {
+                    Blk b{};
+                    b.sW = a > 0; b.sE = a + 2 < ub.size(); b.sS = c > 0; b.sN = c + 2 < vb.size();
+                    b.wu = ub[a]; b.eu = ub[a + 1]; b.sv = vb[c]; b.nv = vb[c + 1];
+                    b.u0 = ub[a] + (b.sW ? edge(ub[a], false) : margin);
+                    b.u1 = ub[a + 1] - (b.sE ? edge(ub[a + 1], false) : margin);
+                    b.v0 = vb[c] + (b.sS ? edge(vb[c], vb[c] == roadV) : margin);
+                    b.v1 = vb[c + 1] - (b.sN ? edge(vb[c + 1], vb[c + 1] == roadV) : margin);
+                    if (b.u1 - b.u0 < 40 || b.v1 - b.v0 < 40) continue;
+                    blks.push_back(b);
+                }
+            std::sort(blks.begin(), blks.end(), [&](const Blk& x, const Blk& y) {
+                return hypotf((x.u0 + x.u1) / 2 - crossU, (x.v0 + x.v1) / 2 - roadV) < hypotf((y.u0 + y.u1) / 2 - crossU, (y.v0 + y.v1) / 2 - roadV); });
+        }
+        // services dealt out over the blocks, houses taken in order
+        std::vector<Item> houses, svcAll;
+        for (auto& it : items) (all[it.type].category == "LIVING" ? houses : svcAll).push_back(it);
+        size_t hi = 0;
+        int unplacedSvc = 0;
+        auto inside = [&](float cu, float cv, float w, float d) {
+            return PolyContains(in.poly, cu - w / 2, cv - d / 2) && PolyContains(in.poly, cu + w / 2, cv - d / 2) &&
+                   PolyContains(in.poly, cu - w / 2, cv + d / 2) && PolyContains(in.poly, cu + w / 2, cv + d / 2);
+        };
+        float lastDepth = 0;
+        // place one item; side 0 S (back at v=edge, entrance +v), 1 N, 2 W (back at u=edge, entrance +u), 3 E.
+        // t = start along the side; returns the frontage used, 0 = did not fit here
+        auto putAt = [&](const Item& it0, int side, float edgeCoord, float t, int net, int role, int grp, bool roadOut) -> float {
+            const BuildingType& bt = all[it0.type];
+            int rot; float F, D;               // frontage along the side, depth across it (raw, no apron)
+            if (roadOut) {                     // road connection toward the street behind the row
+                V2 want = side == 0 ? V2{ 0, -1 } : side == 1 ? V2{ 0, 1 } : side == 2 ? V2{ -1, 0 } : V2{ 1, 0 };
+                rot = -1;
+                for (auto& c : bt.conns) if (c.kind == 1 && rot < 0) {
+                    float l = hypotf(c.dx, c.dz);
+                    for (int rr = 0; rr < 4 && l > 0.01f; ++rr) { V2 n = Turn(rr, c.dx, c.dz); if (n.u * want.u + n.v * want.v > 0.7f * l) { rot = rr; break; } }
+                }
+                if (rot < 0) roadOut = false;      // no road connection (water / sewage node): placed like a house
+            }
+            if (roadOut) {
+                float eu = (rot & 1) ? bt.sz : bt.sx, ev = (rot & 1) ? bt.sx : bt.sz;   // extents along u / v
+                F = side < 2 ? eu : ev; D = side < 2 ? ev : eu;
+                D += 2.0f;                       // room for its yard / doors on the courtyard side
+            }
+            if (!roadOut) {
+                // the entrance to the courtyard: it.rot makes it face +v
+                rot = (it0.rot + (side == 0 ? 0 : side == 1 ? 2 : side == 2 ? 3 : 1)) & 3;
+                float rawF = it0.w - kSide, rawD = it0.d - kApron;      // MakeItem: w along the entrance side
+                F = rawF; D = rawD + kApron;
+            }
+            float rawDepth = roadOut ? D - 2.0f : D - kApron;
+            float cu, cv, w, d;
+            if (side < 2) { cu = t + F / 2; cv = side == 0 ? edgeCoord + rawDepth / 2 : edgeCoord - rawDepth / 2; w = F; d = rawDepth; }
+            else { cv = t + F / 2; cu = side == 2 ? edgeCoord + rawDepth / 2 : edgeCoord - rawDepth / 2; w = rawDepth; d = F; }
+            if (!inside(cu, cv, w, d)) return -F;
+            if (busy(cu, cv, w, d) || heightRange(cu, cv, w, d) > in.maxDiff) return -F;
+            Placed pb{ it0.type, cu, cv, w, d, (rot & 1) != 0 };
+            pb.rot = rot;
+            V2 off = Turn(rot, bt.cx, bt.cz);
+            pb.ou = cu - off.u; pb.ov = cv - off.v;
+            pb.net = (signed char)net; pb.role = (signed char)role; pb.grp = (short)grp;
+            r.buildings.push_back(pb);
+            lastDepth = std::max(lastDepth, D);
+            return F;
+        };
+        std::deque<Pend> nodeQ;          // utility nodes waiting for a spot in an edge row
+        auto wantNodes = [&](float hu, float hv2) {
+            if (!sites) return;
+            for (int k = 0; k < 4; ++k) {
+                if (!in.utilBuild[k] || utilType[k][0] < 0) continue;
+                for (size_t s = 0; s < sites[k].size(); ++s) {
+                    if (siteDone[k][s] || hypotf(sites[k][s].u - hu, sites[k][s].v - hv2) > 40) continue;
+                    siteDone[k][s] = 1;
+                    short g = (short)utilGrp[k]++;
+                    nodeQ.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
+                    if (utilType[k][1] >= 0 && (k < 3 ? in.utilChain : (in.powerTrafo && g % 6 == 0))) nodeQ.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
+                }
+            }
+        };
+        // one edge row from a to b along the side, leaving the gate free; street-side services and nodes go here
+        auto edgeRow = [&](int side, float edgeCoord, float a, float b, float gate, std::vector<Item>& svcHere, bool fill, bool street) -> float {
+            float t = a + 1.0f, maxD = 0;
+            int fails = 0;
+            while (t < b - 6) {
+                bool isNode = street && !nodeQ.empty();      // vehicles need the street behind the row
+                Item it; int net = -1, role = 0, grp = 0; bool roadOut = false; bool isSvc = false;
+                if (isNode) { it = nodeQ.front().it; net = nodeQ.front().net; role = nodeQ.front().role; grp = nodeQ.front().grp; roadOut = true; }
+                else if (street && std::any_of(svcHere.begin(), svcHere.end(), [&](const Item& x) { return all[x.type].needsRoad; })) {
+                    auto pos = std::find_if(svcHere.begin(), svcHere.end(), [&](const Item& x) { return all[x.type].needsRoad; });
+                    std::rotate(svcHere.begin(), pos, pos + 1);       // the street-side service to the front
+                    it = svcHere.front(); roadOut = true; isSvc = true;
+                }
+                else if (fill && hi < houses.size()) it = houses[hi];
+                else break;
+                float Fguess = roadOut ? std::max(all[it.type].sx, all[it.type].sz) : it.w - kSide;
+                if (t < gate + 7 && t + Fguess > gate - 7) { t = gate + 7; continue; }
+                if (t + Fguess > b) {
+                    if (isNode) { nodeQ.pop_front(); ++unplacedSvc; continue; }
+                    if (isSvc) break;
+                    break;
+                }
+                lastDepth = 0;
+                float used = putAt(it, side, edgeCoord, t, net, role, grp, roadOut);
+                if (used <= 0) {
+                    if (used == 0) { if (isNode) { nodeQ.pop_front(); ++unplacedSvc; } else if (isSvc) { svcHere.erase(svcHere.begin()); ++unplacedSvc; } else ++hi; continue; }
+                    t += 6; if (++fails > 200) break; continue;
+                }
+                maxD = std::max(maxD, lastDepth);
+                const Placed& pb = r.buildings.back();
+                if (isNode) nodeQ.pop_front();
+                else if (isSvc) svcHere.erase(svcHere.begin());
+                else { ++hi; wantNodes(pb.u, pb.v); }
+                t += used + gap;
+            }
+            return maxD;
+        };
+        // strips inside the courtyard: rows along u, footpath in the middle running the full width to the ring
+        auto courtyard = [&](float cu0, float cu1, float cv0, float cv1, std::vector<Item>& svcHere, bool fill) {
+            float v = cv0;
+            while (true) {
+                // a service too deep for what is left of the courtyard goes on to the next block
+                for (size_t k = 0; k < svcHere.size();) {
+                    if (svcHere[k].d + band > cv1 - v || svcHere[k].w > cu1 - cu0) { svcAll.push_back(svcHere[k]); svcHere.erase(svcHere.begin() + k); }
+                    else ++k;
+                }
+                // the deepest of the next items decides the strip
+                float depth = 0;
+                for (auto& s : svcHere) depth = std::max(depth, s.d);
+                for (size_t k = hi; k < houses.size() && k < hi + 8 && fill; ++k) depth = std::max(depth, houses[k].d);
+                if (depth <= 0) break;
+                float h = 2 * depth + band;
+                bool two = v + h <= cv1, one = !two && v + depth + band <= cv1;
+                if (!two && !one) break;
+                float pathV = v + depth + band / 2;
+                int placedHere = 0;
+                for (int row = 0; row < (two ? 2 : 1); ++row) {
+                    float u = cu0 + 1;
+                    int fails = 0;
+                    while (true) {
+                        Item it; bool isSvc = false;
+                        if (!svcHere.empty()) { it = svcHere.front(); isSvc = true; }
+                        else if (fill && hi < houses.size()) it = houses[hi];
+                        else break;
+                        if (it.d > depth + 0.01f) { if (isSvc) { svcHere.push_back(svcHere.front()); svcHere.erase(svcHere.begin()); if (++fails > 8) break; continue; } break; }
+                        if (u + it.w > cu1) break;
+                        float cu = u + it.w / 2, fd = it.d - kApron;
+                        float cv = row == 0 ? pathV - band / 2 - kApron - fd / 2 : pathV + band / 2 + kApron + fd / 2;
+                        float w = it.w - kSide;
+                        if (!inside(cu, cv, w, fd) || busy(cu, cv, w, fd) || heightRange(cu, cv, w, fd) > in.maxDiff) { u += 6; if (++fails > 200) break; continue; }
+                        Placed pb{ it.type, cu, cv, w, fd, it.rotated };
+                        pb.rot = (it.rot + (row == 0 ? 0 : 2)) & 3;
+                        if (all[it.type].needsRoad) {      // a road connection looks along the strip toward the nearer ring side
+                            for (auto& c : all[it.type].conns) if (c.kind == 1) {
+                                float want = (cu - cu0 < cu1 - cu) ? -1.0f : 1.0f;
+                                if (Turn(pb.rot, c.dx, c.dz).u * want < 0 && fabsf(Turn(pb.rot, c.dx, c.dz).u) > 0.5f) pb.rot = (pb.rot + 2) & 3;
+                                break;
+                            }
+                        }
+                        V2 off = Turn(pb.rot, all[it.type].cx, all[it.type].cz);
+                        pb.ou = cu - off.u; pb.ov = cv - off.v;
+                        r.buildings.push_back(pb); ++placedHere;
+                        if (isSvc) svcHere.erase(svcHere.begin()); else ++hi;
+                        u += it.w + gap;
+                    }
+                }
+                if (placedHere) r.paths.push_back({ cu0 - 3, pathV, cu1 + 3, pathV });
+                v += (two ? h : depth + band) + gap;
+            }
+        };
+        for (size_t bi = 0; bi < blks.size(); ++bi) {
+            const Blk& b = blks[bi];
+            bool fill = hi < houses.size();
+            if (!fill && svcAll.empty()) break;
+            // services of this block: one of each kind (never two schools side by side); once the houses are used
+            // up, all that is left
+            std::vector<Item> svc;
+            for (size_t k = 0; k < svcAll.size();) {
+                bool have = false;
+                for (auto& x : svc) if (all[x.type].category == all[svcAll[k].type].category) have = true;
+                if (!have || !fill) { svc.push_back(svcAll[k]); svcAll.erase(svcAll.begin() + k); } else ++k;
+            }
+            // gates: middle of each side, or at a stop standing on that side's street
+            float gS = (b.u0 + b.u1) / 2, gN = gS, gW = (b.v0 + b.v1) / 2, gE = gW;
+            float stopEdgeS = 0, stopEdgeN = 0; bool stopS = false, stopN = false;
+            for (auto& st : r.buildings) if (st.stop && st.u > b.u0 + 15 && st.u < b.u1 - 15) {
+                if (b.sS && fabsf(b.sv - roadV) < 0.01f && fabsf(st.ov - b.sv) < 1) { gS = st.u; stopS = true; stopEdgeS = st.v + st.d / 2 + 1; }
+                if (b.sN && fabsf(b.nv - roadV) < 0.01f && fabsf(st.ov - b.nv) < 1) { gN = st.u; stopN = true; stopEdgeN = st.v - st.d / 2 - 1; }
+            }
+            // edge rows: street-side services and nodes go in the row facing the main street first
+            float dS = edgeRow(0, b.v0, b.u0, b.u1, gS, svc, fill, b.sS);
+            float dN = edgeRow(1, b.v1, b.u0, b.u1, gN, svc, fill, b.sN);
+            float wv0 = b.v0 + std::max(dS, 4.0f) + 2, wv1 = b.v1 - std::max(dN, 4.0f) - 2;
+            float dW = wv1 - wv0 > 20 ? edgeRow(2, b.u0, wv0, wv1, gW, svc, fill, b.sW) : 0;
+            float dE = wv1 - wv0 > 20 ? edgeRow(3, b.u1, wv0, wv1, gE, svc, fill, b.sE) : 0;
+            // the ring
+            float rv0 = b.v0 + std::max(dS, 0.0f) + 1.5f, rv1 = b.v1 - std::max(dN, 0.0f) - 1.5f;
+            float ru0 = b.u0 + std::max(dW, 0.0f) + 1.5f, ru1 = b.u1 - std::max(dE, 0.0f) - 1.5f;
+            if (dS + dN + dW + dE <= 0) { for (auto& x : svc) svcAll.push_back(x); continue; }
+            if (ru1 - ru0 > 8 && rv1 - rv0 > 8) {
+                r.paths.push_back({ ru0, rv0, ru1, rv0 }); r.paths.push_back({ ru1, rv0, ru1, rv1 });
+                r.paths.push_back({ ru1, rv1, ru0, rv1 }); r.paths.push_back({ ru0, rv1, ru0, rv0 });
+            }
+            // gates to the streets
+            if (b.sS) r.paths.push_back({ gS, rv0, gS, stopS ? stopEdgeS : b.sv });
+            if (b.sN) r.paths.push_back({ gN, rv1, gN, stopN ? stopEdgeN : b.nv });
+            if (b.sW) r.paths.push_back({ ru0, gW, b.wu, gW });
+            if (b.sE) r.paths.push_back({ ru1, gE, b.eu, gE });
+            // the courtyard
+            if (ru1 - ru0 > 30 && rv1 - rv0 > 30) courtyard(ru0 + 3, ru1 - 3, rv0 + 3, rv1 - 3, svc, fill);
+            for (auto& x : svc) svcAll.push_back(x);       // did not fit: the next block takes it
+        }
+        r.unplaced = (int)(houses.size() - hi) + unplacedSvc + (int)svcAll.size();
+    }
+
+    // the last node of a pipe network hangs on the previous switch, so its own switch is not needed
+    {
+        int lastGrp[4] = { -1, -1, -1, -1 };
+        for (auto& b : r.buildings) if (b.net >= 0 && b.role == 0) lastGrp[b.net] = std::max(lastGrp[b.net], (int)b.grp);
+        r.buildings.erase(std::remove_if(r.buildings.begin(), r.buildings.end(), [&](const Placed& b) {
+            return b.net >= 0 && b.net < 3 && b.role == 1 && b.grp >= lastGrp[b.net]; }), r.buildings.end());
+        for (int k = 0; k < 4; ++k) r.utilNodes[k].clear();
+        for (auto& b : r.buildings) if (b.net >= 0 && b.role == 0) r.utilNodes[b.net].push_back({ b.u, b.v });
+    }
+
     // Connections: a footpath from every building's footpath entrance to the nearest footpath, and a driveway from
     // the road connection of buildings that need vehicles to the nearest street. A search on a 2 m grid with a
     // price on turns keeps the lines straight and out of the buildings.
@@ -438,7 +705,8 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             for (auto& p : r.paths) { mark(goal, 1, p.u1, p.v1, p.u2, p.v2); mark(slow, 1, p.u1, p.v1, p.u2, p.v2); }
             for (auto& rd : r.roads) {
                 mark(goal, 2, rd.u1, rd.v1, rd.u2, rd.v2);
-                mark(block, 1, rd.u1, rd.v1 - rd.width / 2 + 0.5f, rd.u2, rd.v1 + rd.width / 2 - 0.5f);    // nobody walks on the roadway
+                if (fabsf(rd.u1 - rd.u2) < 0.01f) mark(block, 1, rd.u1 - rd.width / 2 + 0.5f, rd.v1, rd.u1 + rd.width / 2 - 0.5f, rd.v2);
+                else mark(block, 1, rd.u1, rd.v1 - rd.width / 2 + 0.5f, rd.u2, rd.v1 + rd.width / 2 - 0.5f);    // nobody walks on the roadway
             }
         }
         const int du[4] = { 1, 0, -1, 0 }, dv[4] = { 0, 1, 0, -1 };
@@ -839,6 +1107,12 @@ PlanResult MakePlan(const PlanInput& inRaw) {
         if (t.id == "heating_endstation_small" && t.heatCap > 0) in.utilNodeCap[2] = t.heatCap;
         if (t.id == "eletric_substation" && t.powerCap > 0) in.utilNodeCap[3] = t.powerCap;
     }
+    if (in.fillAll && in.servicePop <= 0 && in.services) {
+        PlanInput probe = in;
+        for (int k = 0; k < 4; ++k) probe.utilBuild[k] = false;
+        probe.servicePop = 1;                           // one of each service while measuring
+        in.servicePop = std::max(1, MakePlanImpl(probe, nullptr).capacity);
+    }
     bool any = false;
     for (int k = 0; k < 4; ++k) any = any || in.utilBuild[k];
     if (!any) return MakePlanImpl(in, nullptr);
@@ -864,8 +1138,12 @@ PlanResult MakePlan(const PlanInput& inRaw) {
             if (anyStreet)
                 for (size_t b = 0; b < n; ++b) {
                     float gapToStreet = 1e9f;
-                    for (auto& rd : cur.roads) if (fabsf(rd.v1 - rd.v2) < 0.01f && bs[b]->u > std::min(rd.u1, rd.u2) && bs[b]->u < std::max(rd.u1, rd.u2))
-                        gapToStreet = std::min(gapToStreet, fabsf(bs[b]->v - rd.v1) - bs[b]->d / 2 - rd.width / 2);
+                    for (auto& rd : cur.roads) {
+                        if (fabsf(rd.v1 - rd.v2) < 0.01f && bs[b]->u > std::min(rd.u1, rd.u2) && bs[b]->u < std::max(rd.u1, rd.u2))
+                            gapToStreet = std::min(gapToStreet, fabsf(bs[b]->v - rd.v1) - bs[b]->d / 2 - rd.width / 2);
+                        if (fabsf(rd.u1 - rd.u2) < 0.01f && bs[b]->v > std::min(rd.v1, rd.v2) && bs[b]->v < std::max(rd.v1, rd.v2))
+                            gapToStreet = std::min(gapToStreet, fabsf(bs[b]->u - rd.u1) - bs[b]->w / 2 - rd.width / 2);
+                    }
                     streetSide[b] = gapToStreet < 14.0f;
                 }
         }
