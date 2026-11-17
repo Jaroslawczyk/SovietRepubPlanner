@@ -167,7 +167,7 @@ static PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites
                         siteDone[k][s] = 1;
                         short g = (short)utilGrp[k]++;
                         queued.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
-                        if (utilType[k][1] >= 0 && (k < 3 || (in.powerTrafo && g % 6 == 0))) helpers.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
+                        if (utilType[k][1] >= 0 && (k < 3 ? in.utilChain : (in.powerTrafo && g % 6 == 0))) helpers.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
                     }
                 }
                 for (auto& hp : helpers) queued.push_back(hp);

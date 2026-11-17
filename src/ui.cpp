@@ -54,9 +54,10 @@ const char* const kUtilUnit[4] = { "м³/сут", "м³/сут", "кВт", "кВ
 const ImU32 kUtilCol[4] = { IM_COL32(70, 150, 255, 255), IM_COL32(165, 110, 55, 255), IM_COL32(245, 85, 60, 255), IM_COL32(250, 220, 60, 255) };
 bool  g_utilShow[4] = { false, false, false, false };
 bool  g_utilBuild[4] = { false, false, false, false };   // the network goes into the plan and gets built
-bool  g_powerUnder = true;                                // medium-voltage lines as underground cable
+bool  g_powerUnder = false;                               // medium-voltage lines as underground cable
 float g_utilRadius[4] = { 140, 170, 160, 140 };   // seen working in the game at least this far (sewage 174 m, heat 162 m, power 141 m); the real limit is unknown
 bool  g_powerTrafo = true;
+bool  g_utilChain = false;      // switches and pipes between the nodes of one network
 float g_utilNorm[4] = { 0.12f, 0.12f, 0.9f, 0.25f };   // per resident; rough guesses, editable in the panel
 std::vector<std::vector<V3>> g_utilLines[4];
 std::vector<V3> g_utilPts[4];
@@ -195,7 +196,7 @@ void Regenerate() {
     in.services = &g_services;
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; }
-    in.powerTrafo = g_powerTrafo;
+    in.powerTrafo = g_powerTrafo; in.utilChain = g_utilChain;
     in.occupied = [&a](float u, float v) { return eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0; };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     g_plan = MakePlan(in);
@@ -878,7 +879,8 @@ void TabUtils() {
         ImGui::Separator();
         ImGui::PopID();
     }
-    ImGui::TextDisabled("Отмеченные сети ставятся вместе со всем планом кнопкой мгновенной постройки.");
+    if (ImGui::Checkbox("связать узлы трубами через распределители (опыт: игра гнёт такие трубы петлями)", &g_utilChain)) g_dirty = true;
+    ImGui::TextDisabled("Отмеченные сети ставятся вместе со всем планом кнопкой мгновенной постройки. Каждый узел воды, канализации и тепла подключите к своей магистрали сами.");
 }
 
 void Footer() {

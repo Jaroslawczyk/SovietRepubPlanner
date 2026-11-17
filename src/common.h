@@ -101,6 +101,7 @@ struct PlanInput {
     std::vector<float> stopsU;                      // bus stops along the street
     float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
     bool  utilBuild[4] = {};                        // put this network's buildings and lines into the plan
+    bool  utilChain = false;                        // also put switches and pipes between the nodes (the game bends such pipes into loops)
     bool  powerTrafo = true;                        // put a transformer for the substations too
     float utilRadius[4] = { 140, 170, 160, 140 };   // water, sewage, heating, power: how far a node serves, m
     float walkRadius = 400;                         // how tooFar residents walk to a stop
