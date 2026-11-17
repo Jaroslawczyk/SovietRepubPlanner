@@ -44,7 +44,8 @@ namespace eng {
     void DebugDumpTools();
     void DebugDumpLoad();
     void LogDarkness();                             // debug: log exe+0x9d5d84 every 20 s while DistrictPlanner.darkness exists                           // debug: log node capacities and building loads from the running game
-    void SetPathSnapMode(int mode);                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
+    void SetPathSnapMode(int mode);
+    void SetStraightLines(bool on);                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
     void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
     void StopAutoBuild();

@@ -57,7 +57,7 @@ bool  g_utilBuild[4] = { false, false, false, false };   // the network goes int
 bool  g_powerUnder = false;                               // medium-voltage lines as underground cable
 float g_utilRadius[4] = { 250, 250, 380, 250 };   // the game links a building to a node closer than this (2D distance; SOVIET64.exe 0x441340, 0x441600, 0x440d90, 0x4406d0)
 bool  g_powerTrafo = true;
-bool  g_utilChain = false;      // switches and pipes between the nodes of one network
+bool  g_utilChain = true;       // switches and pipes between the nodes of one network
 float g_utilNorm[4] = { 0.12f, 0.12f, 0.7f, 0.002f };  // per resident; heat and power read from the game (brick house: 35 tank units, 0.1 MW for 50), water and sewage are guesses
 std::vector<std::vector<V3>> g_utilLines[4];
 std::vector<V3> g_utilPts[4];
@@ -697,7 +697,9 @@ void InstantStart() {
     const int nStreets = (int)rd.size();
     rd.insert(rd.end(), g_plan.drives.begin(), g_plan.drives.end());
     const auto roadPieces = Noded(rd);
-    for (auto& pc : roadPieces) if (pc.second < nStreets) InstantLine(1, g_roadKind, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
+    // streets go in whole (straight, cut only by length); driveways are cut where they meet each other and end on the
+    // street, where the road snap joins them to the middle of the street piece
+    for (int k = 0; k < nStreets; ++k) InstantLine(1, g_roadKind, rd[k].u1, rd[k].v1, rd[k].u2, rd[k].v2);
     for (size_t i = 0; i < g_plan.buildings.size(); ++i) {
         const Placed& b = g_plan.buildings[i];
         V3 w = LocalToWorld(g_area, b.u, b.v, 0);
@@ -1121,6 +1123,11 @@ void SelfTest() {
     if (GetFileAttributesW((GameDir() + L"DistrictPlanner.darkness").c_str()) != INVALID_FILE_ATTRIBUTES) eng::LogDarkness();
     std::wstring dlFlag = GameDir() + L"DistrictPlanner.dumpload";
     if (GetFileAttributesW(dlFlag.c_str()) != INVALID_FILE_ATTRIBUTES) { DeleteFileW(dlFlag.c_str()); eng::DebugDumpLoad(); }
+    std::wstring stFlag = GameDir() + L"DistrictPlanner.straight";
+    if (GetFileAttributesW(stFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        int m = 1; FILE* f = _wfopen(stFlag.c_str(), L"r"); if (f) { fscanf(f, "%d", &m); fclose(f); }
+        DeleteFileW(stFlag.c_str()); eng::SetStraightLines(m != 0);
+    }
     std::wstring smFlag = GameDir() + L"DistrictPlanner.snapmode";     // debug: footpath snap mode for A/B tests
     if (GetFileAttributesW(smFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
         int m = 1; FILE* f = _wfopen(smFlag.c_str(), L"r"); if (f) { fscanf(f, "%d", &m); fclose(f); }
@@ -1148,7 +1155,8 @@ void SelfTest() {
     }
     std::wstring flag = GameDir() + L"DistrictPlanner.selftest";
     if (GetFileAttributesW(flag.c_str()) == INVALID_FILE_ATTRIBUTES) return;
-    int stMode = 1; { FILE* f = _wfopen(flag.c_str(), L"r"); if (f) { fscanf(f, "%d", &stMode); fclose(f); } }   // 2 = keep the services
+    int stMode = 1; { FILE* f = _wfopen(flag.c_str(), L"r"); if (f) { fscanf(f, "%d", &stMode); fclose(f); } }   // 2 = keep the services, 3 = also bigger (450 m, 2000 people)
+    const float side = stMode == 3 ? 450.0f : 300.0f;
     DeleteFileW(flag.c_str());
     g_selfTest = 2;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
@@ -1163,23 +1171,23 @@ void SelfTest() {
         for (int ring = 0; ring < 30 && !found; ++ring)
             for (int a = -ring; a <= ring && !found; ++a) for (int b = -ring; b <= ring && !found; ++b) {
                 if (std::max(abs(a), abs(b)) != ring) continue;
-                float x0 = c.x + a * 150.0f, z0 = c.z + b * 150.0f, lo = 1e9f, hi = -1e9f; bool ok = true;
-                for (float x = -20; x <= 320 && ok; x += 20) for (float z = -20; z <= 320 && ok; z += 20) {
+                float x0 = c.x + a * side / 2, z0 = c.z + b * side / 2, lo = 1e9f, hi = -1e9f; bool ok = true;
+                for (float x = -20; x <= side + 20 && ok; x += 20) for (float z = -20; z <= side + 20 && ok; z += 20) {
                     if (eng::Occupied(x0 + x, z0 + z)) ok = false;
                     float h = eng::TerrainHeight(x0 + x, z0 + z); lo = std::min(lo, h); hi = std::max(hi, h);
                 }
                 if (!ok || hi - lo > 12 || lo < 1) continue;
-                pts = { { x0, 0, z0 }, { x0 + 300, 0, z0 }, { x0 + 300, 0, z0 + 300 }, { x0, 0, z0 + 300 } };
+                pts = { { x0, 0, z0 }, { x0 + side, 0, z0 }, { x0 + side, 0, z0 + side }, { x0, 0, z0 + side } };
                 for (auto& q : pts) q.y = eng::TerrainHeight(q.x, q.z);
                 Log("selftest: free square at %.0f %.0f (ring %d, height %.0f..%.0f)", x0, z0, ring, lo, hi);
                 found = true;
             }
     }
-    g_population = 600; g_open = true; g_showLevel = false;
+    g_population = stMode == 3 ? 2000 : 600; g_open = true; g_showLevel = false;
     {   // test district: only a building that is unlocked from the start, no services
         const auto& all = catalog::All();
         for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = all[i].id == "residental_brick_2";
-        for (auto& sv : g_services) sv.enabled = stMode == 2 && sv.typeIndex >= 0;
+        for (auto& sv : g_services) sv.enabled = stMode >= 2 && sv.typeIndex >= 0;
         for (int k = 0; k < 4; ++k) { g_utilBuild[k] = g_utilShow[k] = true; }
     }
     SetArea(pts);
