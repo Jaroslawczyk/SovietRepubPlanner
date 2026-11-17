@@ -1232,7 +1232,7 @@ void InstantTick() {
         return;
     }
     std::vector<int> codes; eng::InstantResults(codes);
-    std::vector<eng::InstantJob> failedLines;
+    std::vector<eng::InstantJob> failedLines, steepStreets;
     for (size_t i = 0; i < r.jobs.size() && i < codes.size(); ++i) {
         const eng::InstantJob& j = r.jobs[i];
         if (j.kind == 0) {
@@ -1285,6 +1285,7 @@ void InstantTick() {
                     grade = std::max(grade, fabsf(eng::TerrainHeight(x + tx * 5, z + tz * 5) - eng::TerrainHeight(x, z)) / 5);
                     side = std::max(side, fabsf(eng::TerrainHeight(x - tz * 5, z + tx * 5) - eng::TerrainHeight(x + tz * 5, z - tx * 5)) / 10);
                 }
+                if (grade > 0.12f && r.phase == 1) steepStreets.push_back(j);   // the ground gets evened along it, then a retry
                 Log("street refused %.0f %.0f -> %.0f %.0f (%.0f m): crosses %d trails (min angle %.0f, nearest to an end %.1f m), %d game roads (angle %.0f, %.1f m), grade %.0f %%, cross slope %.0f %%",
                     j.a.x, j.a.z, j.b.x, j.b.z, len, nP, aP, eP, nR, aR, eR, grade * 100, side * 100);
             }
@@ -1300,9 +1301,24 @@ void InstantTick() {
         else if (j.kind == 3) { if (r.phase == 1) ++r.nAll; if (codes[i] == 1) ++r.nOk; else if (r.phase == 1) failedLines.push_back(j); }
         else { ++r.pAll; if (codes[i] == 1) { ++r.pOk; r.built.push_back(j); } }
     }
-    if (r.phase == 1 && !r.retry.empty()) {
+    if (r.phase == 1 && (!r.retry.empty() || !steepStreets.empty())) {
         r.lineRetry = failedLines;
+        r.lineRetry.insert(r.lineRetry.end(), steepStreets.begin(), steepStreets.end());
         std::vector<V3> pts;
+        // steep street pieces: a corridor 2 m wider than the street on each side is set to an even slope from end
+        // to end (free levelling, the same as under the buildings)
+        for (auto& j : steepStreets) {
+            float len = sqrtf((j.b.x - j.a.x) * (j.b.x - j.a.x) + (j.b.z - j.a.z) * (j.b.z - j.a.z));
+            if (len < 1) continue;
+            float tx = (j.b.x - j.a.x) / len, tz = (j.b.z - j.a.z) / len, ha = eng::TerrainHeight(j.a.x, j.a.z), hb = eng::TerrainHeight(j.b.x, j.b.z);
+            float half = (g_roadType == 2 ? 9.0f : 4.0f) + 2.0f;
+            for (float d = -2; d <= len + 2.01f; d += 2.5f)
+                for (float o = -half; o <= half + 0.01f; o += 2.5f) {
+                    float t = std::clamp(d / len, 0.0f, 1.0f);
+                    pts.push_back({ j.a.x + tx * d - tz * o, ha + (hb - ha) * t, j.a.z + tz * d + tx * o });
+                }
+        }
+        if (!steepStreets.empty()) Log("levelling under %d steep street pieces, %d points", (int)steepStreets.size(), (int)pts.size());
         for (int bi : r.retry) {
             const Placed& b = g_plan.buildings[bi];
             for (float du = -b.w / 2 - 4; du <= b.w / 2 + 4.01f; du += 2.5f)
