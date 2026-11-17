@@ -220,6 +220,7 @@ static const char* const kPairs[][2] = {
     { "Ещё не изучены", "Not researched yet" },
     { "%s\n%d жит. · %.0fx%.0f м · %s", "%s\n%d res. · %.0fx%.0f m · %s" },
     { "Выбрано домов: %d", "Houses selected: %d" },
+    { "Дороги игры: %d концов улиц подведено к ним, %d отрезков плана уже построено.", "Game roads: %d street ends joined to them, %d plan pieces already built." },
     { "не изучено", "not researched" },
 };
 const char* T(const char* ru) {

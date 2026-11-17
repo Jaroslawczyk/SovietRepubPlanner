@@ -1,4 +1,4 @@
-// Access to the game engine (C3DDLL64.dll) through IAT hooks in SOVIET64.exe.
+﻿// Access to the game engine (C3DDLL64.dll) through IAT hooks in SOVIET64.exe.
 #include "common.h"
 #include <cmath>
 #include <cstring>
@@ -109,7 +109,7 @@ MB_HOOK(h_MDown, o_MDown)
 typedef bool (*InName_t)(void*, char*);
 static InName_t o_BtnDown, o_BtnPress;
 char g_scriptButton[64] = "MOUSEDRAG";   // the named button the line tools read while the left button is held
-static void GameThreadTick(); static void DumpLoadNow(); static std::atomic<bool> g_dumpLoad{ false };
+static bool ReadMem(const void* p, void* out, size_t n); static void GameThreadTick(); static void DumpLoadNow(); static void DumpRoadsNow(); extern std::atomic<bool> g_dumpRoads; static std::atomic<bool> g_dumpLoad{ false };
 static bool NamedButton(InName_t orig, const char* kind, void* s, char* name) {
     bool v = orig(s, name);
     if (name && kind[0] == 'p' && strcmp(name, "TOOL_CANCEL") == 0) GameThreadTick();
@@ -812,6 +812,7 @@ static void GameThreadTick() {
     if (!gx::Supported()) return;
     if (g_dumpTools.exchange(false)) gx::DumpTools();
     if (g_dumpLoad.exchange(false)) DumpLoadNow();
+    if (g_dumpRoads.exchange(false)) DumpRoadsNow();
     if (g_dbgToolSet.exchange(false)) {
         void* tool = nullptr; const char* nm = gx::FindTool(g_dbgTool, &tool);
         if (nm) *(void**)(gx::Game() + 0xd428) = tool;
@@ -862,6 +863,34 @@ static bool ReadWorldBld(BYTE* b, NodeVec_t gp, NodeVec_t gr, char* nm, V3& pos,
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
+// Network manager (game+mgrOffset): vector +0x298 = nodes (position vec3 at +0x4), vector +0x2b0 = pieces
+// (end nodes at +0x20 / +0x28, curve points: vector +0x8/+0x10 of 0x18-byte records starting with the vec3).
+static bool ReadPiece(BYTE* e, std::vector<V3>& pts) {
+    __try {
+        BYTE* b = *(BYTE**)(e + 0x8); BYTE* en = *(BYTE**)(e + 0x10);
+        if (b && en > b && (en - b) % 0x18 == 0 && (en - b) / 0x18 < 2000)
+            for (BYTE* q = b; q < en; q += 0x18) pts.push_back(*(V3*)q);
+        if (pts.size() < 2) {
+            pts.clear();
+            BYTE* n1 = *(BYTE**)(e + 0x20); BYTE* n2 = *(BYTE**)(e + 0x28);
+            if (!n1 || !n2) return false;
+            pts.push_back(*(V3*)(n1 + 4)); pts.push_back(*(V3*)(n2 + 4));
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void ListNetLines(int mgrOffset, std::vector<std::vector<V3>>& out) {
+    out.clear();
+    if (!gx::Supported()) return;
+    BYTE* m = *(BYTE**)(gx::Game() + mgrOffset);
+    if (!m) return;
+    BYTE* v[2]; if (!ReadMem(m + 0x2b0, v, 16) || !v[0] || v[1] <= v[0]) return;
+    for (BYTE* it = v[0]; it < v[1]; it += 8) {
+        BYTE* e; if (!ReadMem(it, &e, 8) || !e) continue;
+        std::vector<V3> pts;
+        if (ReadPiece(e, pts)) out.push_back(pts);
+    }
+}
 void ListBuildings(std::vector<WorldBld>& out) {
     out.clear();
     if (!gx::Supported()) return;
@@ -882,6 +911,43 @@ void ListBuildings(std::vector<WorldBld>& out) {
 }
 // Debug: per building type, the values the game uses for node load (power +0x10f8, heat +0x1060 are pointers to floats).
 void DebugDumpLoad() { g_dumpLoad = true; }
+// ---- debug: find where the network managers keep world positions of their pieces ----
+std::atomic<bool> g_dumpRoads{ false };
+void DebugDumpRoads() { g_dumpRoads = true; }
+static bool ReadMem(const void* p, void* out, size_t n) { __try { memcpy(out, p, n); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; } }
+static bool OnGround(const float* f) {
+    if (!(fabsf(f[0]) < 12000 && fabsf(f[2]) < 12000 && fabsf(f[0]) + fabsf(f[2]) > 1)) return false;
+    return fabsf(TerrainHeight(f[0], f[2]) - f[1]) < 4.0f;
+}
+static void DumpRoadsNow() {
+    BYTE* G = gx::Game();
+    const int mgrs[] = { 0xf7a0, 0xf968 };
+    for (int mo : mgrs) {
+        BYTE* m = *(BYTE**)(G + mo);
+        Log("NET mgr G+0x%x = %p", mo, m);
+        if (!m) continue;
+        for (int vo : { 0x260, 0x278, 0x298, 0x2b0, 0x2d0 }) {
+            BYTE* v[2]; if (!ReadMem(m + vo, v, 16) || !v[0] || v[1] <= v[0]) { Log("  vec +0x%x empty", vo); continue; }
+            size_t n = (size_t)(v[1] - v[0]) / 8;
+            int direct[0x200] = {}, ind[0x80][0x20] = {}; int seen = 0;
+            for (size_t i = 0; i < n && seen < 300; ++i) {
+                BYTE* e; if (!ReadMem(v[0] + i * 8, &e, 8) || !e) continue;
+                BYTE buf[0x800]; if (!ReadMem(e, buf, sizeof(buf))) continue;
+                ++seen;
+                for (int o = 0; o + 12 <= 0x800; o += 4) if (OnGround((float*)(buf + o))) direct[o / 4]++;
+                for (int o = 0; o < 0x400; o += 8) {
+                    BYTE* q = *(BYTE**)(buf + o); BYTE b2[0x80];
+                    if ((UINT64)q < 0x10000 || !ReadMem(q, b2, sizeof(b2))) continue;
+                    for (int k = 0; k + 12 <= 0x80; k += 4) if (OnGround((float*)(b2 + k))) ind[o / 8][k / 4]++;
+                }
+            }
+            Log("  vec +0x%x: %d elements, %d read", vo, (int)n, seen);
+            for (int o = 0; o < 0x200; ++o) if (seen && direct[o] * 2 > seen) Log("    direct +0x%x: %d", o * 4, direct[o]);
+            for (int o = 0; o < 0x80; ++o) for (int k = 0; k < 0x20; ++k) if (seen && ind[o][k] * 2 > seen) Log("    via +0x%x -> +0x%x: %d", o * 8, k * 4, ind[o][k]);
+        }
+    }
+}
+
 void LogDarkness() {
     static DWORD last = 0; DWORD now = GetTickCount();
     if (now - last < 20000) return;

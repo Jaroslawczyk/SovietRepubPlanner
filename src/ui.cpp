@@ -61,6 +61,7 @@ std::vector<ServiceRule> g_services = {     // labels are translated with T() wh
 int   g_population = 1000;
 float g_gap = 8.0f;
 int   g_density = 90;               // 0..100: gaps between buildings and rows
+std::vector<std::vector<V2>> g_extPaths;   // footpaths already in the game (local frame)
 bool  g_autoHouse = true;          // the house ticked by default; the first manual tick replaces it
 bool  g_fillAll = true;    // no empty corners: houses until nothing fits
 int   g_roadType = 1;
@@ -241,7 +242,27 @@ void Regenerate() {
                 for (auto* id : nodeIds[k]) if (*id && w.id == id) { in.extNodes[k].push_back(WorldToLocal(a, w.pos)); break; }
             }
     }
-    in.occupied = [&a](float u, float v) { return eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0; };
+    {   // roads and footpaths already in the game, in the local frame
+        std::vector<std::vector<V3>> lines;
+        eng::ListNetLines(0xf7a0, lines);
+        for (auto& L : lines) { std::vector<V2> l; for (auto& p : L) l.push_back(WorldToLocal(a, p)); in.extRoads.push_back(l); }
+        g_extPaths.clear();
+        eng::ListNetLines(0xf968, lines);
+        for (auto& L : lines) { std::vector<V2> l; for (auto& p : L) l.push_back(WorldToLocal(a, p)); g_extPaths.push_back(l); }
+    }
+    in.occupied = [&a, &in](float u, float v) {
+        if (eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0) return true;
+        auto nearLine = [&](const std::vector<std::vector<V2>>& set, float r) {
+            for (auto& L : set) for (size_t k = 0; k + 1 < L.size(); ++k) {
+                float du = L[k + 1].u - L[k].u, dv = L[k + 1].v - L[k].v, l2 = du * du + dv * dv;
+                float t = l2 > 0 ? std::clamp(((u - L[k].u) * du + (v - L[k].v) * dv) / l2, 0.0f, 1.0f) : 0.0f;
+                float eu = L[k].u + du * t - u, ev = L[k].v + dv * t - v;
+                if (eu * eu + ev * ev < r * r) return true;
+            }
+            return false;
+        };
+        return nearLine(in.extRoads, 7.0f) || nearLine(g_extPaths, 2.5f);   // keep buildings off existing roads and footpaths
+    };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     {   // connections of the buildings that already stand near the district, for feeding its networks
         std::vector<eng::WorldBld> world; eng::ListBuildings(world);
@@ -267,6 +288,7 @@ void Regenerate() {
         if (lastN != in.extPorts.size()) { lastN = in.extPorts.size(); Log("plan: %d standing buildings, %d of their ports can feed the district", (int)world.size(), (int)lastN); }
     }
     g_plan = MakePlan(in);
+    Log("plan: %d game roads, %d game footpaths seen; %d street ends joined, %d plan pieces dropped", (int)in.extRoads.size(), (int)g_extPaths.size(), g_plan.joinedRoads, g_plan.droppedRoads);
     {   // air pollution over the district: the worst cell of the game's 200 m grid under the outline
         g_polA = g_polB = 0; g_polOk = false;
         static bool gridLogged = false; if (!gridLogged) { gridLogged = true; eng::LogPollutionGrid(); }
@@ -1355,6 +1377,7 @@ void Footer() {
         }
         if (g_plan.unplaced > 0) ImGui::TextColored(red, T("Вмещается около %d жит., не влезло зданий: %d — нужен участок больше."), g_plan.capacity, g_plan.unplaced);
         else if (g_plan.steepSkipped > 0 || g_plan.busySkipped > 0) ImGui::TextDisabled(T("Обойдено: крутые места %d раз, существующая застройка %d раз."), g_plan.steepSkipped, g_plan.busySkipped);
+        if (g_plan.joinedRoads || g_plan.droppedRoads) ImGui::TextDisabled(T("Дороги игры: %d концов улиц подведено к ним, %d отрезков плана уже построено."), g_plan.joinedRoads, g_plan.droppedRoads);
     }
     if (g_polOk) {
         if (g_polA > 0.001f || g_polB > 0.001f) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), T("Загрязнение воздуха над участком: %.3f / %.3f (сетка игры, 200 м) — жителям вредно."), g_polA, g_polB);
@@ -1574,6 +1597,7 @@ void SelfTest() {
     if (GetFileAttributesW((GameDir() + L"DistrictPlanner.replan").c_str()) != INVALID_FILE_ATTRIBUTES) { DeleteFileW((GameDir() + L"DistrictPlanner.replan").c_str()); g_dirty = true; }
     std::wstring dlFlag = GameDir() + L"DistrictPlanner.dumpload";
     if (GetFileAttributesW(dlFlag.c_str()) != INVALID_FILE_ATTRIBUTES) { DeleteFileW(dlFlag.c_str()); eng::DebugDumpLoad(); }
+    { std::wstring f = GameDir() + L"DistrictPlanner.roaddump"; if (GetFileAttributesW(f.c_str()) != INVALID_FILE_ATTRIBUTES) { DeleteFileW(f.c_str()); eng::DebugDumpRoads(); } }
     std::wstring stFlag = GameDir() + L"DistrictPlanner.straight";
     if (GetFileAttributesW(stFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
         int m = 1; FILE* f = _wfopen(stFlag.c_str(), L"r"); if (f) { fscanf(f, "%d", &m); fclose(f); }

@@ -54,6 +54,7 @@ namespace eng {
     void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed
     void DebugDumpTools();
     void DebugDumpLoad();
+    void DebugDumpRoads();
     void LogDarkness();                             // debug: log exe+0x9d5d84 every 20 s while DistrictPlanner.darkness exists                           // debug: log node capacities and building loads from the running game
     void SetPathSnapMode(int mode);
     void SetStraightLines(bool on);                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
@@ -63,6 +64,8 @@ namespace eng {
     // sense as the build cursor rotation)
     struct WorldBld { std::string id; V3 pos; float yaw; };
     void ListBuildings(std::vector<WorldBld>& out);
+    // lines already built in the game: mgrOffset 0xf7a0 roads, 0xf968 footpaths; each piece as its curve points
+    void ListNetLines(int mgrOffset, std::vector<std::vector<V3>>& out);
     void StopAutoBuild();
     bool ScriptActive();                            // a line script is driving the real mouse
     bool AutoBuildActive();
@@ -142,7 +145,8 @@ struct PlanInput {
     float roadV = 0;                                // where the street crosses the district
     std::vector<float> stopsU;                      // bus stops along the street
     struct ExtPort { int kind; float u, v, h; };        // a connection of a building that already stands (local frame)
-    std::vector<ExtPort> extPorts;                  // the planner feeds each network from the nearest fitting one
+    std::vector<ExtPort> extPorts;
+    std::vector<std::vector<V2>> extRoads;          // roads already in the game (local frame): the plan joins them and does not double them                  // the planner feeds each network from the nearest fitting one
     int   stopType = -1;
     bool  crossRoad = false;                        // a second street across the first one (crossroads in the middle)                            // catalog index of the stop building (bus, trolleybus, tram); -1 = only mark the place
     float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
@@ -179,6 +183,7 @@ struct PlanResult {
     std::vector<char>    pathBuild;                 // per path: 0 = only the walking line along a street (the street has pavements)
     std::vector<RoadSeg> roads;
     std::vector<V2>      stops, crossings;
+    int joinedRoads = 0, droppedRoads = 0;          // plan street ends tied to existing roads / plan pieces already built
     std::vector<PathSeg> drives;                    // driveways from the street to road connections
     std::vector<V2>      pedPts, roadPts;           // connection points that got a footpath / a driveway
     int noPath = 0, noRoad = 0;

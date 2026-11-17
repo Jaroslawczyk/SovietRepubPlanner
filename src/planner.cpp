@@ -1098,6 +1098,42 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         }
     }
     for (size_t k = 0; k < r.paths.size(); ++k) if (r.pathBuild[k]) r.pathLength += fabsf(r.paths[k].u2 - r.paths[k].u1) + fabsf(r.paths[k].v2 - r.paths[k].v1);
+    // roads already in the game: do not lay a plan piece over one, and tie loose street ends to the nearest one
+    if (!in.extRoads.empty() && !r.roads.empty()) {
+        auto segDist = [](float pu, float pv, float au, float av, float bu, float bv, float& qu, float& qv) {
+            float du = bu - au, dv = bv - av, l2 = du * du + dv * dv;
+            float t = l2 > 0 ? std::clamp(((pu - au) * du + (pv - av) * dv) / l2, 0.0f, 1.0f) : 0.0f;
+            qu = au + du * t; qv = av + dv * t;
+            return sqrtf((pu - qu) * (pu - qu) + (pv - qv) * (pv - qv));
+        };
+        auto nearestExt = [&](float u, float v, V2& at) {
+            float best = 1e9f;
+            for (auto& L : in.extRoads) for (size_t k = 0; k + 1 < L.size(); ++k) {
+                float qu, qv, d = segDist(u, v, L[k].u, L[k].v, L[k + 1].u, L[k + 1].v, qu, qv);
+                if (d < best) { best = d; at = { qu, qv }; }
+            }
+            return best;
+        };
+        V2 tmp;
+        size_t before = r.roads.size();
+        r.roads.erase(std::remove_if(r.roads.begin(), r.roads.end(), [&](const RoadSeg& s) {
+            return nearestExt((s.u1 + s.u2) / 2, (s.v1 + s.v2) / 2, tmp) < 6 && nearestExt(s.u1, s.v1, tmp) < 8 && nearestExt(s.u2, s.v2, tmp) < 8;
+        }), r.roads.end());
+        r.droppedRoads = (int)(before - r.roads.size());
+        std::vector<RoadSeg> joins;
+        for (size_t i = 0; i < r.roads.size(); ++i) for (int e = 0; e < 2; ++e) {
+            const RoadSeg& s = r.roads[i];
+            float u = e ? s.u2 : s.u1, v = e ? s.v2 : s.v1, qu, qv;
+            bool loose = true;
+            for (size_t j = 0; j < r.roads.size() && loose; ++j)
+                if (j != i && segDist(u, v, r.roads[j].u1, r.roads[j].v1, r.roads[j].u2, r.roads[j].v2, qu, qv) < 1.5f) loose = false;
+            if (!loose) continue;
+            V2 at; float d = nearestExt(u, v, at);
+            if (d > 9 && d < 90) joins.push_back({ u, v, at.u, at.v, s.width });
+        }
+        r.joinedRoads = (int)joins.size();
+        r.roads.insert(r.roads.end(), joins.begin(), joins.end());
+    }
     for (auto& p : r.drives) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
     for (auto& p : r.roads) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
 
