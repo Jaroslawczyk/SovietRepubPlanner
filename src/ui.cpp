@@ -29,7 +29,9 @@ float g_angle = 0;                  // extra rotation of the building grid, degr
 std::vector<char> g_houseSel;       // per catalog index
 std::vector<int> g_houseShare;      // per catalog index: weight of the type among the houses
 int   g_stopKind = 0;               // index into kStopIds
-const char* const kStopIds[] = { "busstop", "busstop_t", "muddy_busstop", "tram_stop_small", "tram_stop_big", "" };
+const char* const kStopIds[] = { "busstop", "busstop_t", "muddy_busstop", "road_busstation_small", "road_busstation", "tram_stop_small", "tram_stop_big", "" };
+const int kStopCount = 8;
+bool  g_crossRoad = false;          // a second street across the first one
 int   g_roadKind = 1;               // street surface for instant building: 0 gravel, 1 asphalt
 int   g_pathKind = 1;               // footpath: 0 dirt trail, 1 gravel, 2 asphalt
 std::vector<ServiceRule> g_services = {
@@ -200,7 +202,7 @@ void Regenerate() {
     in.poly = a.local; in.population = g_population; in.gap = g_gap;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
-    in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops;
+    in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.crossRoad = g_crossRoad;
     for (size_t t = 0; t < catalog::All().size(); ++t) if (kStopIds[g_stopKind][0] && catalog::All()[t].id == kStopIds[g_stopKind]) in.stopType = (int)t; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; if (k >= 2) in.utilPerPerson[k] = g_utilNorm[k]; }
     in.powerTrafo = g_powerTrafo; in.utilChain = g_utilChain;
@@ -288,6 +290,21 @@ void Regenerate() {
         for (auto& nd : g_plan.utilNodes[k]) g_utilPts[k].push_back(LocalToWorld(a, nd.u, nd.v, 1.0f));
     }
     for (auto& p : g_plan.drives) g_driveLines.push_back(Sample(a, p.u1, p.v1, p.u2, p.v2, 5.0f));
+    auto strip = [&](float u1, float v1, float u2, float v2, float width, ImU32 col) {     // a band of the real width
+        float len = hypotf(u2 - u1, v2 - v1); if (len < 0.1f) return;
+        float nu = -(v2 - v1) / len * width / 2, nv = (u2 - u1) / len * width / 2;
+        int n = std::max(1, (int)(len / 8.0f));
+        for (int i = 0; i < n; ++i) {
+            float t0 = (float)i / n, t1 = (float)(i + 1) / n;
+            float a0 = u1 + (u2 - u1) * t0, b0 = v1 + (v2 - v1) * t0, a1 = u1 + (u2 - u1) * t1, b1 = v1 + (v2 - v1) * t1;
+            Cell c; c.col = col;
+            c.c[0] = LocalToWorld(a, a0 + nu, b0 + nv); c.c[1] = LocalToWorld(a, a1 + nu, b1 + nv);
+            c.c[2] = LocalToWorld(a, a1 - nu, b1 - nv); c.c[3] = LocalToWorld(a, a0 - nu, b0 - nv);
+            g_roadQuads.push_back(c);
+        }
+    };
+    for (auto& p : g_plan.drives) strip(p.u1, p.v1, p.u2, p.v2, 8.0f, IM_COL32(70, 70, 78, 200));
+    for (auto& p : g_plan.paths) strip(p.u1, p.v1, p.u2, p.v2, 2.5f, IM_COL32(205, 205, 200, 150));
     for (auto& s : g_plan.pedPts) g_pedPts.push_back(LocalToWorld(a, s.u, s.v, 0.5f));
     for (auto& s : g_plan.roadPts) g_roadPts.push_back(LocalToWorld(a, s.u, s.v, 0.5f));
     for (auto& s : g_plan.stops) g_stopPts.push_back(LocalToWorld(a, s.u, s.v, 1.0f));
@@ -887,6 +904,7 @@ void TabRoads() {
     const char* types[] = { "без дороги (только дорожки)", "улица, 2 полосы", "проспект, 4 полосы" };
     ImGui::SetNextItemWidth(280);
     if (ImGui::Combo("тип дороги", &g_roadType, types, 3)) g_dirty = true;
+    if (ImGui::Checkbox("вторая улица поперёк (перекрёсток в середине)", &g_crossRoad)) g_dirty = true;
     if (ImGui::SliderFloat("улица через каждые, м (0 — одна)", &g_streetGap, 0.0f, 600.0f, "%.0f")) { if (g_streetGap < 80) g_streetGap = 0; g_dirty = true; }
     ImGui::TextDisabled("Вдоль улицы идут тротуары, дорожки кварталов сходятся к переходу у остановки.");
 
@@ -897,7 +915,7 @@ void TabRoads() {
         std::string cur = kStopIds[g_stopKind][0] ? nameOf(kStopIds[g_stopKind]) : std::string("только отметить место");
         ImGui::SetNextItemWidth(280);
         if (ImGui::BeginCombo("вид остановки", cur.c_str())) {
-            for (int k = 0; k < 6; ++k) {
+            for (int k = 0; k < kStopCount; ++k) {
                 std::string nm = kStopIds[k][0] ? nameOf(kStopIds[k]) : std::string("только отметить место");
                 if (ImGui::Selectable(nm.c_str(), k == g_stopKind)) { g_stopKind = k; g_dirty = true; }
             }
@@ -1264,6 +1282,7 @@ void SelfTest() {
             }
     }
     g_population = stMode == 3 ? 2000 : 600; g_open = true; g_showLevel = false;
+    g_crossRoad = stMode == 3;
     {   // test district: only a building that is unlocked from the start, no services
         const auto& all = catalog::All();
         for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = all[i].id == "residental_brick_2";

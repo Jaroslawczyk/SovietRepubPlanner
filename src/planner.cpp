@@ -69,7 +69,9 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     for (auto& p : in.poly) { minU = std::min(minU, p.u); maxU = std::max(maxU, p.u); minV = std::min(minV, p.v); maxV = std::max(maxV, p.v); }
     if (maxU - minU < 20 || maxV - minV < 20) return r;
 
-    const float margin = 5.0f, band = 7.0f, gap = in.gap, corridor = 4.5f;
+    const float margin = 5.0f, band = 7.0f, gap = in.gap;
+    float corridor = 4.5f;
+    const float crossU = (minU + maxU) / 2;
 
     // what to build: services first (they end up next to the street), then houses round-robin
     std::vector<Item> items;
@@ -117,6 +119,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 for (auto& c : st.conns) if (c.kind == 1) hl = std::max(hl, fabsf(c.x));
                 if (hl < 5) hl = st.sx / 2;
                 for (auto& sp : r.stops) {
+                    if (in.crossRoad && fabsf(sp.u - crossU) < hl + 14) sp.u = std::min(R - hl - 2, crossU + hl + 14);   // not on the crossroads
                     Placed pb{ in.stopType, sp.u + st.cx, roadV + st.cz, st.sx, st.sz, false };
                     pb.rot = 0; pb.ou = sp.u; pb.ov = roadV; pb.stop = true;
                     r.buildings.push_back(pb);
@@ -142,6 +145,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         } else roadHalf = 0;
     }
     float spineU = r.stops.empty() ? (minU + maxU) / 2 : r.stops[0].u;
+    if (in.crossRoad && roadHalf > 0) { spineU = crossU; corridor = roadHalf + 4.0f; }   // the cross street runs in the spine
 
     auto heightRange = [&](float cu, float cv, float w, float d) {
         if (!in.height) return 0.0f;
@@ -213,6 +217,17 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             if (heightRange(cu, cv, it.w, it.d) > in.maxDiff) { u += 6; ++r.steepSkipped; continue; }   // too steep here
             Placed pb{ it.type, cu, cv, it.w - kSide, it.d - kApron, it.rotated };
             pb.rot = (it.rot + (north ? 2 : 0)) & 3;                // the entrance looks at this row's footpath
+            if (all[it.type].needsRoad && roadHalf > 0) {
+                // a building that needs vehicles turns its road connection toward the street (a half turn keeps the
+                // footprint), so its driveway is short and direct instead of running round the rows
+                for (auto& c : all[it.type].conns) if (c.kind == 1) {
+                    float nearV = roadV, bd = 1e9f;
+                    for (auto& rd : r.roads) if (rd.v1 == rd.v2 && fabsf(rd.v1 - cv) < bd) { bd = fabsf(rd.v1 - cv); nearV = rd.v1; }
+                    float want = nearV < cv ? -1.0f : 1.0f;
+                    if (Turn(pb.rot, c.dx, c.dz).v * want < 0) pb.rot = (pb.rot + 2) & 3;
+                    break;
+                }
+            }
             V2 off = Turn(pb.rot, all[it.type].cx, all[it.type].cz);
             pb.ou = cu - off.u; pb.ov = cv - off.v;
             if (util) { pb.net = pending.front().net; pb.role = pending.front().role; pb.grp = pending.front().grp; }
@@ -333,11 +348,22 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             prev = { pv, r.roads[0].u1, r.roads[0].u2 }; havePrev = true;
         } else if (side == 1 && !stripsUp.empty()) { prev = stripsUp[0]; havePrev = true; }
         for (auto& st : list) {
-            if (havePrev) link(prev, st);
+            if (havePrev && !(in.crossRoad && roadHalf > 0)) link(prev, st);
             prev = st; havePrev = true;
         }
     }
-    if (roadHalf > 0 && !r.roads.empty() && (!stripsUp.empty() || !stripsDown.empty()))
+    if (in.crossRoad && roadHalf > 0) {
+        std::vector<V2> tp; for (auto& q : in.poly) tp.push_back({ q.v, q.u });       // scan across: swap the axes
+        float B, T;
+        if (PolyScan(tp, spineU, B, T) && T - B > 30) {
+            std::vector<float> cuts{ B };
+            for (auto& rd : r.roads) if (rd.v1 == rd.v2 && rd.v1 > B + 5 && rd.v1 < T - 5 && spineU > std::min(rd.u1, rd.u2) && spineU < std::max(rd.u1, rd.u2)) cuts.push_back(rd.v1);
+            cuts.push_back(T); std::sort(cuts.begin(), cuts.end());
+            for (size_t k = 0; k + 1 < cuts.size(); ++k) r.roads.push_back({ spineU, cuts[k], spineU, cuts[k + 1], roadHalf * 2 });
+            r.paths.push_back({ spineU - roadHalf - 2, B, spineU - roadHalf - 2, T });
+            r.paths.push_back({ spineU + roadHalf + 2, B, spineU + roadHalf + 2, T });
+        }
+    } else if (roadHalf > 0 && !r.roads.empty() && (!stripsUp.empty() || !stripsDown.empty()))
         r.crossings.push_back({ spineU, roadV });
     // Connections: a footpath from every building's footpath entrance to the nearest footpath, and a driveway from
     // the road connection of buildings that need vehicles to the nearest street. A search on a 2 m grid with a
@@ -360,7 +386,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             dist.assign((size_t)W * H * 4, 1e9f); parent.assign((size_t)W * H * 4, -1);
             for (auto& b : r.buildings) {
                 mark(block, 1 | 4, b.u - b.w / 2 - 1, b.v - b.d / 2 - 1, b.u + b.w / 2 + 1, b.v + b.d / 2 + 1);     // 4 = shut for pipes too
-                mark(block, 2, b.u - b.w / 2 - 3, b.v - b.d / 2 - 3, b.u + b.w / 2 + 3, b.v + b.d / 2 + 3);
+                mark(block, 2, b.u - b.w / 2 - 5, b.v - b.d / 2 - 5, b.u + b.w / 2 + 5, b.v + b.d / 2 + 5);   // a road is 8 m wide: its axis keeps 4 m + 1 m off
             }
             for (auto& p : r.paths) { mark(goal, 1, p.u1, p.v1, p.u2, p.v2); mark(slow, 1, p.u1, p.v1, p.u2, p.v2); }
             for (auto& rd : r.roads) {
@@ -372,7 +398,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         // mode 0 = footpath, 1 = driveway, 2 = utility line to the cell marked 4 in goal (may cross paths and roads); returns the price of the line, < 0 = no way
         auto route = [&](V2 p, V2 n, int mode, const Placed& own, std::vector<V2>& out) {
             const unsigned char bit = mode == 2 ? 4 : mode ? 2 : 1;
-            const float infl = (mode == 1 ? 3.0f : 1.0f) + cell;
+            const float infl = (mode == 1 ? 5.0f : 1.0f) + cell;
             int dir = fabsf(n.u) >= fabsf(n.v) ? (n.u > 0 ? 0 : 2) : (n.v > 0 ? 1 : 3);
             V2 q = p; float walked = 0;         // straight out of the own building first
             while (fabsf(q.u - own.u) < own.w / 2 + infl && fabsf(q.v - own.v) < own.d / 2 + infl) {

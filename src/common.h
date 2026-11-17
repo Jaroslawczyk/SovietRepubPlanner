@@ -125,7 +125,8 @@ struct PlanInput {
     std::vector<float> stopsU;                      // bus stops along the street
     struct ExtPort { int kind; float u, v, h; };        // a connection of a building that already stands (local frame)
     std::vector<ExtPort> extPorts;                  // the planner feeds each network from the nearest fitting one
-    int   stopType = -1;                            // catalog index of the stop building (bus, trolleybus, tram); -1 = only mark the place
+    int   stopType = -1;
+    bool  crossRoad = false;                        // a second street across the first one (crossroads in the middle)                            // catalog index of the stop building (bus, trolleybus, tram); -1 = only mark the place
     float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
     bool  utilBuild[4] = {};                        // put this network's buildings and lines into the plan
     bool  utilChain = false;                        // also put switches and pipes between the nodes (the game bends such pipes into loops)
