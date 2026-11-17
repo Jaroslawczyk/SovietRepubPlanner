@@ -48,8 +48,8 @@ std::vector<ServiceRule> g_services = {
 };
 int   g_population = 1000;
 float g_gap = 8.0f;
-int   g_density = 75;               // 0..100: gaps between buildings and rows
-bool  g_fillAll = false;
+int   g_density = 90;               // 0..100: gaps between buildings and rows
+bool  g_fillAll = true;    // no empty corners: houses until nothing fits
 int   g_roadType = 1;
 float g_roadV = 0;
 std::vector<float> g_stops;
@@ -881,6 +881,15 @@ void CheckGaps(const InstantRun& r) {
     struct S { V3 a, b; bool road; };
     std::vector<S> segs;
     for (auto& j : r.built) segs.push_back({ j.a, j.b, j.kind == 1 });
+    // a stop is a pass-through piece of the street that people walk through
+    for (auto& b : g_plan.buildings) if (b.stop) {
+        V3 w = LocalToWorld(g_area, b.ou, b.ov, 0);
+        if (!(eng::Occupied(w.x, w.z) & 1)) continue;
+        segs.push_back({ LocalToWorld(g_area, b.ou - b.w / 2 - 1, b.ov, 0), LocalToWorld(g_area, b.ou + b.w / 2 + 1, b.ov, 0), true });
+        segs.push_back({ LocalToWorld(g_area, b.ou, b.ov - b.d / 2 - 1, 0), LocalToWorld(g_area, b.ou, b.ov + b.d / 2 + 1, 0), true });
+        for (int sd = -1; sd <= 1; sd += 2)    // its edges, where footpaths end
+            segs.push_back({ LocalToWorld(g_area, b.u - b.w / 2 - 1, b.v + sd * (b.d / 2 + 1), 0), LocalToWorld(g_area, b.u + b.w / 2 + 1, b.v + sd * (b.d / 2 + 1), 0), true });
+    }
     if (segs.empty()) return;
     auto onSeg = [](const S& s, float x, float z, float tol) {
         float dx = s.b.x - s.a.x, dz = s.b.z - s.a.z, l2 = dx * dx + dz * dz;
@@ -892,7 +901,7 @@ void CheckGaps(const InstantRun& r) {
     std::function<int(int)> root = [&](int x) { return par[x] == x ? x : par[x] = root(par[x]); };
     for (size_t a = 0; a < segs.size(); ++a)
         for (size_t b = a + 1; b < segs.size(); ++b) {
-            float tol = (segs[a].road || segs[b].road) ? (g_roadKind == 2 ? 6.5f : 4.5f) : 1.2f;   // a footpath may end at the street's edge
+            float tol = (segs[a].road || segs[b].road) ? 4.0f : 1.2f;   // a footpath joins a street only when drawn onto it
             if (onSeg(segs[b], segs[a].a.x, segs[a].a.z, tol) || onSeg(segs[b], segs[a].b.x, segs[a].b.z, tol) ||
                 onSeg(segs[a], segs[b].a.x, segs[b].a.z, tol) || onSeg(segs[a], segs[b].b.x, segs[b].b.z, tol)) par[root((int)a)] = root((int)b);
         }
@@ -940,7 +949,7 @@ void CheckGaps(const InstantRun& r) {
         for (float t = 0; t <= len + 0.01f; t += 4.0f) {
             V3 p{ sg.a.x + (sg.b.x - sg.a.x) * std::min(t, len) / std::max(len, 0.01f), 0, sg.a.z + (sg.b.z - sg.a.z) * std::min(t, len) / std::max(len, 0.01f) };
             if (!sg.road) { targets.push_back(p); continue; }
-            float nx = -(sg.b.z - sg.a.z) / std::max(len, 0.01f), nz = (sg.b.x - sg.a.x) / std::max(len, 0.01f), off = g_roadKind == 2 ? 6.0f : 4.5f;
+            float nx = -(sg.b.z - sg.a.z) / std::max(len, 0.01f), nz = (sg.b.x - sg.a.x) / std::max(len, 0.01f), off = 0.0f;   // onto the street itself: only that joins
             targets.push_back({ p.x + nx * off, 0, p.z + nz * off });
             targets.push_back({ p.x - nx * off, 0, p.z - nz * off });
         }

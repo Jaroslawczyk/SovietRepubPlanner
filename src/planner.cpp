@@ -221,6 +221,13 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             if (u < spineU + corridor && u + it.w > spineU - corridor) { u = spineU + corridor; continue; }  // leave the spine free
             float cu = u + it.w / 2;
             float cv = north ? vlo + it.d / 2 : vhi - it.d / 2;
+            if (util && all[it.type].needsRoad) {
+                // a node with vehicles only in a row facing a street: anywhere else its driveway loops round the rows
+                float gapToStreet = 1e9f;
+                for (auto& rd : r.roads) if (fabsf(rd.v1 - rd.v2) < 0.01f && cu > std::min(rd.u1, rd.u2) && cu < std::max(rd.u1, rd.u2))
+                    gapToStreet = std::min(gapToStreet, fabsf(cv - rd.v1) - it.d / 2 - rd.width / 2);
+                if (!r.roads.empty() && gapToStreet > 16.0f) { pending.pop_front(); ++r.unplaced; continue; }
+            }
             if (busy(cu, cv, it.w, it.d)) { u += 6; ++r.busySkipped; continue; }                        // something is already built here
             if (heightRange(cu, cv, it.w, it.d) > in.maxDiff) { u += 6; ++r.steepSkipped; continue; }   // too steep here
             Placed pb{ it.type, cu, cv, it.w - (side ? kApron : kSide), it.d - (side ? kSide : kApron), it.rotated };
@@ -333,7 +340,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     auto blocked = [&](float u, float v1, float v2) {
         if (v1 > v2) std::swap(v1, v2);
         for (auto& b : r.buildings)
-            if (fabsf(b.u - u) < b.w / 2 + 3.5f && b.v + b.d / 2 > v1 && b.v - b.d / 2 < v2) return true;   // the game refuses a path along a building wall (its apron)
+            if (!b.stop && fabsf(b.u - u) < b.w / 2 + 3.5f && b.v + b.d / 2 > v1 && b.v - b.d / 2 < v2) return true;   // the game refuses a path along a building wall (its apron)
         return false;
     };
     auto link = [&](const StripInfo& a, const StripInfo& b) {
@@ -343,7 +350,14 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             float cu = spineU + (k % 2 ? 1 : -1) * (float)((k + 1) / 2) * 2.0f;
             if (cu < lo || cu > hi) { if (spineU + k < lo && spineU - k > hi) break; continue; }
             if (blocked(cu, a.pathV, b.pathV)) continue;
-            r.paths.push_back({ cu, a.pathV, cu, b.pathV });
+            // a stop stands on the street: the footpath stops at its edge (the game refuses a path into the model),
+            // the stop's own entrances take people on
+            float va = a.pathV;
+            for (auto& st : r.buildings) if (st.stop && fabsf(cu - st.u) < st.w / 2 + 1.0f) {
+                float sgn = b.pathV > a.pathV ? 1.0f : -1.0f, edge = st.v + sgn * (st.d / 2 + 1.0f);
+                if ((edge - a.pathV) * sgn > 0 && (b.pathV - edge) * sgn > 5.5f) va = edge;
+            }
+            r.paths.push_back({ cu, va, cu, b.pathV });
             return true;
         }
         Log("plan: no link between footpaths v %.1f [%.1f..%.1f] and v %.1f [%.1f..%.1f], spine %.1f", a.pathV, a.l, a.r, b.pathV, b.l, b.r, spineU);
@@ -536,6 +550,8 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 segs.push_back({ b.ou - b.w / 2 - 1, roadV - h, b.ou + b.w / 2 + 1, roadV - h });
                 segs.push_back({ b.ou - b.w / 2 - 1, roadV + h, b.ou + b.w / 2 + 1, roadV + h });
                 segs.push_back({ b.ou - b.w / 2 - 1, roadV, b.ou + b.w / 2 + 1, roadV });
+                segs.push_back({ b.u - b.w / 2 - 1, b.v - b.d / 2 - 1, b.u + b.w / 2 + 1, b.v - b.d / 2 - 1 });   // its edges, where footpaths end
+                segs.push_back({ b.u - b.w / 2 - 1, b.v + b.d / 2 + 1, b.u + b.w / 2 + 1, b.v + b.d / 2 + 1 });
             }
             std::vector<int> par(segs.size());
             for (size_t k = 0; k < par.size(); ++k) par[k] = (int)k;
@@ -699,6 +715,32 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             if (!((horiz && phoriz) || (vert && pvert))) continue;
             float off = horiz ? fabsf(p.v1 - rd.v1) : fabsf(p.u1 - rd.u1);
             if (off > rd.width / 2 + 0.5f && off < rd.width / 2 + 3.5f) { r.pathBuild[k] = 0; break; }
+        }
+    }
+    // A footpath that reaches a street must be drawn onto the street itself: the pavement line is not built, so a
+    // path stopping there hangs in the air next to the road and the game does not join them. Each end lying on a
+    // pavement line is carried across the pavement to the street's axis (the game makes the joint / crossing).
+    for (size_t k = 0; k < r.paths.size(); ++k) {
+        if (!r.pathBuild[k]) continue;
+        PathSeg& p = r.paths[k];
+        for (int e = 0; e < 2; ++e) {
+            float& eu = e ? p.u2 : p.u1; float& ev = e ? p.v2 : p.v1;
+            for (size_t j = 0; j < r.paths.size(); ++j) {
+                if (r.pathBuild[j]) continue;
+                const PathSeg& q = r.paths[j];
+                bool horiz = fabsf(q.v1 - q.v2) < 0.01f;
+                if (horiz ? (fabsf(ev - q.v1) > 0.6f || eu < std::min(q.u1, q.u2) - 1 || eu > std::max(q.u1, q.u2) + 1)
+                          : (fabsf(eu - q.u1) > 0.6f || ev < std::min(q.v1, q.v2) - 1 || ev > std::max(q.v1, q.v2) + 1)) continue;
+                for (auto& rd : r.roads) {
+                    bool rh = fabsf(rd.v1 - rd.v2) < 0.01f;
+                    if (rh != horiz) continue;
+                    float off = horiz ? fabsf(q.v1 - rd.v1) : fabsf(q.u1 - rd.u1);
+                    if (off < rd.width / 2 + 0.5f || off > rd.width / 2 + 3.5f) continue;
+                    if (horiz) ev = rd.v1; else eu = rd.u1;
+                    break;
+                }
+                break;
+            }
         }
     }
     for (size_t k = 0; k < r.paths.size(); ++k) if (r.pathBuild[k]) r.pathLength += fabsf(r.paths[k].u2 - r.paths[k].u1) + fabsf(r.paths[k].v2 - r.paths[k].v1);
