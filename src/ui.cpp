@@ -830,11 +830,12 @@ std::vector<std::string> IndProducts() {
     std::sort(v.begin(), v.end());
     return v;
 }
-int IndProducer(const std::string& res) {    // the producer with the most output per worker, among buildings with workers
+int IndProducer(const std::string& res) {    // the producer with the most output per building, among buildings with workers
     const auto& all = catalog::All(); int best = -1; float bv = 0;
     for (size_t i = 0; i < all.size(); ++i) {
         if (all[i].workers <= 0) continue;
-        for (auto& p : all[i].prod) if (p.first == res && p.second > bv) { bv = p.second; best = (int)i; }
+        // the biggest output per building: per worker picked the scrap recycler (waste_steel) over the steel mill
+        for (auto& p : all[i].prod) if (p.first == res && p.second * all[i].workers > bv) { bv = p.second * all[i].workers; best = (int)i; }
     }
     return best;
 }
