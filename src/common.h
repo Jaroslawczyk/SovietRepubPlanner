@@ -32,13 +32,14 @@ namespace eng {
     std::string SelectedType(DWORD* tick);          // ini name of the building picked last in the game menu
     std::string CursorTypeName();                   // engine identifier of that building type
     void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh);
-    // scripted clicks: action 0 = move only, 1 = left click, 2 = right click at the end of the step,
-    // 3 = left button held for the whole step (drag)
+    // line script with the real mouse: action 0 = move only, 3 = left button held for the step (drag)
     void StartScript(const std::vector<V3>& pos, const std::vector<int>& action, const std::vector<int>& frames, float sw, float sh);
     void StopAutoBuild();
+    bool ScriptActive();                            // a line script is driving the real mouse
     bool AutoBuildActive();
     void AutoBuildStats(int& done, int& failed, int& left);
     void BeginFrame();                              // refresh cached matrices
+    extern char g_scriptButton[64];
     extern bool g_blockMouseButtons;                // game sees no mouse buttons
     extern bool g_blockMouseMove;                   // game sees no wheel / relative motion
     extern bool g_hideMouse;                        // game sees the cursor tooFar off-screen

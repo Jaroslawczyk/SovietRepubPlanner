@@ -69,7 +69,7 @@ std::vector<Cell> g_slope, g_roadQuads;
 std::vector<std::vector<V3>> g_lines, g_outline;
 std::vector<V3> g_stopPts, g_crossPts, g_pedPts, g_roadPts;
 std::vector<std::vector<V3>> g_driveLines;
-int   g_lineMode = 0;               // how the game's line tool is driven: 0 two clicks a piece, 1 chain, 2 hold and drag
+int   g_lineMode = 2;               // unused: the game only accepts press-drag-release               // how the game's line tool is driven: 0 two clicks a piece, 1 chain, 2 hold and drag
 
 // ---------- geometry helpers ----------
 V3 LocalToWorld(const Area& a, float u, float v, float lift = 0.3f) {
@@ -581,17 +581,10 @@ void AddLine(LineJob& job, float u1, float v1, float u2, float v2) {
         if (!Clickable(pts.back())) { ++job.skipped; return; }
     }
     auto step = [&](const V3& w, int action, int frames) { job.pos.push_back(w); job.action.push_back(action); job.frames.push_back(frames); };
-    if (g_lineMode == 1) {              // chain: a click at every point, right click ends the line
-        for (auto& w : pts) { step(w, 0, 18); step(w, 1, 6); }
-        step(pts.back(), 2, 14);
-    } else for (size_t i = 0; i + 1 < pts.size(); ++i) {
+    for (size_t i = 0; i + 1 < pts.size(); ++i) {     // press at the start, drag, release at the end
         const V3& a = pts[i]; const V3& b = pts[i + 1];
-        if (g_lineMode == 0) {          // every piece on its own: click the start, click the end
-            step(a, 0, 16); step(a, 1, 6); step(b, 0, 16); step(b, 1, 6); step(b, 0, 6);
-        } else {                        // press at the start, drag, release at the end
-            V3 mid{ (a.x + b.x) / 2, 0, (a.z + b.z) / 2 };
-            step(a, 0, 16); step(a, 3, 8); step(mid, 3, 10); step(b, 3, 14); step(b, 0, 8);
-        }
+        V3 mid{ (a.x + b.x) / 2, 0, (a.z + b.z) / 2 };
+        step(a, 0, 14); step(a, 3, 10); step(mid, 3, 10); step(b, 3, 16); step(b, 0, 8);
     }
     ++job.lines;
 }
@@ -605,7 +598,8 @@ void LineButton(const char* what, const char* tool, LineJob& job) {
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("Сначала выберите в игровом меню «Транспортная отрасль» %s.\n"
-                          "Мод сам прокликает начало и конец каждого отрезка игровым инструментом; платит игра.\n"
+                          "Мод сам протянет каждый отрезок игровым инструментом: двигает настоящий курсор и зажимает кнопку.\n"
+                          "Панель на это время прячется, мышь не трогайте. Esc — остановить. Платит игра.\n"
                           "Отрезок к зданию начинается точно в его точке подключения, чтобы игра к ней привязалась.\n"
                           "Порядок: сначала улицы и подъезды, потом дорожки.\n"
                           "Отрезки, концы которых за экраном, под панелями игры или закрыты холмом, пропускаются —\n"
@@ -628,10 +622,6 @@ void TabRoads() {
             if (!g_plan.drives.empty()) LineButton("подъезды к зданиям", "тип дороги (подъезд можно попроще)", drives);
             LineButton("дорожки", "тип пешеходной дорожки", paths);
         }
-        const char* modes[] = { "два клика на отрезок", "цепочкой, правый клик в конце", "зажать и тянуть" };
-        ImGui::SetNextItemWidth(280);
-        ImGui::Combo("как прокладывать", &g_lineMode, modes, 3);
-        ImGui::SetItemTooltip("Способ, которым мод управляет игровым инструментом линии.\nЕсли отрезки не появляются или тянутся лишние — попробуйте другой.");
         ImGui::TextDisabled("Зелёные точки — пешеходные входы зданий, оранжевые квадраты — подъезды для машин.");
         const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
         if (g_plan.noRoad) ImGui::TextColored(red, g_plan.roads.empty() ? "Зданиям нужна автодорога: %d — включите улицу ниже." : "Не удалось подвести автодорогу к зданиям: %d.", g_plan.noRoad);
@@ -904,7 +894,7 @@ void SelfTest() {
         LineJob job;
         {   // the file may hold the line mode (0, 1, 2) and how many of the last plan lines to draw (the newest are the house links)
             FILE* f = _wfopen(ptFlag.c_str(), L"r"); int m = -1, n = 0;
-            if (f) { if (fscanf(f, "%d %d", &m, &n) >= 1 && m >= 0 && m <= 2) g_lineMode = m; fclose(f); }
+            if (f) { char btn[64] = ""; if (fscanf(f, "%d %d %63s", &m, &n, btn) >= 1 && m >= 0 && m <= 2) g_lineMode = m; if (btn[0]) strcpy(eng::g_scriptButton, btn); fclose(f); }
             size_t from = n > 0 && (size_t)n < g_plan.paths.size() ? g_plan.paths.size() - n : 0;
             for (size_t k = from; k < g_plan.paths.size(); ++k) { auto& ps = g_plan.paths[k]; AddLine(job, ps.u1, ps.v1, ps.u2, ps.v2); }
         }
@@ -986,7 +976,7 @@ void Draw() {
     if (!g_inited) return;
     if (!eng::Ready()) { g_pick = false; g_dragStop = g_hoverStop = -1; }
     SelfTest();
-    if (g_open) Panel();
+    if (g_open && !eng::ScriptActive()) Panel();        // the line script needs the real mouse over the map
     if (g_dirty && (eng::Ready() || !g_area.ok)) {
         Regenerate();
         if (g_selfTest == 2 && g_dragStop < 0)

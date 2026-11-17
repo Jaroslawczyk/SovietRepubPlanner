@@ -80,22 +80,55 @@ float CursorRot();
 bool CursorActive();
 static std::atomic<int> g_dbgSet{ 0 }, g_dbgClear{ 0 }, g_dbgPoll{ 0 };
 
+static std::atomic<int> g_dbgCalls[6];
+static bool t_press = false, t_drag = false, t_dragPress = false; static float t_rel[3] = {}, t_solid[2] = {}; static int t_lines = 0, t_after = 0;
+static std::atomic<int> g_abPressGen{ 0 };
+// The game polls the mouse from two threads; a scripted "press" event must reach each of them exactly once
+// (for a few milliseconds, so every caller within that thread's frame sees it).
+static bool ScriptPress() {
+    thread_local int seen = -1; thread_local ULONGLONG since = 0;
+    int gen = g_abPressGen;
+    LARGE_INTEGER f, t; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t);
+    ULONGLONG ms = (ULONGLONG)(t.QuadPart * 1000 / f.QuadPart);
+    if (seen != gen) { seen = gen; since = ms; }
+    return ms - since < 6;
+}
 static void ScriptTick();
+static int g_abPressAge = 0;      // frames the scripted button has been down; the game's line tools want a single press event
 static bool g_abRClick = false; static int g_abMode = 0;   // 0 = buildings, 1 = scripted clicks (roads, paths)
-#define MB_HOOK(name, orig) static bool name(void* s) { if (g_abActive) return false; return g_blockMouseButtons ? false : orig(s); }
-static bool h_LPress(void* s) { if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LPress(s); }
-static bool h_LDown(void* s) { static DWORD t = 0; if (t != GetCurrentThreadId()) { t = GetCurrentThreadId(); Log("input polled on thread %lu", t); } if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LDown(s); }   // polled every frame
-static bool h_LPressA(void* s) { if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LPressA(s); }
-static bool h_RPress(void* s)  { if (g_abActive) return g_abRClick; return g_blockMouseButtons ? false : o_RPress(s); }
-static bool h_RDown(void* s)   { if (g_abActive) return g_abRClick; return g_blockMouseButtons ? false : o_RDown(s); }
-static bool h_RPressA(void* s) { if (g_abActive) return g_abRClick; return g_blockMouseButtons ? false : o_RPressA(s); }
+static bool Spoof();
+#define MB_HOOK(name, orig) static bool name(void* s) { if (Spoof()) return false; return g_blockMouseButtons ? false : orig(s); }
+static bool h_LPress(void* s) { if (Spoof()) ++g_dbgCalls[0]; if (Spoof()) return g_abClick && (true); return g_blockMouseButtons ? false : o_LPress(s); }
+static bool h_LDown(void* s) { static DWORD t = 0; if (t != GetCurrentThreadId()) { t = GetCurrentThreadId(); Log("input polled on thread %lu", t); } if (Spoof()) ++g_dbgCalls[1]; if (Spoof()) return g_abClick; return g_blockMouseButtons ? false : o_LDown(s); }   // polled every frame
+static bool h_LPressA(void* s) { if (Spoof()) ++g_dbgCalls[2]; if (Spoof()) return g_abClick && (true); return g_blockMouseButtons ? false : o_LPressA(s); }
+static bool h_RPress(void* s)  { if (Spoof()) return g_abRClick; return g_blockMouseButtons ? false : o_RPress(s); }
+static bool h_RDown(void* s)   { if (Spoof()) return g_abRClick; return g_blockMouseButtons ? false : o_RDown(s); }
+static bool h_RPressA(void* s) { if (Spoof()) return g_abRClick; return g_blockMouseButtons ? false : o_RPressA(s); }
 MB_HOOK(h_MDown, o_MDown)
+// Named buttons ("actions") of the game's input layer; logged to learn which ones the line tools poll.
+typedef bool (*InName_t)(void*, char*);
+static InName_t o_BtnDown, o_BtnPress;
+char g_scriptButton[64] = "MOUSEDRAG";   // the named button the line tools read while the left button is held
+static bool NamedButton(InName_t orig, const char* kind, void* s, char* name) {
+    bool v = orig(s, name);
+    if (v && name && strcmp(name, "MOUSEDRAG") == 0) { if (kind[0] == 'd') t_drag = true; else t_dragPress = true; }
+    static std::vector<std::string> seen; static std::mutex mx; static int trues = 0;
+    std::lock_guard<std::mutex> l(mx);
+    std::string key = std::string(kind) + (name ? name : "?");
+    bool known = false; for (auto& k : seen) if (k == key) known = true;
+    if (!known && seen.size() < 200) { seen.push_back(key); Log("BUTTON %s '%s' polled (script %d)", kind, name ? name : "?", (int)g_abActive); }
+    if (v && trues < 60 && !(name && strcmp(name, "MOUSEDRAG") == 0 && trues > 8)) { ++trues; Log("BUTTON %s '%s' = true", kind, name ? name : "?"); }
+    return v;
+}
+static bool h_BtnDown(void* s, char* name) { return NamedButton(o_BtnDown, "down", s, name); }
+static bool h_BtnPress(void* s, char* name) { return NamedButton(o_BtnPress, "press", s, name); }
 static bool h_KeyDown(void* s, int k)  { return g_blockKeys ? false : o_KeyDown(s, k); }
 static bool h_KeyPress(void* s, int k) { return g_blockKeys ? false : o_KeyPress(s, k); }
 static V3* h_MouseRel(void* s, V3* out) {
     V3* r = o_MouseRel(s, out);
+    if (r && !g_abActive) { t_rel[0] = r->x; t_rel[1] = r->y; t_rel[2] = r->z; }
     // Zeroing this while the cursor is over the panel made the camera drift; only the auto-builder needs it.
-    if (g_abActive && r) { r->x = r->y = r->z = 0; }
+    if (Spoof() && r) { r->x = r->y = r->z = 0; }
     return r;
 }
 
@@ -105,12 +138,14 @@ static V3* h_MouseSolid(void* s, V3* out) {
     V3* r = o_MouseSolid(s, out);
     { static DWORD last = 0; static int n = 0; DWORD now = GetTickCount();
       if (r && n < 40 && now - last > 1500) { ++n; last = now; POINT pt; GetCursorPos(&pt); Log("MOUSESOLID %.2f %.2f %.2f | screen cursor %ld %ld", r->x, r->y, r->z, pt.x, pt.y); } }
-    if (g_abActive && r) { r->x = g_abSpoofX; r->y = g_abSpoofY; }
+    if (Spoof()) ++g_dbgCalls[3];
+    if (r && !g_abActive) { t_solid[0] = r->x; t_solid[1] = r->y; }
+    if (Spoof() && r) { r->x = g_abSpoofX; r->y = g_abSpoofY; }
     return r;
 }
 static V3* h_MouseSolidInv(void* s, V3* out) {
     V3* r = o_MouseSolidInv(s, out);
-    if (g_abActive && r) { r->x = g_abSpoofX; r->y = g_abSpoofY; }
+    if (Spoof() && r) { r->x = g_abSpoofX; r->y = g_abSpoofY; }
     return r;
 }
 static float h_AxisValue(void* s, char* name, int* a, float b, float c) {
@@ -370,27 +405,44 @@ std::string CursorTypeName() { return SelectedType(nullptr); }
 struct ScriptStep { V3 pos; int action; int frames; };
 static std::vector<ScriptStep> g_scr;
 static size_t g_scrIdx = 0; static int g_scrTicks = 0;
+static HWND g_scrWnd = nullptr; static bool g_scrBtn = false;
+static bool Spoof() { return g_abActive && g_abMode == 0; }
+static void ScriptButton(bool down) {
+    if (down == g_scrBtn) return;
+    g_scrBtn = down;
+    INPUT in{}; in.type = INPUT_MOUSE; in.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+    SendInput(1, &in, sizeof(in));
+}
+static void ScriptEnd(const char* why) {
+    ScriptButton(false);
+    g_abActive = false; g_abClick = g_abRClick = false;
+    Log("script: %s, %d lines drawn, %d steps left", why, (int)g_abDone, (int)g_abLeft);
+}
+// The game's line tools (roads, footpaths) only react to a real press-drag-release: the game reads the mouse on
+// two threads and treats a faked hold as a camera drag. So the script moves the real cursor and holds the real
+// button; Esc or switching to another window stops it.
 static void ScriptTick() {
     std::lock_guard<std::mutex> l(g_abMx);
     if (!g_abActive) return;
-    if (g_scrIdx >= g_scr.size()) { g_abActive = false; g_abClick = g_abRClick = false; Log("script: finished, %d clicks", (int)g_abDone); return; }
+    if (g_scrIdx >= g_scr.size()) { ScriptEnd("finished"); return; }
+    if (GetForegroundWindow() != g_scrWnd) { ++g_abFailed; ScriptEnd("the game lost focus, stopped"); return; }
+    if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) { ScriptEnd("stopped with Esc"); return; }
     const ScriptStep& st = g_scr[g_scrIdx];
     float sx, sy;
     if (!WorldToScreen({ st.pos.x, TerrainHeight(st.pos.x, st.pos.z), st.pos.z }, g_abW, g_abH, sx, sy) ||
         sx < 60 || sy < 70 || sx > g_abW - 60 || sy > g_abH - 190) {
-        // cannot reach this point: cancel the current line with a right click and stop
-        Log("script: step %d is off screen or under the game HUD, stopped", (int)g_scrIdx);
-        g_abActive = false; g_abClick = g_abRClick = false; ++g_abFailed; return;
+        ++g_abFailed; ScriptEnd("a point is off screen or under the game HUD, stopped"); return;
     }
-    g_abSpoofX = sx; g_abSpoofY = sy;
+    POINT pt{ (LONG)(sx + 0.5f), (LONG)(sy + 0.5f) };
+    ClientToScreen(g_scrWnd, &pt);
+    SetCursorPos(pt.x + (g_scrTicks & 1), pt.y);       // the one-pixel wobble keeps "mouse moved" events coming
     ++g_scrTicks;
-    bool press = st.action == 3 || g_scrTicks > st.frames - 3;
-    g_abClick = (st.action == 1 || st.action == 3) && press;
-    g_abRClick = st.action == 2 && press;
+    ScriptButton(st.action == 3 && g_scrTicks > 2);
     if (g_scrTicks >= st.frames) {
-        if (st.action == 1) ++g_abDone;
-        bool keep = st.action == 3 && g_scrIdx + 1 < g_scr.size() && g_scr[g_scrIdx + 1].action == 3;   // drag goes on
-        ++g_scrIdx; g_scrTicks = 0; g_abClick = keep; g_abRClick = false;
+        bool held = st.action == 3 && g_scrIdx + 1 < g_scr.size() && g_scr[g_scrIdx + 1].action == 3;   // drag goes on
+        if (st.action == 3 && !held) ++g_abDone;
+        if (!held) ScriptButton(false);
+        ++g_scrIdx; g_scrTicks = held ? 3 : 0;
         g_abLeft = (int)(g_scr.size() - g_scrIdx);
     }
 }
@@ -402,6 +454,7 @@ void StartScript(const std::vector<V3>& pos, const std::vector<int>& action, con
     g_abDone = 0; g_abFailed = 0; g_abLeft = (int)g_scr.size(); g_abW = sw; g_abH = sh;
     if (g_scr.empty()) return;
     Log("script: %d steps", (int)g_scr.size());
+    g_scrWnd = GetForegroundWindow(); g_scrBtn = false;
     g_abMode = 1; g_abActive = true;
 }
 void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh) {
@@ -416,7 +469,8 @@ void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, f
     Log("autobuild: %d targets, cursor type %d '%s'", (int)g_abJobs.size(), g_curType, CursorTypeName().c_str());
     g_abActive = true;
 }
-void StopAutoBuild() { g_abActive = false; g_abClick = false; g_abRClick = false; g_abAxis = 0; }
+bool ScriptActive() { return g_abActive && g_abMode == 1; }
+void StopAutoBuild() { if (g_abActive && g_abMode == 1) ScriptButton(false); g_abActive = false; g_abClick = false; g_abRClick = false; g_abAxis = 0; }
 bool AutoBuildActive() {
     return g_abActive;
 }
@@ -451,6 +505,8 @@ static IatHook g_hooks[] = {
     { "?GetMouseRightDown@C3D_INPUT@@QEAA_NXZ", h_RDown, (void**)&o_RDown },
     { "?GetMouseRightPressAOff@C3D_INPUT@@QEAA_NXZ", h_RPressA, (void**)&o_RPressA },
     { "?GetMouseMiddleDown@C3D_INPUT@@QEAA_NXZ", h_MDown, (void**)&o_MDown },
+    { "?CommonInterfaceGetButtonDown@C3D_INPUT@@QEAA_NPEAD@Z", h_BtnDown, (void**)&o_BtnDown },
+    { "?CommonInterfaceGetButtonPress@C3D_INPUT@@QEAA_NPEAD@Z", h_BtnPress, (void**)&o_BtnPress },
     { "?GetKeyDown@C3D_INPUT@@QEAA_NH@Z", h_KeyDown, (void**)&o_KeyDown },
     { "?GetKeyPress@C3D_INPUT@@QEAA_NH@Z", h_KeyPress, (void**)&o_KeyPress },
     { "?GetMouseSolid@C3D_INPUT@@QEAA?AVC3DVECTOR3@@XZ", h_MouseSolid, (void**)&o_MouseSolid },
