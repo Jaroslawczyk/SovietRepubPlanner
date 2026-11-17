@@ -104,7 +104,8 @@ void Load() {
     g_types.clear();
     std::wstring media = GameDir() + L"media_soviet\\";
     auto names = LoadNames(media + L"sovietRussian.btf");
-    if (names.empty()) names = LoadNames(media + L"sovietEnglish.btf");
+    auto namesEn = LoadNames(media + L"sovietEnglish.btf");
+    if (names.empty()) names = namesEn;
     std::wstring dir = media + L"buildings_types\\";
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((dir + L"*.ini").c_str(), &fd);
@@ -210,6 +211,8 @@ void Load() {
         ComputeLoads(b);
         auto it = names.find(nameId);
         b.name = (it != names.end() && !it->second.empty()) ? WideToUtf8(it->second) : b.id;
+        auto ie = namesEn.find(nameId);
+        b.nameRu = b.name; b.nameEn = (ie != namesEn.end() && !ie->second.empty()) ? WideToUtf8(ie->second) : b.name;
         g_types.push_back(b);
     } while (FindNextFileW(h, &fd));
     FindClose(h);
@@ -225,5 +228,7 @@ void Load() {
     Log("catalog: %d buildings, %d residential, %d names, %d with a footpath entrance, %d need a road",
         (int)g_types.size(), living, (int)names.size(), ped, road);
 }
+
+void SetEnglish(bool en) { for (auto& t : g_types) t.name = en ? t.nameEn : t.nameRu; }
 
 } // namespace catalog

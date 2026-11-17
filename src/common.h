@@ -14,6 +14,12 @@ void Log(const char* fmt, ...);
 std::wstring GameDir();              // folder of SOVIET64.exe, with trailing backslash
 std::string WideToUtf8(const std::wstring& w);
 
+// ---- interface language ----
+namespace i18n { extern bool en; const char* T(const char* ru); }
+using i18n::T;
+// game icon (media_soviet/editor/tool_<id>.png) as an ImGui texture id; nullptr when there is none
+void* LoadIconTexture(const std::wstring& path);
+
 // ---- engine access (IAT hooks on C3DDLL64 imports) ----
 namespace eng {
     void InstallIatHooks();
@@ -38,6 +44,7 @@ namespace eng {
     void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh);
     // line script with the real mouse: action 0 = move only, 3 = left button held for the step (drag)
     void StartScript(const std::vector<V3>& pos, const std::vector<int>& action, const std::vector<int>& frames, float sw, float sh);
+    int  ToolOrder(const std::string& id);          // position of the building in the game's tool table (build menu order), -1 = unknown
     bool InstantSupported();                        // direct build calls exist for this game build
     // one direct call into the game: kind 0 = building "type" at a turned by rot, 1 = road a->b, 2 = footpath a->b
     // kind 3 = a utility line a->b: mgr = offset of the network manager in the game state, lineType / sub / arg as the game's own tool passes them
@@ -74,7 +81,8 @@ namespace eng {
 struct Conn { int kind; float x, z, dx, dz; float y = 0; };   // y: height of the connection point above the model origin
 struct BuildingType {
     std::string id;         // ini file name without extension
-    std::string name;       // localized, UTF-8
+    std::string name;       // localized, UTF-8 (current interface language)
+    std::string nameRu, nameEn;
     std::string category;   // LIVING, SHOP, ...
     std::string material;   // brick / panels / wood ... (from construction cost)
     std::string style;      // STYLE_FLAG
@@ -106,6 +114,7 @@ struct BuildingType {
 namespace catalog {
     void Load();
     const std::vector<BuildingType>& All();
+    void SetEnglish(bool en);                       // switch BuildingType::name
 }
 
 // ---- planner ----
@@ -116,6 +125,7 @@ struct ServiceRule {
     bool  enabled;
     int   perResidents;     // one building per N residents
     int   typeIndex;        // index into catalog::All(), -1 = none
+    const char* prefer = nullptr;   // building id picked by default (else the smallest of the category)
 };
 struct PlanInput {
     std::vector<V2> poly;                           // district outline

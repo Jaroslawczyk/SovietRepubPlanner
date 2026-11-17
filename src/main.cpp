@@ -1,6 +1,8 @@
 // dinput8.dll proxy: loads with the game, hooks IDXGISwapChain::Present and draws the ImGui panel.
 #include "common.h"
 #include <d3d11.h>
+#include <wincodec.h>
+#include <vector>
 #include <cstdarg>
 #include <cstdio>
 #include "imgui.h"
@@ -52,6 +54,34 @@ static ID3D11Device* g_dev = nullptr;
 static ID3D11DeviceContext* g_ctx = nullptr;
 static HWND g_hwnd = nullptr;
 static std::string g_iniPath;
+
+// Game icons: PNG decoded with WIC into a shader resource view. Called from the UI (render thread).
+void* LoadIconTexture(const std::wstring& path) {
+    if (!g_dev || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return nullptr;
+    static IWICImagingFactory* wic = nullptr;
+    if (!wic) {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) { wic = nullptr; return nullptr; }
+    }
+    IWICBitmapDecoder* dec = nullptr; IWICBitmapFrameDecode* fr = nullptr; IWICFormatConverter* cv = nullptr;
+    void* result = nullptr;
+    if (SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &dec)) &&
+        SUCCEEDED(dec->GetFrame(0, &fr)) && SUCCEEDED(wic->CreateFormatConverter(&cv)) &&
+        SUCCEEDED(cv->Initialize(fr, GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))) {
+        UINT w = 0, h = 0; cv->GetSize(&w, &h);
+        std::vector<BYTE> px((size_t)w * h * 4);
+        if (w && h && SUCCEEDED(cv->CopyPixels(nullptr, w * 4, (UINT)px.size(), px.data()))) {
+            D3D11_TEXTURE2D_DESC td{}; td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
+            td.Format = DXGI_FORMAT_R8G8B8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            D3D11_SUBRESOURCE_DATA sd{ px.data(), w * 4, 0 };
+            ID3D11Texture2D* tex = nullptr; ID3D11ShaderResourceView* srv = nullptr;
+            if (SUCCEEDED(g_dev->CreateTexture2D(&td, &sd, &tex)) && SUCCEEDED(g_dev->CreateShaderResourceView(tex, nullptr, &srv))) result = srv;
+            if (tex) tex->Release();
+        }
+    }
+    if (cv) cv->Release(); if (fr) fr->Release(); if (dec) dec->Release();
+    return result;
+}
 
 // Input reaches ImGui through a WH_GETMESSAGE hook instead of subclassing the window: the game re-installs
 // its own window procedure during start-up, and a subclass set before that ends up in an endless call loop.

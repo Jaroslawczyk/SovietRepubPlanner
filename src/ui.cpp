@@ -34,21 +34,34 @@ const int kStopCount = 8;
 bool  g_crossRoad = false;          // a second street across the first one
 int   g_roadKind = 2;               // street surface for instant building: 0 gravel, 1 asphalt
 int   g_pathKind = 1;               // footpath: 0 dirt trail, 1 gravel, 2 asphalt
-std::vector<ServiceRule> g_services = {
-    { "SHOP",         "Магазин",          true,  2000, -1 },
-    { "PUB",          "Пивная",           true,  3000, -1 },
-    { "KINDERGARTEN", "Детский сад",      true,  2500, -1 },
-    { "SCHOOL",       "Школа",            true,  3000, -1 },
-    { "KINO",         "Кинотеатр",        true,  6000, -1 },
-    { "SPORT",        "Спорт",            true,  6000, -1 },
-    { "MONUMENT",     "Памятник",         true,  3000, -1 },
-    { "ATTRACTION",   "Парк / площадка",  true,  2000, -1 },
-    { "HOSPITAL",     "Больница",         false, 10000, -1 },
-    { "CHURCH",       "Церковь",          false, 8000, -1 },
+std::vector<ServiceRule> g_services = {     // labels are translated with T() where shown
+    { "SHOP",          "Магазин",                true,  2000, -1 },
+    { "PUB",           "Пивная",                 true,  3000, -1, "pub" },
+    { "KINDERGARTEN",  "Детский сад",            true,  2500, -1 },
+    { "SCHOOL",        "Школа",                  true,  3000, -1 },
+    { "UNIVERSITY",    "Университет",            true,  6000, -1, "university_technical" },
+    { "KINO",          "Кинотеатр / культура",   true,  5000, -1, "kino" },
+    { "SPORT",         "Спорт: футбольное поле", true,  3000, -1, "playground_football" },
+    { "SPORT",         "Спорт: теннис",          true,  2500, -1, "playground_tenis" },
+    { "ATTRACTION",    "Бассейн / пляж",         false, 8000, -1, "co_swimmingpool" },
+    { "MONUMENT",      "Памятник",               true,  4000, -1, "monument_statue_small" },
+    { "MONUMENT",      "Фонтан",                 true,  3000, -1, "fountain1" },
+    { "ATTRACTION",    "Парк / аттракцион",      true,  4000, -1, "co_chamomile" },
+    { "CITYHALL",      "Горком",                 true,  100000, -1, "cityhall" },
+    { "FIRESTATION",   "Пожарная часть",         true,  10000, -1 },
+    { "POLICE_STATION","Милиция",                true,  8000, -1, "police_small" },
+    { "SECRET_POLICE", "КГБ",                    true,  100000, -1 },
+    { "PRISON",        "Тюрьма",                 false, 100000, -1 },
+    { "COURT_HOUSE",   "Суд",                    false, 100000, -1, "court_small" },
+    { "HOSPITAL",      "Больница",               true,  10000, -1 },
+    { "GAS_STATION",   "Автозаправка",           false, 8000, -1, "gas_station" },
+    { "PARKING",       "Парковка",               false, 3000, -1, "parking_small" },
+    { "CHURCH",        "Церковь",                false, 8000, -1 },
 };
 int   g_population = 1000;
 float g_gap = 8.0f;
 int   g_density = 90;               // 0..100: gaps between buildings and rows
+bool  g_autoHouse = true;          // the house ticked by default; the first manual tick replaces it
 bool  g_fillAll = true;    // no empty corners: houses until nothing fits
 int   g_roadType = 1;
 float g_roadV = 0;
@@ -153,6 +166,8 @@ void InitDefaults() {
     for (size_t i = 0; i < all.size() && !any; ++i) if (all[i].category == "LIVING" && all[i].capacity > 0) { g_houseSel[i] = 1; any = true; }
     for (auto& s : g_services) {
         float best = 1e9f;
+        if (s.prefer) for (size_t i = 0; i < all.size(); ++i) if (all[i].id == s.prefer && all[i].category == s.category) { s.typeIndex = (int)i; best = -1; }
+        if (best < 0) continue;
         for (size_t i = 0; i < all.size(); ++i) {
             if (all[i].category != s.category) continue;
             float area = all[i].sx * all[i].sz;
@@ -264,7 +279,7 @@ void Regenerate() {
         static float lastA = -1, lastB = -1;
         if (g_polOk && (g_polA != lastA || g_polB != lastB)) { lastA = g_polA; lastB = g_polB; Log("pollution over the district: max %.4f / %.4f (cell floats 0 / 1)", g_polA, g_polB); }
     }
-    if (g_rebuilds) snprintf(g_rebuildNote, sizeof(g_rebuildNote), "План пересобран (%d): %d зданий, %d отброшено как оторванные.", g_rebuilds, (int)g_plan.buildings.size(), g_plan.cutOff);
+    if (g_rebuilds) snprintf(g_rebuildNote, sizeof(g_rebuildNote), T("План пересобран (%d): %d зданий, %d отброшено как оторванные."), g_rebuilds, (int)g_plan.buildings.size(), g_plan.cutOff);
     if (g_plan.cutOff) Log("plan: %d buildings and %d footpaths dropped - not joined to the street net", g_plan.cutOff, g_plan.cutOffPaths);
     {
         std::vector<eng::WorldBld> world; eng::ListBuildings(world);
@@ -455,7 +470,7 @@ void DrawWorld() {
         bool hot = (int)i == g_hoverStop || (int)i == g_dragStop;
         dl->AddCircleFilled(s, hot ? 13.0f : 10.0f, IM_COL32(40, 110, 220, 255));
         dl->AddCircle(s, hot ? 13.0f : 10.0f, IM_COL32(255, 255, 255, 255), 0, 2.0f);
-        const char* t = "Остановка";
+        const char* t = T("Остановка");
         ImVec2 ts = ImGui::CalcTextSize(t);
         dl->AddRectFilled(ImVec2(s.x - ts.x / 2 - 4, s.y - 34), ImVec2(s.x + ts.x / 2 + 4, s.y - 14), IM_COL32(0, 0, 0, 170), 4);
         dl->AddText(ImVec2(s.x - ts.x / 2, s.y - 33), IM_COL32(255, 255, 255, 255), t);
@@ -482,7 +497,7 @@ void StopsInteraction() {
     for (size_t i = 0; i < g_stopPts.size(); ++i)
         if (Proj(g_stopPts[i], s) && fabsf(s.x - io.MousePos.x) < 16 && fabsf(s.y - io.MousePos.y) < 16) g_hoverStop = (int)i;
     if (g_hoverStop >= 0) {
-        ImGui::SetTooltip("Перетащите остановку — район перестроится");
+        ImGui::SetTooltip(T("Перетащите остановку — район перестроится"));
         if (ImGui::IsMouseClicked(0)) g_dragStop = g_hoverStop;
     }
 }
@@ -520,9 +535,9 @@ void Picking() {
     }
 
     char buf[200];
-    if (g_draft.empty()) snprintf(buf, sizeof(buf), "Клик — первая точка контура   (ПКМ — отмена)");
-    else if (g_draft.size() < 3) snprintf(buf, sizeof(buf), "Клик — следующая точка   (ПКМ — убрать последнюю)");
-    else snprintf(buf, sizeof(buf), nearFirst ? "Клик — замкнуть контур" : "Клик — точка, клик по первой точке или Enter — замкнуть   (ПКМ — убрать последнюю)");
+    if (g_draft.empty()) snprintf(buf, sizeof(buf), T("Клик — первая точка контура   (ПКМ — отмена)"));
+    else if (g_draft.size() < 3) snprintf(buf, sizeof(buf), T("Клик — следующая точка   (ПКМ — убрать последнюю)"));
+    else snprintf(buf, sizeof(buf), nearFirst ? T("Клик — замкнуть контур") : T("Клик — точка, клик по первой точке или Enter — замкнуть   (ПКМ — убрать последнюю)"));
     ImVec2 tp(io.MousePos.x + 18, io.MousePos.y + 18), ts = ImGui::CalcTextSize(buf);
     dl->AddRectFilled(ImVec2(tp.x - 5, tp.y - 3), ImVec2(tp.x + ts.x + 5, tp.y + ts.y + 3), IM_COL32(0, 0, 0, 190), 4);
     dl->AddText(tp, IM_COL32(255, 255, 255, 255), buf);
@@ -534,11 +549,11 @@ void Picking() {
 
 // ---------- panel ----------
 const char* MaterialName(const std::string& m) {
-    if (m == "brick") return "кирпич";
-    if (m == "panels") return "панели";
-    if (m == "wood") return "дерево";
-    if (m == "concrete") return "бетон";
-    if (m == "steel") return "сталь";
+    if (m == "brick") return T("кирпич");
+    if (m == "panels") return T("панели");
+    if (m == "wood") return T("дерево");
+    if (m == "concrete") return T("бетон");
+    if (m == "steel") return T("сталь");
     return m.empty() ? "-" : m.c_str();
 }
 
@@ -570,56 +585,133 @@ void SortHouses(ImGuiTableSortSpecs* specs) {
     });
 }
 
+void ToggleHouse(int i, bool sel) {
+    if (sel && g_autoHouse) std::fill(g_houseSel.begin(), g_houseSel.end(), 0);   // the default pick goes away
+    g_autoHouse = false;
+    g_houseSel[i] = sel; g_dirty = true;
+}
+std::map<std::string, void*> g_icons;
+void* Icon(const std::string& id) {
+    auto it = g_icons.find(id);
+    if (it != g_icons.end()) return it->second;
+    void* t = LoadIconTexture(GameDir() + L"media_soviet\\editor\\tool_" + std::wstring(id.begin(), id.end()) + L".png");
+    g_icons[id] = t;
+    return t;
+}
+bool g_houseIcons = true;
+// Houses in the order of the game's build menu (tool table order), unknown ones at the end.
+const std::vector<int>& MenuOrder() {
+    static std::vector<int> order; static bool exact = false;
+    if (order.empty() || !exact) {
+        const auto& all = catalog::All();
+        order.clear();
+        for (size_t i = 0; i < all.size(); ++i) if (all[i].category == "LIVING" && all[i].capacity > 0) order.push_back((int)i);
+        exact = eng::ToolOrder(all[order.empty() ? 0 : order[0]].id) >= 0 || eng::ToolOrder("hrusevka") >= 0;
+        std::stable_sort(order.begin(), order.end(), [&](int x, int y) {
+            int a = eng::ToolOrder(all[x].id), b = eng::ToolOrder(all[y].id);
+            if ((a < 0) != (b < 0)) return b < 0;
+            if (a != b) return a < b;
+            return all[x].capacity < all[y].capacity;
+        });
+    }
+    return order;
+}
+void HouseIconGrid(const std::function<bool(const BuildingType&)>& passes) {
+    const auto& all = catalog::All();
+    ImGui::TextDisabled(T("Как в меню стройки игры. Клик — выбрать / снять."));
+    int shareSum = 0, nSel = 0;
+    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { shareSum += std::max(0, g_houseShare[i]); ++nSel; }
+    float listH = std::min(34.0f * nSel + 30, 170.0f);
+    ImGui::BeginChild("icons", ImVec2(0, std::max(120.0f, ImGui::GetContentRegionAvail().y - listH)), ImGuiChildFlags_Borders);
+    const float sz = 72, pad = 6;
+    int perRow = std::max(1, (int)((ImGui::GetContentRegionAvail().x + pad) / (sz + 10 + pad)));
+    int col = 0;
+    for (int i : MenuOrder()) {
+        const BuildingType& b = all[i];
+        if (g_onlySelected && !g_houseSel[i]) continue;
+        if (!passes(b)) continue;
+        if (g_filter[0] && b.name.find(g_filter) == std::string::npos && b.id.find(g_filter) == std::string::npos) continue;
+        if (col) ImGui::SameLine(0, pad);
+        ImGui::PushID(i);
+        bool sel = g_houseSel[i] != 0;
+        void* tex = Icon(b.id);
+        ImGui::PushStyleColor(ImGuiCol_Button, sel ? ImVec4(0.573f, 0.176f, 0.149f, 1) : ImVec4(0.85f, 0.80f, 0.70f, 1));
+        bool click = tex ? ImGui::ImageButton("ic", (ImTextureID)(intptr_t)tex, ImVec2(sz, sz))
+                         : ImGui::Button(b.name.c_str(), ImVec2(sz + 8, sz + 8));
+        ImGui::PopStyleColor();
+        if (click) ToggleHouse(i, !sel);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("%s\n%d жит. · %.0fx%.0f м · %s"), b.name.c_str(), b.capacity, b.sx, b.sz, MaterialName(b.material));
+        ImGui::PopID();
+        col = (col + 1) % perRow;
+    }
+    ImGui::EndChild();
+    ImGui::Text(T("Выбрано домов: %d"), nSel);
+    ImGui::BeginChild("sel", ImVec2(0, 0));
+    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) {
+        ImGui::PushID((int)i);
+        if (void* t = Icon(all[i].id)) { ImGui::Image((ImTextureID)(intptr_t)t, ImVec2(26, 26)); ImGui::SameLine(); }
+        ImGui::SetNextItemWidth(58);
+        if (ImGui::DragInt("##share", &g_houseShare[i], 1.0f, 0, 100, "%d")) { g_houseShare[i] = std::clamp(g_houseShare[i], 0, 100); g_dirty = true; }
+        ImGui::SetItemTooltip(T("Вес этого типа. Потяните мышью или дважды кликните и введите число.\nСправа — получившаяся доля среди домов района."));
+        ImGui::SameLine(); ImGui::Text("%3d %%  %s — %d", shareSum > 0 ? (int)lroundf(100.0f * g_houseShare[i] / shareSum) : 0, all[i].name.c_str(), all[i].capacity);
+        ImGui::SameLine(); if (ImGui::SmallButton("x")) ToggleHouse((int)i, false);
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+}
+
 void TabArea() {
-    ImGui::SeparatorText("Территория");
+    if (ImGui::Checkbox(T("English interface"), &i18n::en)) { catalog::SetEnglish(i18n::en); g_dirty = true; }
+    ImGui::SetItemTooltip(T("Язык интерфейса и названий зданий (названия берутся из файлов игры)."));
+    ImGui::SeparatorText(T("Территория"));
     ImGui::BeginDisabled(!eng::Ready());
-    if (ImGui::Button(g_pick ? "Отменить рисование" : "Нарисовать на карте", ImVec2(210, 0))) { g_pick = !g_pick; g_draft.clear(); }
+    if (ImGui::Button(g_pick ? T("Отменить рисование") : T("Нарисовать на карте"), ImVec2(210, 0))) { g_pick = !g_pick; g_draft.clear(); }
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (g_area.ok) {
-        ImGui::Text("%.1f га, %d точек", g_area.sqm / 10000.0f, (int)g_area.pts.size());
+        ImGui::Text(T("%.1f га, %d точек"), g_area.sqm / 10000.0f, (int)g_area.pts.size());
         ImGui::SameLine();
-        if (ImGui::SmallButton("Сбросить")) { g_area.ok = false; g_dirty = g_areaChanged = true; }
-    } else ImGui::TextDisabled("участок не выбран");
-    ImGui::TextDisabled("Кликайте по карте углы района любой формы, замкните кликом по первой точке.");
+        if (ImGui::SmallButton(T("Сбросить"))) { g_area.ok = false; g_dirty = g_areaChanged = true; }
+    } else ImGui::TextDisabled(T("участок не выбран"));
+    ImGui::TextDisabled(T("Кликайте по карте углы района любой формы, замкните кликом по первой точке."));
     ImGui::SetNextItemWidth(220);
-    if (ImGui::SliderFloat("поворот застройки, °", &g_angle, -90.0f, 90.0f, "%.0f") && g_area.ok) {
+    if (ImGui::SliderFloat(T("поворот застройки, °"), &g_angle, -90.0f, 90.0f, "%.0f") && g_area.ok) {
         BuildFrame(g_area, true); g_dirty = g_areaChanged = true;
     }
 
-    ImGui::SeparatorText("Рельеф");
-    ImGui::Checkbox("показывать крутые склоны (оранжевый > 12 %, красный > 25 %)", &g_showSlope);
-    ImGui::Checkbox("показывать выравнивание: объёмные здания и жёлтые линии среза / насыпи", &g_showLevel);
+    ImGui::SeparatorText(T("Рельеф"));
+    ImGui::Checkbox(T("показывать крутые склоны (оранжевый > 12 %, красный > 25 %)"), &g_showSlope);
+    ImGui::Checkbox(T("показывать выравнивание: объёмные здания и жёлтые линии среза / насыпи"), &g_showLevel);
     ImGui::SetNextItemWidth(220);
-    if (ImGui::SliderFloat("допустимый перепад под зданием, м", &g_maxDiff, 0.5f, 12.0f, "%.1f")) g_dirty = true;
+    if (ImGui::SliderFloat(T("допустимый перепад под зданием, м"), &g_maxDiff, 0.5f, 12.0f, "%.1f")) g_dirty = true;
 
-    ImGui::SeparatorText("Население");
+    ImGui::SeparatorText(T("Население"));
     ImGui::SetNextItemWidth(220);
-    if (ImGui::InputInt("жителей", &g_population, 100, 1000)) { g_population = std::clamp(g_population, 10, 200000); g_dirty = true; }
+    if (ImGui::InputInt(T("жителей"), &g_population, 100, 1000)) { g_population = std::clamp(g_population, 10, 200000); g_dirty = true; }
     ImGui::SetNextItemWidth(220);
-    if (ImGui::SliderInt("плотность застройки, %", &g_density, 0, 100)) g_dirty = true;
-    ImGui::SetItemTooltip("Сжимает промежутки между зданиями (14 → 3 м) и полосы дорожек между рядами (9 → 5 м).\nНа большой плотности игре может не хватить места под площадки у входов.");
-    if (ImGui::Checkbox("застроить весь участок", &g_fillAll)) g_dirty = true;
-    ImGui::SetItemTooltip("Дома ставятся, пока помещаются, без оглядки на число жителей выше.");
+    if (ImGui::SliderInt(T("плотность застройки, %"), &g_density, 0, 100)) g_dirty = true;
+    ImGui::SetItemTooltip(T("Сжимает промежутки между зданиями (14 → 3 м) и полосы дорожек между рядами (9 → 5 м).\nНа большой плотности игре может не хватить места под площадки у входов."));
+    if (ImGui::Checkbox(T("застроить весь участок"), &g_fillAll)) g_dirty = true;
+    ImGui::SetItemTooltip(T("Дома ставятся, пока помещаются, без оглядки на число жителей выше."));
 
-    ImGui::SeparatorText("Выбранные дома");
+    ImGui::SeparatorText(T("Выбранные дома"));
     const auto& all = catalog::All();
     int n = 0;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) {
-        ImGui::BulletText("%s — %d жит.", all[i].name.c_str(), all[i].capacity); ++n;
+        ImGui::BulletText(T("%s — %d жит."), all[i].name.c_str(), all[i].capacity); ++n;
     }
-    if (!n) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Не выбрано ни одного дома — откройте вкладку «Дома».");
+    if (!n) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), T("Не выбрано ни одного дома — откройте вкладку «Дома»."));
 }
 
 void TabHouses() {
     const auto& all = catalog::All();
     ImGui::SetNextItemWidth(200);
-    ImGui::InputTextWithHint("##filter", "поиск по названию", g_filter, sizeof(g_filter));
-    ImGui::SameLine(); ImGui::Checkbox("только выбранные", &g_onlySelected);
+    ImGui::InputTextWithHint("##filter", T("поиск по названию"), g_filter, sizeof(g_filter));
+    ImGui::SameLine(); ImGui::Checkbox(T("только выбранные"), &g_onlySelected);
     // filter: how many residents, which wall material (the material decides what the building site needs)
     ImGui::SetNextItemWidth(220);
-    ImGui::DragIntRange2("жителей в доме", &g_resMin, &g_resMax, 1.0f, 0, 1000, "от %d", "до %d");
-    static const char* mats[] = { "любой материал", "кирпич", "панели", "дерево" };
+    ImGui::DragIntRange2(T("жителей в доме"), &g_resMin, &g_resMax, 1.0f, 0, 1000, T("от %d"), T("до %d"));
+    const char* mats[] = { T("любой материал"), T("кирпич"), T("панели"), T("дерево") };
     static const char* matKeys[] = { "", "brick", "panel", "wood" };
     ImGui::SameLine(); ImGui::SetNextItemWidth(150); ImGui::Combo("##mat", &g_matFilter, mats, IM_ARRAYSIZE(mats));
     auto passes = [&](const BuildingType& b) {
@@ -628,27 +720,31 @@ void TabHouses() {
         return true;
     };
     ImGui::SameLine();
-    if (ImGui::SmallButton("Выбрать по фильтру")) {
+    if (ImGui::SmallButton(T("Выбрать по фильтру"))) {
         for (int i : g_houseOrder) if (passes(catalog::All()[i])) g_houseSel[i] = 1; else g_houseSel[i] = 0;
+        g_autoHouse = false;
         g_dirty = true;
     }
-    ImGui::SetItemTooltip("Отмечает все дома, подходящие под фильтр, и снимает остальные.");
+    ImGui::SetItemTooltip(T("Отмечает все дома, подходящие под фильтр, и снимает остальные."));
     ImGui::SameLine();
-    if (ImGui::SmallButton("Снять все")) { std::fill(g_houseSel.begin(), g_houseSel.end(), 0); g_dirty = true; }
+    if (ImGui::SmallButton(T("Снять все"))) { std::fill(g_houseSel.begin(), g_houseSel.end(), 0); g_autoHouse = false; g_dirty = true; }
+    if (ImGui::RadioButton(T("иконки"), g_houseIcons)) g_houseIcons = true;
+    ImGui::SameLine(); if (ImGui::RadioButton(T("таблица"), !g_houseIcons)) g_houseIcons = false;
+    if (g_houseIcons) { HouseIconGrid(passes); return; }
     const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                                   ImGuiTableFlags_Sortable | ImGuiTableFlags_Resizable;
     int shareSum = 0;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) shareSum += std::max(0, g_houseShare[i]);
     if (ImGui::BeginTable("houses", 8, flags, ImVec2(0, ImGui::GetContentRegionAvail().y))) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Дом", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Доля", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, 112);
-        ImGui::TableSetupColumn("Жителей", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_PreferSortDescending, 70);
-        ImGui::TableSetupColumn("Размер, м", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("Кач.", ImGuiTableColumnFlags_WidthFixed, 46);
-        ImGui::TableSetupColumn("Материал", ImGuiTableColumnFlags_WidthFixed, 78);
-        ImGui::TableSetupColumn("Стиль", ImGuiTableColumnFlags_WidthFixed, 96);
-        ImGui::TableSetupColumn("м³ на жит.", ImGuiTableColumnFlags_WidthFixed, 74);
+        ImGui::TableSetupColumn(T("Дом"), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(T("Доля"), ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, 112);
+        ImGui::TableSetupColumn(T("Жителей"), ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_PreferSortDescending, 70);
+        ImGui::TableSetupColumn(T("Размер, м"), ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn(T("Кач."), ImGuiTableColumnFlags_WidthFixed, 46);
+        ImGui::TableSetupColumn(T("Материал"), ImGuiTableColumnFlags_WidthFixed, 78);
+        ImGui::TableSetupColumn(T("Стиль"), ImGuiTableColumnFlags_WidthFixed, 96);
+        ImGui::TableSetupColumn(T("м³ на жит."), ImGuiTableColumnFlags_WidthFixed, 74);
         ImGui::TableHeadersRow();
         ImGuiTableSortSpecs* specs = ImGui::TableGetSortSpecs();
         if (g_houseOrder.empty() || (specs && specs->SpecsDirty)) { SortHouses(specs); if (specs) specs->SpecsDirty = false; }
@@ -661,13 +757,13 @@ void TabHouses() {
             ImGui::TableNextColumn();
             ImGui::PushID(i);
             bool sel = g_houseSel[i] != 0;
-            if (ImGui::Checkbox(b.name.c_str(), &sel)) { g_houseSel[i] = sel; g_dirty = true; }
+            if (ImGui::Checkbox(b.name.c_str(), &sel)) ToggleHouse(i, sel);
             ImGui::SetItemTooltip("%s", b.id.c_str());
             ImGui::TableNextColumn();
             if (sel) {      // share of this type among the houses of the district
                 ImGui::SetNextItemWidth(58);
                 if (ImGui::DragInt("##share", &g_houseShare[i], 1.0f, 0, 100, "%d")) { g_houseShare[i] = std::clamp(g_houseShare[i], 0, 100); g_dirty = true; }
-                ImGui::SetItemTooltip("Вес этого типа. Потяните мышью или дважды кликните и введите число.\nСправа — получившаяся доля среди домов района.");
+                ImGui::SetItemTooltip(T("Вес этого типа. Потяните мышью или дважды кликните и введите число.\nСправа — получившаяся доля среди домов района."));
                 ImGui::SameLine(); ImGui::Text("%d %%", shareSum > 0 ? (int)lroundf(100.0f * g_houseShare[i] / shareSum) : 0);
             }
             ImGui::PopID();
@@ -677,7 +773,7 @@ void TabHouses() {
             ImGui::TableNextColumn(); ImGui::TextUnformatted(MaterialName(b.material));
             ImGui::TableNextColumn(); ImGui::TextUnformatted(b.style.empty() ? "-" : b.style.c_str());
             ImGui::TableNextColumn(); ImGui::Text("%.0f", HouseVolume(b) / std::max(1, b.capacity));
-            ImGui::SetItemTooltip("Объём здания на одного жителя — чем меньше, тем дешевле стройка на человека\n(игра считает стоимость по стенам и крыше модели).");
+            ImGui::SetItemTooltip(T("Объём здания на одного жителя — чем меньше, тем дешевле стройка на человека\n(игра считает стоимость по стенам и крыше модели)."));
         }
         ImGui::EndTable();
     }
@@ -685,24 +781,25 @@ void TabHouses() {
 
 void TabServices() {
     const auto& all = catalog::All();
-    ImGui::TextDisabled("Что строить в квартале и на сколько жителей одно здание.");
+    ImGui::TextDisabled(T("Что строить в квартале и на сколько жителей одно здание."));
     if (ImGui::BeginTable("services", 3, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg)) {
-        ImGui::TableSetupColumn("Что строить", ImGuiTableColumnFlags_WidthFixed, 170);
-        ImGui::TableSetupColumn("Здание", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("1 на N жит.", ImGuiTableColumnFlags_WidthFixed, 100);
+        ImGui::TableSetupColumn(T("Что строить"), ImGuiTableColumnFlags_WidthFixed, 170);
+        ImGui::TableSetupColumn(T("Здание"), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(T("1 на N жит."), ImGuiTableColumnFlags_WidthFixed, 100);
         ImGui::TableHeadersRow();
         for (auto& s : g_services) {
-            ImGui::PushID(s.category);
+            ImGui::PushID((int)(&s - g_services.data()));
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::BeginDisabled(s.typeIndex < 0);
-            if (ImGui::Checkbox(s.label, &s.enabled)) g_dirty = true;
+            if (ImGui::Checkbox(T(s.label), &s.enabled)) g_dirty = true;
+            if (s.typeIndex >= 0) ImGui::SetItemTooltip("%s", all[s.typeIndex].id.c_str());
             ImGui::TableNextColumn();
             ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::BeginCombo("##type", s.typeIndex >= 0 ? all[s.typeIndex].name.c_str() : "нет в игре")) {
+            if (ImGui::BeginCombo("##type", s.typeIndex >= 0 ? all[s.typeIndex].name.c_str() : T("нет в игре"))) {
                 for (size_t i = 0; i < all.size(); ++i) {
                     if (all[i].category != s.category) continue;
-                    char label[200]; snprintf(label, sizeof(label), "%s  (%.0fx%.0f м)##%d", all[i].name.c_str(), all[i].sx, all[i].sz, (int)i);
+                    char label[200]; snprintf(label, sizeof(label), T("%s  (%.0fx%.0f м)##%d"), all[i].name.c_str(), all[i].sx, all[i].sz, (int)i);
                     if (ImGui::Selectable(label, s.typeIndex == (int)i)) { s.typeIndex = (int)i; g_dirty = true; }
                 }
                 ImGui::EndCombo();
@@ -753,20 +850,14 @@ void AddLine(LineJob& job, float u1, float v1, float u2, float v2) {
 }
 void LineButton(const char* what, const char* tool, LineJob& job) {
     char t[220];
-    if (job.lines == 0) snprintf(t, sizeof(t), "%s: нечего строить%s", what, job.skipped ? " (всё за экраном или за холмом)" : "");
-    else if (job.skipped) snprintf(t, sizeof(t), "Проложить в игре %s — %d отрезков (не видно ещё %d)", what, job.lines, job.skipped);
-    else snprintf(t, sizeof(t), "Проложить в игре %s — %d отрезков", what, job.lines);
+    if (job.lines == 0) snprintf(t, sizeof(t), T("%s: нечего строить%s"), what, job.skipped ? T(" (всё за экраном или за холмом)") : "");
+    else if (job.skipped) snprintf(t, sizeof(t), T("Проложить в игре %s — %d отрезков (не видно ещё %d)"), what, job.lines, job.skipped);
+    else snprintf(t, sizeof(t), T("Проложить в игре %s — %d отрезков"), what, job.lines);
     ImGui::BeginDisabled(job.lines == 0 || eng::AutoBuildActive());
     if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) { ImVec2 ds = ImGui::GetIO().DisplaySize; eng::StartScript(job.pos, job.action, job.frames, ds.x, ds.y); }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("Сначала выберите в игровом меню «Транспортная отрасль» %s.\n"
-                          "Мод сам протянет каждый отрезок игровым инструментом: двигает настоящий курсор и зажимает кнопку.\n"
-                          "Панель на это время прячется, мышь не трогайте. Esc — остановить. Платит игра.\n"
-                          "Отрезок к зданию начинается точно в его точке подключения, чтобы игра к ней привязалась.\n"
-                          "Порядок: сначала улицы и подъезды, потом дорожки.\n"
-                          "Отрезки, концы которых за экраном, под панелями игры или закрыты холмом, пропускаются —\n"
-                          "поднимите камеру выше и смотрите на участок сверху. Камеру во время работы не двигайте.", tool);
+        ImGui::SetTooltip(T("Сначала выберите в игровом меню «Транспортная отрасль» %s.\nМод сам протянет каждый отрезок игровым инструментом: двигает настоящий курсор и зажимает кнопку.\nПанель на это время прячется, мышь не трогайте. Esc — остановить. Платит игра.\nОтрезок к зданию начинается точно в его точке подключения, чтобы игра к ней привязалась.\nПорядок: сначала улицы и подъезды, потом дорожки.\nОтрезки, концы которых за экраном, под панелями игры или закрыты холмом, пропускаются —\nподнимите камеру выше и смотрите на участок сверху. Камеру во время работы не двигайте."), tool);
 }
 
 // Everything of the plan placed at once by direct calls into the game (the mechanism behind the game's own
@@ -895,7 +986,7 @@ void InstantStart() {
         InstantLine(3, net[s.net][1], s.u1, s.v1, s.u2, s.v2, s.h1, s.h2);
         for (size_t k = from; k < g_inst.jobs.size(); ++k) { g_inst.jobs[k].mgr = net[s.net][0]; g_inst.jobs[k].sub = net[s.net][2]; g_inst.jobs[k].arg = net[s.net][3]; }
     }
-    if (g_inst.jobs.empty()) { g_inst.note = "Нечего строить."; return; }
+    if (g_inst.jobs.empty()) { g_inst.note = T("Нечего строить."); return; }
     eng::QueueInstant(g_inst.jobs);
     g_inst.phase = 1;
 }
@@ -1085,9 +1176,9 @@ void InstantTick() {
         return;
     }
     char t[260];
-    snprintf(t, sizeof(t), "Построено (проверено по сети игры): зданий %d из %d, дорог %d из %d отрезков, дорожек %d из %d отрезков, сетей %d из %d отрезков.", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll);
+    snprintf(t, sizeof(t), T("Построено (проверено по сети игры): зданий %d из %d, дорог %d из %d отрезков, дорожек %d из %d отрезков, сетей %d из %d отрезков."), r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll);
     r.note = t;
-    if (!g_gapPts.empty()) { char g[160]; snprintf(g, sizeof(g), " Разрывы: %d вход(ов) не связаны с улицей — отмечены красным.", (int)g_gapPts.size()); r.note += g; }
+    if (!g_gapPts.empty()) { char g[160]; snprintf(g, sizeof(g), T(" Разрывы: %d вход(ов) не связаны с улицей — отмечены красным."), (int)g_gapPts.size()); r.note += g; }
     r.phase = 0;
     Log("instant build summary: buildings %d/%d, roads %d/%d, footpaths %d/%d, utility lines %d/%d", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll);
 }
@@ -1096,200 +1187,193 @@ void InstantUi() {
     InstantRun& r = g_inst;
     if (r.phase) {
         ImGui::BeginDisabled();
-        ImGui::Button(r.phase == 2 ? "Выравниваю площадки под отклонённые здания…" : "Строю…", ImVec2(-FLT_MIN, 0));
+        ImGui::Button(r.phase == 2 ? T("Выравниваю площадки под отклонённые здания…") : T("Строю…"), ImVec2(-FLT_MIN, 0));
         ImGui::EndDisabled();
         return;
     }
     {   // one switch for all networks; the Сети tab has each one, its node buildings and their radii
         bool anyU = g_utilBuild[0] || g_utilBuild[1] || g_utilBuild[2] || g_utilBuild[3];
-        if (ImGui::Checkbox("строить коммуникации (вода, канализация, отопление, электричество)", &anyU)) {
+        if (ImGui::Checkbox(T("строить коммуникации (вода, канализация, отопление, электричество)"), &anyU)) {
             for (int k = 0; k < 4; ++k) g_utilBuild[k] = g_utilShow[k] = anyU;
             g_dirty = true;
         }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Узлы: водораспределитель, канализационная станция, тепловой пункт, подстанция;\nпо отдельности и с радиусами — во вкладке «Сети». Уже стоящие узлы рядом учитываются.");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Узлы: водораспределитель, канализационная станция, тепловой пункт, подстанция;\nпо отдельности и с радиусами — во вкладке «Сети». Уже стоящие узлы рядом учитываются."));
     }
-    char t[160]; snprintf(t, sizeof(t), "Построить всё сразу — %d зданий, улицы, подъезды, дорожки", (int)g_plan.buildings.size());
+    char t[160]; snprintf(t, sizeof(t), T("Построить всё сразу — %d зданий, улицы, подъезды, дорожки"), (int)g_plan.buildings.size());
     ImGui::BeginDisabled(g_plan.buildings.empty() && g_plan.paths.empty());
     if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) InstantStart();
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("Весь план ставится в игру одним действием, тем же способом, каким игра вставляет скопированную зону:\n"
-                          "ничего выбирать в меню стройки и кликать не нужно, камера может стоять как угодно.\n"
-                          "Порядок: улицы, здания, подъезды, дорожки. Игра сама проверяет каждое место и берёт плату\n"
-                          "в текущем режиме стройки. Где земля слишком неровная, мод выравнивает площадку и повторяет.");
+        ImGui::SetTooltip(T("Весь план ставится в игру одним действием, тем же способом, каким игра вставляет скопированную зону:\nничего выбирать в меню стройки и кликать не нужно, камера может стоять как угодно.\nПорядок: улицы, здания, подъезды, дорожки. Игра сама проверяет каждое место и берёт плату\nв текущем режиме стройки. Где земля слишком неровная, мод выравнивает площадку и повторяет."));
     if (!r.note.empty()) ImGui::TextWrapped("%s", r.note.c_str());
 }
 
 void TabRoads() {
     if (eng::InstantSupported()) {
-        ImGui::SeparatorText("Покрытие");
-        const char* rk[] = { "гравийная дорога", "асфальтовая дорога", "асфальтовая с тротуарами" };
-        const char* pk[] = { "тропинка", "гравийная дорожка", "асфальтовая дорожка" };
-        ImGui::SetNextItemWidth(280); ImGui::Combo("улицы и подъезды", &g_roadKind, rk, 3);
-        ImGui::SetNextItemWidth(280); ImGui::Combo("дорожки", &g_pathKind, pk, 3);
-        ImGui::TextDisabled("Используется кнопкой «Построить всё сразу» внизу панели.");
-        ImGui::TextDisabled("Зелёные точки — пешеходные входы зданий, оранжевые квадраты — подъезды для машин.");
+        ImGui::SeparatorText(T("Покрытие"));
+        const char* rk[] = { T("гравийная дорога"), T("асфальтовая дорога"), T("асфальтовая с тротуарами") };
+        const char* pk[] = { T("тропинка"), T("гравийная дорожка"), T("асфальтовая дорожка") };
+        ImGui::SetNextItemWidth(280); ImGui::Combo(T("улицы и подъезды"), &g_roadKind, rk, 3);
+        ImGui::SetNextItemWidth(280); ImGui::Combo(T("дорожки"), &g_pathKind, pk, 3);
+        ImGui::TextDisabled(T("Используется кнопкой «Построить всё сразу» внизу панели."));
+        ImGui::TextDisabled(T("Зелёные точки — пешеходные входы зданий, оранжевые квадраты — подъезды для машин."));
         const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
-        if (g_plan.noRoad) ImGui::TextColored(red, g_plan.roads.empty() ? "Зданиям нужна автодорога: %d — включите улицу ниже." : "Не удалось подвести автодорогу к зданиям: %d.", g_plan.noRoad);
-        if (g_plan.noPath) ImGui::TextColored(red, "Не удалось подвести дорожку к зданиям: %d.", g_plan.noPath);
+        if (g_plan.noRoad) ImGui::TextColored(red, g_plan.roads.empty() ? T("Зданиям нужна автодорога: %d — включите улицу ниже.") : T("Не удалось подвести автодорогу к зданиям: %d."), g_plan.noRoad);
+        if (g_plan.noPath) ImGui::TextColored(red, T("Не удалось подвести дорожку к зданиям: %d."), g_plan.noPath);
     } else if (g_area.ok && !g_plan.buildings.empty()) {
-        ImGui::SeparatorText("Построить в игре");
+        ImGui::SeparatorText(T("Построить в игре"));
         if (eng::AutoBuildActive()) {
             int done, failed, left; eng::AutoBuildStats(done, failed, left);
-            char t[120]; snprintf(t, sizeof(t), "Стоп  ·  кликов сделано %d, шагов осталось %d", done, left);
+            char t[120]; snprintf(t, sizeof(t), T("Стоп  ·  кликов сделано %d, шагов осталось %d"), done, left);
             if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) eng::StopAutoBuild();
         } else {
             LineJob paths, roads, drives;
             for (auto& ps : g_plan.paths) AddLine(paths, ps.u1, ps.v1, ps.u2, ps.v2);
             for (auto& rd : g_plan.roads) AddLine(roads, rd.u1, rd.v1, rd.u2, rd.v2);
             for (auto& rd : g_plan.drives) AddLine(drives, rd.u1, rd.v1, rd.u2, rd.v2);
-            if (!g_plan.roads.empty()) LineButton("улицы", "тип дороги", roads);
-            if (!g_plan.drives.empty()) LineButton("подъезды к зданиям", "тип дороги (подъезд можно попроще)", drives);
-            LineButton("дорожки", "тип пешеходной дорожки", paths);
+            if (!g_plan.roads.empty()) LineButton(T("улицы"), T("тип дороги"), roads);
+            if (!g_plan.drives.empty()) LineButton(T("подъезды к зданиям"), T("тип дороги (подъезд можно попроще)"), drives);
+            LineButton(T("дорожки"), T("тип пешеходной дорожки"), paths);
         }
-        ImGui::TextDisabled("Зелёные точки — пешеходные входы зданий, оранжевые квадраты — подъезды для машин.");
+        ImGui::TextDisabled(T("Зелёные точки — пешеходные входы зданий, оранжевые квадраты — подъезды для машин."));
         const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
-        if (g_plan.noRoad) ImGui::TextColored(red, g_plan.roads.empty() ? "Зданиям нужна автодорога: %d — включите улицу ниже." : "Не удалось подвести автодорогу к зданиям: %d.", g_plan.noRoad);
-        if (g_plan.noPath) ImGui::TextColored(red, "Не удалось подвести дорожку к зданиям: %d.", g_plan.noPath);
+        if (g_plan.noRoad) ImGui::TextColored(red, g_plan.roads.empty() ? T("Зданиям нужна автодорога: %d — включите улицу ниже.") : T("Не удалось подвести автодорогу к зданиям: %d."), g_plan.noRoad);
+        if (g_plan.noPath) ImGui::TextColored(red, T("Не удалось подвести дорожку к зданиям: %d."), g_plan.noPath);
     }
-    ImGui::SeparatorText("Улица через район");
-    const char* types[] = { "без дороги (только дорожки)", "улица, 2 полосы", "проспект, 4 полосы" };
+    ImGui::SeparatorText(T("Улица через район"));
+    const char* types[] = { T("без дороги (только дорожки)"), T("улица, 2 полосы"), T("проспект, 4 полосы") };
     ImGui::SetNextItemWidth(280);
-    if (ImGui::Combo("тип дороги", &g_roadType, types, 3)) g_dirty = true;
-    if (ImGui::Checkbox("вторая улица поперёк (перекрёсток в середине)", &g_crossRoad)) g_dirty = true;
-    if (ImGui::SliderFloat("улица через каждые, м (0 — одна)", &g_streetGap, 0.0f, 600.0f, "%.0f")) { if (g_streetGap < 80) g_streetGap = 0; g_dirty = true; }
-    ImGui::TextDisabled("Вдоль улицы идут тротуары, дорожки кварталов сходятся к переходу у остановки.");
+    if (ImGui::Combo(T("тип дороги"), &g_roadType, types, 3)) g_dirty = true;
+    if (ImGui::Checkbox(T("вторая улица поперёк (перекрёсток в середине)"), &g_crossRoad)) g_dirty = true;
+    if (ImGui::SliderFloat(T("улица через каждые, м (0 — одна)"), &g_streetGap, 0.0f, 600.0f, "%.0f")) { if (g_streetGap < 80) g_streetGap = 0; g_dirty = true; }
+    ImGui::TextDisabled(T("Вдоль улицы идут тротуары, дорожки кварталов сходятся к переходу у остановки."));
 
-    ImGui::SeparatorText("Остановки");
+    ImGui::SeparatorText(T("Остановки"));
     {
         const auto& all = catalog::All();
         auto nameOf = [&](const char* id) -> std::string { for (auto& t : all) if (t.id == id) return t.name; return id; };
-        std::string cur = kStopIds[g_stopKind][0] ? nameOf(kStopIds[g_stopKind]) : std::string("только отметить место");
+        std::string cur = kStopIds[g_stopKind][0] ? nameOf(kStopIds[g_stopKind]) : std::string(T("только отметить место"));
         ImGui::SetNextItemWidth(280);
-        if (ImGui::BeginCombo("вид остановки", cur.c_str())) {
+        if (ImGui::BeginCombo(T("вид остановки"), cur.c_str())) {
             for (int k = 0; k < kStopCount; ++k) {
-                std::string nm = kStopIds[k][0] ? nameOf(kStopIds[k]) : std::string("только отметить место");
+                std::string nm = kStopIds[k][0] ? nameOf(kStopIds[k]) : std::string(T("только отметить место"));
                 if (ImGui::Selectable(nm.c_str(), k == g_stopKind)) { g_stopKind = k; g_dirty = true; }
             }
             ImGui::EndCombo();
         }
-        ImGui::SetItemTooltip("Остановка ставится прямо на улицу: дорога проходит сквозь неё.\n"
-                              "Троллейбусной нужна контактная сеть, трамвайной — рельсы на улице:\nвыберите им подходящее покрытие улицы ниже.");
+        ImGui::SetItemTooltip(T("Остановка ставится прямо на улицу: дорога проходит сквозь неё.\nТроллейбусной нужна контактная сеть, трамвайной — рельсы на улице:\nвыберите им подходящее покрытие улицы ниже."));
     }
     ImGui::BeginDisabled(g_roadType == 0 || !g_area.ok);
     int removeAt = -1;
     for (size_t i = 0; i < g_stops.size(); ++i) {
         ImGui::PushID((int)i);
-        ImGui::BulletText("Остановка %d", (int)i + 1);
-        if (g_stops.size() > 1) { ImGui::SameLine(); if (ImGui::SmallButton("убрать")) removeAt = (int)i; }
+        ImGui::BulletText(T("Остановка %d"), (int)i + 1);
+        if (g_stops.size() > 1) { ImGui::SameLine(); if (ImGui::SmallButton(T("убрать"))) removeAt = (int)i; }
         ImGui::PopID();
     }
     if (removeAt >= 0) { g_stops.erase(g_stops.begin() + removeAt); g_dirty = true; }
-    if (ImGui::Button("Добавить остановку") && g_stops.size() < 8) {
+    if (ImGui::Button(T("Добавить остановку")) && g_stops.size() < 8) {
         float L = g_area.minU, R = g_area.maxU;
         PolyScan(g_area.local, g_roadV, L, R);
         g_stops.push_back(L + (R - L) * (0.25f + 0.5f * (float)(g_stops.size() % 2)));
         g_dirty = true;
     }
     ImGui::EndDisabled();
-    ImGui::TextDisabled("Остановку (синий кружок на карте) можно перетащить мышью:\nулица пройдёт через неё, район перестроится.");
+    ImGui::TextDisabled(T("Остановку (синий кружок на карте) можно перетащить мышью:\nулица пройдёт через неё, район перестроится."));
 
-    ImGui::SeparatorText("Пешая доступность");
+    ImGui::SeparatorText(T("Пешая доступность"));
     ImGui::SetNextItemWidth(280);
-    if (ImGui::SliderFloat("сколько идут до остановки, м", &g_walk, 150.0f, 900.0f, "%.0f")) g_dirty = true;
-    ImGui::TextDisabled("Дома дальше этого расстояния обводятся красным.");
+    if (ImGui::SliderFloat(T("сколько идут до остановки, м"), &g_walk, 150.0f, 900.0f, "%.0f")) g_dirty = true;
+    ImGui::TextDisabled(T("Дома дальше этого расстояния обводятся красным."));
 }
 
 void TabUtils() {
-    ImGui::TextWrapped("По правилам игры: дома берут воду, тепло и свет от узла в радиусе обслуживания, к самим домам линии не нужны. "
-                       "Труба соединяет только два здания, поэтому узлы висят на распределителях, а те идут цепочкой; провод среднего "
-                       "напряжения идёт от трансформатора прямо к подстанции (до 6 на трансформатор). Начало каждой цепочки и "
-                       "высокую сторону трансформатора подключаете вы — к своему источнику. Радиусы взяты из кода игры: вода, канализация и электричество 250 м, отопление 380 м (по прямой).");
+    ImGui::TextWrapped(T("По правилам игры: дома берут воду, тепло и свет от узла в радиусе обслуживания, к самим домам линии не нужны. Труба соединяет только два здания, поэтому узлы висят на распределителях, а те идут цепочкой; провод среднего напряжения идёт от трансформатора прямо к подстанции (до 6 на трансформатор). Начало каждой цепочки и высокую сторону трансформатора подключаете вы — к своему источнику. Радиусы взяты из кода игры: вода, канализация и электричество 250 м, отопление 380 м (по прямой)."));
     ImGui::Spacing();
     int people = g_plan.capacity;
     for (int k = 0; k < 4; ++k) {
         ImGui::PushID(k);
         ImGui::PushStyleColor(ImGuiCol_CheckMark, ImGui::ColorConvertU32ToFloat4(kUtilCol[k]));
-        if (ImGui::Checkbox(kUtilName[k], &g_utilBuild[k])) { g_dirty = true; g_utilShow[k] = g_utilBuild[k]; }
+        if (ImGui::Checkbox(T(kUtilName[k]), &g_utilBuild[k])) { g_dirty = true; g_utilShow[k] = g_utilBuild[k]; }
         ImGui::PopStyleColor();
-        ImGui::SameLine(); ImGui::Checkbox("показывать", &g_utilShow[k]);
-        if (k == 3) { ImGui::SameLine(); ImGui::Checkbox("кабель под землёй", &g_powerUnder); ImGui::SameLine(); if (ImGui::Checkbox("своя подстанция", &g_powerTrafo)) g_dirty = true; }
-        if (ImGui::Checkbox("учитывать уже стоящие узлы (свои или поставлю сам)", &g_utilExisting[k])) g_dirty = true;
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Узлы этой сети, которые уже стоят рядом, обслуживают дома в своём радиусе —\nтам план новых узлов не ставит. Чтобы поставить узел самому, поставьте его и пересоберите план.");
+        ImGui::SameLine(); ImGui::Checkbox(T("показывать"), &g_utilShow[k]);
+        if (k == 3) { ImGui::SameLine(); ImGui::Checkbox(T("кабель под землёй"), &g_powerUnder); ImGui::SameLine(); if (ImGui::Checkbox(T("своя подстанция"), &g_powerTrafo)) g_dirty = true; }
+        if (ImGui::Checkbox(T("учитывать уже стоящие узлы (свои или поставлю сам)"), &g_utilExisting[k])) g_dirty = true;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Узлы этой сети, которые уже стоят рядом, обслуживают дома в своём радиусе —\nтам план новых узлов не ставит. Чтобы поставить узел самому, поставьте его и пересоберите план."));
         ImGui::SetNextItemWidth(200);
-        if (ImGui::SliderFloat("радиус узла, м", &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
+        if (ImGui::SliderFloat(T("радиус узла, м"), &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
         ImGui::SetNextItemWidth(120);
-        if (k < 2) ImGui::TextDisabled("Нагрузка по формуле игры: жилой дом — жители × 0,045; службы — (рабочие + специалисты) × 0,02.");
-        else ImGui::TextDisabled(k == 2 ? "Нагрузка по формуле игры: жилой дом — жители × 0,7; службы — по рабочим и посетителям."
-                                          : "Нагрузка по формуле игры: жилой дом — жители × 0,002 МВт; службы — по рабочим и посетителям, не меньше 0,05 МВт.");
+        if (k < 2) ImGui::TextDisabled(T("Нагрузка по формуле игры: жилой дом — жители × 0,045; службы — (рабочие + специалисты) × 0,02."));
+        else ImGui::TextDisabled(k == 2 ? T("Нагрузка по формуле игры: жилой дом — жители × 0,7; службы — по рабочим и посетителям.")
+                                          : T("Нагрузка по формуле игры: жилой дом — жители × 0,002 МВт; службы — по рабочим и посетителям, не меньше 0,05 МВт."));
         if (g_utilBuild[k] && g_area.ok && !g_plan.buildings.empty()) {
             int nodes = (int)g_plan.utilNodes[k].size(), helpers = 0;
             for (auto& b : g_plan.buildings) if (b.net == k && b.role == 1) ++helpers;
-            ImGui::Text("Узлов (%s): %d  ·  %s: %d  ·  линий %.0f м  ·  нагрузка %.0f %s", kUtilNode[k], nodes,
-                        k == 3 ? "трансформаторов" : "распределителей", helpers, g_plan.utilLen[k], g_plan.utilDemand[k], kUtilUnit[k]);
-            if (g_plan.utilUncovered[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Вне радиуса зданий: %d.", g_plan.utilUncovered[k]);
+            ImGui::Text(T("Узлов (%s): %d  ·  %s: %d  ·  линий %.0f м  ·  нагрузка %.0f %s"), T(kUtilNode[k]), nodes,
+                        k == 3 ? T("трансформаторов") : T("распределителей"), helpers, g_plan.utilLen[k], g_plan.utilDemand[k], T(kUtilUnit[k]));
+            if (g_plan.utilUncovered[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), T("Вне радиуса зданий: %d."), g_plan.utilUncovered[k]);
             if (k >= 2 && nodes > 0) {
                 float cap = 0; for (auto& t : catalog::All()) { if (k == 2 && t.id == "heating_endstation_small") cap = t.heatCap; if (k == 3 && t.id == "eletric_substation") cap = t.powerCap; }
-                ImGui::Text("Спрос района %.*f %s · самый загруженный узел %.0f %% (игра предупреждает с 90 %%, ёмкость узла %g)",
-                            k == 3 ? 2 : 0, g_plan.utilDemand[k], kUtilUnit[k], g_plan.utilMaxLoad[k] * 100, cap);
-                if (g_plan.utilOverloaded[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Перегружено узлов: %d.", g_plan.utilOverloaded[k]);
+                ImGui::Text(T("Спрос района %.*f %s · самый загруженный узел %.0f %% (игра предупреждает с 90 %%, ёмкость узла %g)"),
+                            k == 3 ? 2 : 0, g_plan.utilDemand[k], T(kUtilUnit[k]), g_plan.utilMaxLoad[k] * 100, cap);
+                if (g_plan.utilOverloaded[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), T("Перегружено узлов: %d."), g_plan.utilOverloaded[k]);
                 if (k == 3) {   // what the district actually draws at night: services add the lighting half
                     float night = 0;
                     for (auto& b : g_plan.buildings) night += catalog::All()[b.type].powerNight;
-                    ImGui::TextDisabled("Ночью район берёт из сети до %.2f МВт (освещение служб); ёмкость узлов это не меняет — учитывайте для электростанции.", night);
+                    ImGui::TextDisabled(T("Ночью район берёт из сети до %.2f МВт (освещение служб); ёмкость узлов это не меняет — учитывайте для электростанции."), night);
                 }
             }
-            if (g_plan.utilNoLine[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Не удалось проложить соединений: %d.", g_plan.utilNoLine[k]);
+            if (g_plan.utilNoLine[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), T("Не удалось проложить соединений: %d."), g_plan.utilNoLine[k]);
         }
         ImGui::Separator();
         ImGui::PopID();
     }
-    if (ImGui::Checkbox("связать узлы трубами через распределители (опыт: игра гнёт такие трубы петлями)", &g_utilChain)) g_dirty = true;
-    ImGui::TextDisabled("Отмеченные сети ставятся вместе со всем планом кнопкой мгновенной постройки. Каждый узел воды, канализации и тепла подключите к своей магистрали сами.");
+    if (ImGui::Checkbox(T("связать узлы трубами через распределители (опыт: игра гнёт такие трубы петлями)"), &g_utilChain)) g_dirty = true;
+    ImGui::TextDisabled(T("Отмеченные сети ставятся вместе со всем планом кнопкой мгновенной постройки. Каждый узел воды, канализации и тепла подключите к своей магистрали сами."));
 }
 
 void Footer() {
     ImGui::Separator();
     const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
-    if (!g_area.ok) ImGui::TextDisabled("Нарисуйте участок на карте.");
-    else if (g_plan.buildings.empty()) ImGui::TextColored(red, "Ничего не поместилось: отметьте дома, увеличьте участок или допустимый перепад.");
+    if (!g_area.ok) ImGui::TextDisabled(T("Нарисуйте участок на карте."));
+    else if (g_plan.buildings.empty()) ImGui::TextColored(red, T("Ничего не поместилось: отметьте дома, увеличьте участок или допустимый перепад."));
     else {
-        ImGui::Text("Домов %d  ·  мест %d из %d  ·  служб %d", g_plan.houses, g_plan.capacity, g_population, g_plan.services);
-        ImGui::Text("Дорог %.0f м  ·  дорожек %.0f м  ·  срезать %.0f м³  ·  насыпать %.0f м³", g_plan.roadLength, g_plan.pathLength, g_plan.cut, g_plan.fill);
-        ImGui::Text("Рабочих мест в службах %d  ·  работников ≈ %d (60 %% жителей)", g_plan.jobs, g_plan.capacity * 6 / 10);
+        ImGui::Text(T("Домов %d  ·  мест %d из %d  ·  служб %d"), g_plan.houses, g_plan.capacity, g_population, g_plan.services);
+        ImGui::Text(T("Дорог %.0f м  ·  дорожек %.0f м  ·  срезать %.0f м³  ·  насыпать %.0f м³"), g_plan.roadLength, g_plan.pathLength, g_plan.cut, g_plan.fill);
+        ImGui::Text(T("Рабочих мест в службах %d  ·  работников ≈ %d (60 %% жителей)"), g_plan.jobs, g_plan.capacity * 6 / 10);
         if (g_plan.maxWalkToStop >= 0) {
-            if (g_plan.farHouses) ImGui::TextColored(red, "До остановки до %.0f м — %d домов дальше %.0f м, добавьте остановку.", g_plan.maxWalkToStop, g_plan.farHouses, g_walk);
-            else ImGui::Text("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м", g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));
-        } else if (g_plan.maxWalkToShop >= 0) ImGui::Text("До магазина не дальше %.0f м", g_plan.maxWalkToShop);
+            if (g_plan.farHouses) ImGui::TextColored(red, T("До остановки до %.0f м — %d домов дальше %.0f м, добавьте остановку."), g_plan.maxWalkToStop, g_plan.farHouses, g_walk);
+            else ImGui::Text(T("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м"), g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));
+        } else if (g_plan.maxWalkToShop >= 0) ImGui::Text(T("До магазина не дальше %.0f м"), g_plan.maxWalkToShop);
         {   // Soviet micro-district norms (SNiP II-60-75): shop 400, kindergarten 350, school 500 m
-            static const char* kName[3] = { "магазина", "детсада", "школы" };
+            const char* kName[3] = { T("магазина"), T("детсада"), T("школы") };
             static const float kR[3] = { 400, 350, 500 };
             for (int k = 0; k < 3; ++k) if (g_plan.normWalk[k] >= 0) {
-                if (g_plan.normFar[k]) ImGui::TextColored(red, "До %s до %.0f м: %d домов дальше нормы %.0f м", kName[k], g_plan.normWalk[k], g_plan.normFar[k], kR[k]);
-                else ImGui::Text("До %s не дальше %.0f м (норма %.0f м)", kName[k], g_plan.normWalk[k], kR[k]);
+                if (g_plan.normFar[k]) ImGui::TextColored(red, T("До %s до %.0f м: %d домов дальше нормы %.0f м"), kName[k], g_plan.normWalk[k], g_plan.normFar[k], kR[k]);
+                else ImGui::Text(T("До %s не дальше %.0f м (норма %.0f м)"), kName[k], g_plan.normWalk[k], kR[k]);
             }
         }
-        if (g_plan.unplaced > 0) ImGui::TextColored(red, "Вмещается около %d жит., не влезло зданий: %d — нужен участок больше.", g_plan.capacity, g_plan.unplaced);
-        else if (g_plan.steepSkipped > 0 || g_plan.busySkipped > 0) ImGui::TextDisabled("Обойдено: крутые места %d раз, существующая застройка %d раз.", g_plan.steepSkipped, g_plan.busySkipped);
+        if (g_plan.unplaced > 0) ImGui::TextColored(red, T("Вмещается около %d жит., не влезло зданий: %d — нужен участок больше."), g_plan.capacity, g_plan.unplaced);
+        else if (g_plan.steepSkipped > 0 || g_plan.busySkipped > 0) ImGui::TextDisabled(T("Обойдено: крутые места %d раз, существующая застройка %d раз."), g_plan.steepSkipped, g_plan.busySkipped);
     }
     if (g_polOk) {
-        if (g_polA > 0.001f || g_polB > 0.001f) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрязнение воздуха над участком: %.3f / %.3f (сетка игры, 200 м) — жителям вредно.", g_polA, g_polB);
-        else ImGui::TextDisabled("Воздух над участком чистый (сетка загрязнения игры).");
+        if (g_polA > 0.001f || g_polB > 0.001f) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), T("Загрязнение воздуха над участком: %.3f / %.3f (сетка игры, 200 м) — жителям вредно."), g_polA, g_polB);
+        else ImGui::TextDisabled(T("Воздух над участком чистый (сетка загрязнения игры)."));
     }
-    if (ImGui::Button("Пересобрать план", ImVec2(-FLT_MIN, 0))) {
-        if (!g_area.ok) snprintf(g_rebuildNote, sizeof(g_rebuildNote), "Сначала нарисуйте участок на карте.");
+    if (ImGui::Button(T("Пересобрать план"), ImVec2(-FLT_MIN, 0))) {
+        if (!g_area.ok) snprintf(g_rebuildNote, sizeof(g_rebuildNote), T("Сначала нарисуйте участок на карте."));
         else { g_dirty = g_areaChanged = true; ++g_rebuilds; g_rebuildNote[0] = 0; }
     }
     if (g_rebuildNote[0]) ImGui::TextDisabled("%s", g_rebuildNote);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Заново читает рельеф и расставляет здания, улицу и дорожки по всему участку.");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Заново читает рельеф и расставляет здания, улицу и дорожки по всему участку."));
     static bool levelling = false;
     int pending = eng::LevelPending();
     if (levelling && !pending) { levelling = false; g_dirty = g_areaChanged = true; }
     bool canLevel = g_area.ok && !g_plan.buildings.empty() && !pending;
     ImGui::BeginDisabled(!canLevel);
     char lbl[96];
-    if (pending) snprintf(lbl, sizeof(lbl), "Выравниваю… осталось точек: %d", pending);
-    else snprintf(lbl, sizeof(lbl), "Выровнять землю под зданиями (сразу, бесплатно)");
+    if (pending) snprintf(lbl, sizeof(lbl), T("Выравниваю… осталось точек: %d"), pending);
+    else snprintf(lbl, sizeof(lbl), T("Выровнять землю под зданиями (сразу, бесплатно)"));
     if (ImGui::Button(lbl, ImVec2(-FLT_MIN, 0))) {
         std::vector<V3> pts;
         for (auto& b : g_plan.buildings)
@@ -1303,8 +1387,7 @@ void Footer() {
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("Землю под зданиями плана сразу ставит на высоту площадок. "
-                          "Бесплатно, без техники; отменить нельзя — сохранитесь заранее.");
+        ImGui::SetTooltip(T("Землю под зданиями плана сразу ставит на высоту площадок. Бесплатно, без техники; отменить нельзя — сохранитесь заранее."));
     // Building in the game. The game's own build tool does the work: the player picks a building in the game's
     // build menu, the mod notices which one, turns it as the plan says, puts the game's cursor on every spot of
     // that type and clicks; then it asks for the next type.
@@ -1341,40 +1424,36 @@ void Footer() {
 
         if (eng::AutoBuildActive()) {
             int done, failed, left; eng::AutoBuildStats(done, failed, left);
-            char t[160]; snprintf(t, sizeof(t), "Стоп  ·  поставлено %d, не вышло %d, осталось %d", done, failed, left);
+            char t[160]; snprintf(t, sizeof(t), T("Стоп  ·  поставлено %d, не вышло %d, осталось %d"), done, failed, left);
             if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) { eng::StopAutoBuild(); seq = false; }
         } else if (seq) {
             if (seqRunning) { seqRunning = false; seqDone.push_back(seqType); seqType = -1; }      // one type finished
             else if (types.empty()) seq = false;
             else {
                 if (std::find(types.begin(), types.end(), seqType) == types.end()) { seqType = types[0]; seqSince = GetTickCount(); }
-                ImGui::TextColored(ImVec4(0.573f, 0.176f, 0.149f, 1), "Выберите в меню стройки игры: %s", all[seqType].name.c_str());
-                ImGui::SetItemTooltip("Обычно мод сам замечает выбор и начинает ставить. Если не заметил — нажмите «Уже выбрано — ставить».");
+                ImGui::TextColored(ImVec4(0.573f, 0.176f, 0.149f, 1), T("Выберите в меню стройки игры: %s"), all[seqType].name.c_str());
+                ImGui::SetItemTooltip(T("Обычно мод сам замечает выбор и начинает ставить. Если не заметил — нажмите «Уже выбрано — ставить»."));
                 DWORD tick = 0;
                 std::string cur = lower(eng::SelectedType(&tick));
                 bool cursor = eng::CursorActive();
                 if (cursor && tick > seqSince && cur == lower(all[seqType].id)) { if (start(seqType)) seqRunning = true; }
                 float w3 = (ImGui::GetContentRegionAvail().x - 16) / 3;
                 ImGui::BeginDisabled(!cursor);
-                if (ImGui::Button("Уже выбрано — ставить", ImVec2(w3 * 1.4f, 0))) { if (start(seqType)) seqRunning = true; }
+                if (ImGui::Button(T("Уже выбрано — ставить"), ImVec2(w3 * 1.4f, 0))) { if (start(seqType)) seqRunning = true; }
                 ImGui::EndDisabled();
                 ImGui::SameLine();
-                if (ImGui::Button("Пропустить", ImVec2(w3 * 0.8f, 0))) { seqDone.push_back(seqType); seqType = -1; }
+                if (ImGui::Button(T("Пропустить"), ImVec2(w3 * 0.8f, 0))) { seqDone.push_back(seqType); seqType = -1; }
                 ImGui::SameLine();
-                if (ImGui::Button("Стоп", ImVec2(-FLT_MIN, 0))) seq = false;
+                if (ImGui::Button(T("Стоп"), ImVec2(-FLT_MIN, 0))) seq = false;
             }
         } else if (!types.empty() || !seqDone.empty()) {
             char t[160];
-            if (types.empty()) snprintf(t, sizeof(t), "Повторить для пропущенных и не вставших зданий");
-            else snprintf(t, sizeof(t), "Построить в игре всё по очереди — %d зданий", total);
+            if (types.empty()) snprintf(t, sizeof(t), T("Повторить для пропущенных и не вставших зданий"));
+            else snprintf(t, sizeof(t), T("Построить в игре всё по очереди — %d зданий"), total);
             if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) { seq = !types.empty(); seqRunning = false; seqType = -1; seqDone.clear(); }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("Поставьте камеру так, чтобы весь участок был на экране, и не двигайте её.\n"
-                                  "Мод по очереди называет здание — выберите его в игровом меню строительства.\n"
-                                  "Дальше он сам поворачивает здание как на плане, наводит игровой курсор и кликает\n"
-                                  "во всех местах этого типа, затем называет следующее. Платит игра как обычно.\n"
-                                  "На неровном месте мод удерживает кнопку, чтобы игра выровняла площадку.");
-        } else if (!g_plan.buildings.empty()) ImGui::TextDisabled("Все здания плана уже стоят в игре.");
+                ImGui::SetTooltip(T("Поставьте камеру так, чтобы весь участок был на экране, и не двигайте её.\nМод по очереди называет здание — выберите его в игровом меню строительства.\nДальше он сам поворачивает здание как на плане, наводит игровой курсор и кликает\nво всех местах этого типа, затем называет следующее. Платит игра как обычно.\nНа неровном месте мод удерживает кнопку, чтобы игра выровняла площадку."));
+        } else if (!g_plan.buildings.empty()) ImGui::TextDisabled(T("Все здания плана уже стоят в игре."));
     }
 }
 
@@ -1389,7 +1468,7 @@ void Panel() {
     ImVec2 wp = ImGui::GetWindowPos(); float ww = ImGui::GetWindowWidth();
     const float hh = 36;
     dl->AddRectFilled(wp, ImVec2(wp.x + ww, wp.y + hh), IM_COL32(146, 45, 38, 255), ImGui::GetStyle().WindowRounding, ImDrawFlags_RoundCornersTop);
-    const char* title = ":: Планировщик квартала ::";
+    const char* title = T(":: Планировщик квартала ::");
     ImVec2 ts = ImGui::CalcTextSize(title);
     dl->AddText(ImVec2(wp.x + (ww - ts.x) / 2, wp.y + (hh - ts.y) / 2), IM_COL32(255, 244, 222, 255), title);
     ImGui::SetCursorPos(ImVec2(ww - 32, 6));
@@ -1400,13 +1479,13 @@ void Panel() {
     dl->AddLine(ImVec2(c.x - 6, c.y + 6), ImVec2(c.x + 6, c.y - 6), xc, 2.5f);
     ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, hh + 8));
 
-    if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Загрузите карту или сохранение, чтобы выбрать участок.");
+    if (!eng::Ready()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), T("Загрузите карту или сохранение, чтобы выбрать участок."));
 
     // the summary and the build buttons below the tabs grew past a fixed height and were cut off: they get their own
     // scrolling area, about 40 % of the window
     float footer = std::max(180.0f, ImGui::GetContentRegionAvail().y * 0.42f);
     if (ImGui::BeginTabBar("##tabs")) {
-        struct { const char* name; void (*fn)(); } tabs[] = { { "Участок", TabArea }, { "Дома", TabHouses }, { "Службы", TabServices }, { "Дороги", TabRoads }, { "Сети", TabUtils } };
+        struct { const char* name; void (*fn)(); } tabs[] = { { T("Участок"), TabArea }, { T("Дома"), TabHouses }, { T("Службы"), TabServices }, { T("Дороги"), TabRoads }, { T("Сети"), TabUtils } };
         for (auto& t : tabs) {
             if (!ImGui::BeginTabItem(t.name)) continue;
             ImGui::BeginChild("##body", ImVec2(0, std::max(120.0f, ImGui::GetContentRegionAvail().y - footer)));
@@ -1443,7 +1522,7 @@ void ToggleButton() {
     }
     if (ImGui::IsItemDeactivated() && !dragged) g_open = !g_open;
     bool hov = ImGui::IsItemHovered();
-    ImGui::SetItemTooltip("Планировщик квартала (F8). Можно перетащить.");
+    ImGui::SetItemTooltip(T("Планировщик квартала (F8). Можно перетащить."));
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 q(p.x + sz, p.y + sz);
     dl->AddRectFilled(ImVec2(p.x + 2, p.y + 3), ImVec2(q.x + 2, q.y + 3), IM_COL32(0, 0, 0, 70), 5);

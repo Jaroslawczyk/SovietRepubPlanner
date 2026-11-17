@@ -777,6 +777,29 @@ static std::atomic<bool> g_instBusy{ false };
 static std::atomic<bool> g_dumpTools{ false };
 static char g_dbgTool[96] = ""; static std::atomic<bool> g_dbgToolSet{ false };
 bool InstantSupported() { return gx::Supported(); }
+// Order of the tool records = order the game loaded its building types = order of the build menu.
+static bool ReadToolNames(std::vector<std::string>& out) {
+    __try {
+        BYTE* G = gx::Game();
+        BYTE* b = *(BYTE**)(G + 0xd280); BYTE* e = *(BYTE**)(G + 0xd288);
+        if (!b || e <= b || (e - b) / 0x2d0 > 20000) return false;
+        for (; b < e; b += 0x2d0) { char nm[64]; strncpy(nm, (const char*)b, 63); nm[63] = 0; out.emplace_back(nm); }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+int ToolOrder(const std::string& id) {
+    static std::map<std::string, int> order; static bool ok = false;
+    if (!ok) {
+        if (!gx::Supported()) return -1;
+        std::vector<std::string> n;
+        if (!ReadToolNames(n) || n.size() < 100) return -1;
+        for (size_t i = 0; i < n.size(); ++i) { std::string k = n[i]; for (auto& c : k) c = (char)tolower((unsigned char)c); order.emplace(k, (int)i); }
+        ok = true; Log("tool order: %d tools", (int)n.size());
+    }
+    std::string k = id; for (auto& c : k) c = (char)tolower((unsigned char)c);
+    auto it = order.find(k);
+    return it == order.end() ? -1 : it->second;
+}
 void QueueInstant(const std::vector<InstantJob>& jobs) {
     std::lock_guard<std::mutex> l(g_instMx);
     g_inst = jobs; g_instRes.assign(jobs.size(), -999); g_instAt = 0; g_instBusy = !jobs.empty();
