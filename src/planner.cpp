@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <queue>
+#include <deque>
 
 bool PolyScan(const std::vector<V2>& poly, float v, float& left, float& right) {
     std::vector<float> xs;
@@ -42,7 +43,7 @@ V2 Turn(int rot, float x, float z) {
 int EntranceTurn(const BuildingType& b) {
     const Conn* c = nullptr;
     for (auto& k : b.conns) if (k.kind == 0) { c = &k; break; }
-    if (!c && !b.conns.empty()) c = &b.conns[0];
+    if (!c) for (auto& k : b.conns) if (k.kind == 1) { c = &k; break; }
     if (!c) return -1;
     if (fabsf(c->dz) >= fabsf(c->dx)) return c->dz > 0 ? 0 : 2;
     return c->dx > 0 ? 1 : 3;
@@ -130,6 +131,19 @@ PlanResult MakePlan(const PlanInput& in) {
         return false;
     };
 
+    // utility buildings: [network][0] = the node that serves houses in its radius, [1] = switch (pipes) / transformer (power)
+    int utilType[4][2] = { { -1, -1 }, { -1, -1 }, { -1, -1 }, { -1, -1 } };
+    {
+        static const char* const ids[4][2] = { { "water_substation", "water_switch" }, { "sewage_substation", "sewage_switch" },
+                                               { "heating_endstation_small", "heating_pumpingstation_small" }, { "eletric_substation", "eletric_transformator" } };
+        for (size_t t = 0; t < all.size(); ++t) for (int k = 0; k < 4; ++k) for (int j = 0; j < 2; ++j) if (all[t].id == ids[k][j]) utilType[k][j] = (int)t;
+    }
+    struct Pend { Item it; signed char net, role; short grp; };
+    std::deque<Pend> pending, queued;   // utility buildings waiting for the next free spot in a row / for the building that asked for them
+    int utilOrder[4] = { 0, 1, 2, 3 };
+    std::sort(utilOrder, utilOrder + 4, [&](int x, int y) { return in.utilRadius[x] < in.utilRadius[y]; });
+    int utilGrp[4] = {};
+
     size_t i = 0;
     // one row of buildings between vlo and vhi, facing the path at pathV
     auto placeRow = [&](float vlo, float vhi, bool north, float pathV, size_t limit, float& rowL, float& rowR) {
@@ -138,9 +152,28 @@ PlanResult MakePlan(const PlanInput& in) {
         for (float sv : scan) { if (!PolyScan(in.poly, sv, l, rr)) return 0; L = std::max(L, l); R = std::min(R, rr); }
         int placed = 0;
         float u = L + margin;
-        while (i < limit) {
-            const Item& it = items[i];
-            if (it.d > vhi - vlo + 0.01f) break;
+        while (i < limit || !pending.empty()) {       // nodes asked for by the last building still get their spot
+            if (i < limit && pending.empty() && queued.empty()) {
+                // a building is about to go here: every network needs a node within reach of it. The missing nodes follow
+                // right after this building (smallest radius first), their switches / transformer after the nodes.
+                const Item& h = items[i];
+                float hu = u + h.w / 2, hv = north ? vlo + h.d / 2 : vhi - h.d / 2;
+                std::vector<Pend> helpers;
+                for (int k : utilOrder) {
+                    if (!in.utilBuild[k] || utilType[k][0] < 0) continue;
+                    bool nearNode = false;
+                    for (auto& nd : r.utilNodes[k]) if (hypotf(nd.u - hu, nd.v - hv) <= in.utilRadius[k] * 0.8f) { nearNode = true; break; }
+                    if (nearNode) continue;
+                    short g = (short)utilGrp[k]++;
+                    queued.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
+                    if (utilType[k][1] >= 0 && (k < 3 || g % 6 == 0)) helpers.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
+                    r.utilNodes[k].push_back({ hu, hv });           // the real spots replace these after the layout
+                }
+                for (auto& hp : helpers) queued.push_back(hp);
+            }
+            const bool util = !pending.empty();
+            const Item it = util ? pending.front().it : items[i];
+            if (it.d > vhi - vlo + 0.01f) { if (util) { pending.pop_front(); continue; } break; }
             if (u + it.w > R - margin) break;
             if (u < spineU + corridor && u + it.w > spineU - corridor) { u = spineU + corridor; continue; }  // leave the spine free
             float cu = u + it.w / 2;
@@ -151,9 +184,11 @@ PlanResult MakePlan(const PlanInput& in) {
             pb.rot = (it.rot + (north ? 2 : 0)) & 3;                // the entrance looks at this row's footpath
             V2 off = Turn(pb.rot, all[it.type].cx, all[it.type].cz);
             pb.ou = cu - off.u; pb.ov = cv - off.v;
+            if (util) { pb.net = pending.front().net; pb.role = pending.front().role; pb.grp = pending.front().grp; }
             r.buildings.push_back(pb);
             rowL = std::min(rowL, cu - it.w / 2 + 4); rowR = std::max(rowR, cu + it.w / 2 - 4);
-            u += it.w + gap; ++i; ++placed;
+            u += it.w + gap; ++placed;
+            if (util) pending.pop_front(); else { ++i; pending.insert(pending.end(), queued.begin(), queued.end()); queued.clear(); }
         }
         return placed;
     };
@@ -179,6 +214,7 @@ PlanResult MakePlan(const PlanInput& in) {
     auto nextDepth = [&]() {
         float d = 0;
         for (size_t k = i; k < items.size() && k < i + 16; ++k) d = std::max(d, items[k].d);
+        for (auto& p : pending) d = std::max(d, p.it.d);
         return d;
     };
 
@@ -187,8 +223,8 @@ PlanResult MakePlan(const PlanInput& in) {
     bool upDone = false, downDone = false;
     float nextUpStreet = in.streetSpacing, nextDownStreet = in.streetSpacing;
     int emptyUp = 0, emptyDown = 0;
-    while (i < items.size() && !(upDone && downDone)) {
-        for (int side = 0; side < 2 && i < items.size(); ++side) {
+    while ((i < items.size() || !pending.empty()) && !(upDone && downDone)) {
+        for (int side = 0; side < 2 && (i < items.size() || !pending.empty()); ++side) {
             bool goUp = side == 0;
             if (goUp ? upDone : downDone) continue;
             // a parallel street every "streetSpacing" metres, so that the whole area gets road access
@@ -227,6 +263,16 @@ PlanResult MakePlan(const PlanInput& in) {
         }
     }
     r.unplaced = (int)(items.size() - i);
+
+    // the last node of a pipe network hangs on the previous switch, so its own switch is not needed
+    {
+        int lastGrp[4] = { -1, -1, -1, -1 };
+        for (auto& b : r.buildings) if (b.net >= 0 && b.role == 0) lastGrp[b.net] = std::max(lastGrp[b.net], (int)b.grp);
+        r.buildings.erase(std::remove_if(r.buildings.begin(), r.buildings.end(), [&](const Placed& b) {
+            return b.net >= 0 && b.net < 3 && b.role == 1 && b.grp >= lastGrp[b.net]; }), r.buildings.end());
+        for (int k = 0; k < 4; ++k) r.utilNodes[k].clear();
+        for (auto& b : r.buildings) if (b.net >= 0 && b.role == 0) r.utilNodes[b.net].push_back({ b.u, b.v });
+    }
 
     // Links between neighbouring strips (and the street): a short footpath across, placed as close to the stop
     // as possible where it stays inside both footpaths' extents and does not run through a building.
@@ -282,7 +328,7 @@ PlanResult MakePlan(const PlanInput& in) {
             block.assign((size_t)W * H, 0); goal = block; slow = block;
             dist.assign((size_t)W * H * 4, 1e9f); parent.assign((size_t)W * H * 4, -1);
             for (auto& b : r.buildings) {
-                mark(block, 1, b.u - b.w / 2 - 1, b.v - b.d / 2 - 1, b.u + b.w / 2 + 1, b.v + b.d / 2 + 1);
+                mark(block, 1 | 4, b.u - b.w / 2 - 1, b.v - b.d / 2 - 1, b.u + b.w / 2 + 1, b.v + b.d / 2 + 1);     // 4 = shut for pipes too
                 mark(block, 2, b.u - b.w / 2 - 3, b.v - b.d / 2 - 3, b.u + b.w / 2 + 3, b.v + b.d / 2 + 3);
             }
             for (auto& p : r.paths) { mark(goal, 1, p.u1, p.v1, p.u2, p.v2); mark(slow, 1, p.u1, p.v1, p.u2, p.v2); }
@@ -292,10 +338,10 @@ PlanResult MakePlan(const PlanInput& in) {
             }
         }
         const int du[4] = { 1, 0, -1, 0 }, dv[4] = { 0, 1, 0, -1 };
-        // mode 0 = footpath, 1 = driveway; returns the price of the line, < 0 = no way
+        // mode 0 = footpath, 1 = driveway, 2 = utility line to the cell marked 4 in goal (may cross paths and roads); returns the price of the line, < 0 = no way
         auto route = [&](V2 p, V2 n, int mode, const Placed& own, std::vector<V2>& out) {
-            const unsigned char bit = mode ? 2 : 1;
-            const float infl = (mode ? 3.0f : 1.0f) + cell;
+            const unsigned char bit = mode == 2 ? 4 : mode ? 2 : 1;
+            const float infl = (mode == 1 ? 3.0f : 1.0f) + cell;
             int dir = fabsf(n.u) >= fabsf(n.v) ? (n.u > 0 ? 0 : 2) : (n.v > 0 ? 1 : 3);
             V2 q = p; float walked = 0;         // straight out of the own building first
             while (fabsf(q.u - own.u) < own.w / 2 + infl && fabsf(q.v - own.v) < own.d / 2 + infl) {
@@ -308,19 +354,19 @@ PlanResult MakePlan(const PlanInput& in) {
             std::priority_queue<QE, std::vector<QE>, std::greater<QE>> pq;
             int start = (sj * W + si) * 4 + dir, found = -1, pops = 0;
             dist[start] = 0; parent[start] = -1; touched.push_back(start); pq.push({ 0.0f, start });
-            while (!pq.empty() && pops++ < 40000) {
+            while (!pq.empty() && pops++ < (mode == 2 ? 600000 : 40000)) {
                 QE e = pq.top(); pq.pop();
                 if (e.first > dist[e.second]) continue;
                 int c = e.second / 4, d = e.second % 4, i = c % W, j = c / W;
                 if (goal[c] & bit) { found = e.second; break; }
-                if (e.first > 260) break;
+                if (e.first > (mode == 2 ? 900 : 260)) break;
                 for (int nd = 0; nd < 4; ++nd) {
                     if (nd == (d + 2) % 4) continue;
                     int ni = i + du[nd], nj = j + dv[nd];
                     if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
                     int nc = nj * W + ni;
                     if (block[nc] & bit) continue;
-                    float cost = e.first + 1 + (nd != d ? 6 : 0) + (mode && (slow[nc] & 1) ? 12 : 0);
+                    float cost = e.first + 1 + (nd != d ? 6 : 0) + (mode == 1 && (slow[nc] & 1) ? 12 : 0);
                     int ns = nc * 4 + nd;
                     if (cost < dist[ns]) {
                         if (dist[ns] > 1e8f) touched.push_back(ns);
@@ -346,6 +392,7 @@ PlanResult MakePlan(const PlanInput& in) {
                 if (corner.size() > 1 && (alongU ? corner[1].v == cells[0].v : corner[1].u == cells[0].u)) { if (alongU) corner[1].v = p.v; else corner[1].u = p.u; }
                 out.clear(); out.push_back(p);
                 for (auto& c : corner) out.push_back(c);
+                if (mode < 2) {
                 // the last leg ends exactly on the footpath / street it reached
                 V2& last = out.back(); const V2 prev = out[out.size() - 2];
                 float best = 1e9f; V2 hit = last; bool horiz = true;
@@ -360,6 +407,7 @@ PlanResult MakePlan(const PlanInput& in) {
                 if (horiz && legVertical) last = { prev.u, hit.v };
                 else if (!horiz && !legVertical) last = { hit.u, prev.v };
                 else last = hit;
+                }
             }
             for (int s : touched) { dist[s] = 1e9f; parent[s] = -1; }
             touched.clear();
@@ -391,6 +439,69 @@ PlanResult MakePlan(const PlanInput& in) {
             }
         }
         r.paths.insert(r.paths.end(), extra.begin(), extra.end());
+
+        // Utility lines by the game's rules: a pipe joins two buildings only, so every node hangs on a switch and the
+        // switches form a chain (the last node is fed by the previous switch); a medium-voltage wire runs from a
+        // transformer output straight to a substation. The head of each chain is left for the player to feed.
+        if (gridOk) {
+            auto port = [&](const Placed& b, int kind, int nth) -> const Conn* {
+                for (auto& c : all[b.type].conns) if (c.kind == kind && nth-- == 0) return &c;
+                return nullptr;
+            };
+            auto pipe = [&](int net, const Placed* A, const Conn* ca, const Placed* B, const Conn* cb) {
+                if (!A || !B || !ca || !cb) { ++r.utilNoLine[net]; return; }
+                V2 p = Turn(A->rot, ca->x, ca->z), pn = Turn(A->rot, ca->dx, ca->dz);
+                V2 q = Turn(B->rot, cb->x, cb->z), qn = Turn(B->rot, cb->dx, cb->dz);
+                p.u += A->ou; p.v += A->ov; q.u += B->ou; q.v += B->ov;
+                // the search ends at the first free spot straight out of the target's connection
+                int qd = fabsf(qn.u) >= fabsf(qn.v) ? (qn.u > 0 ? 0 : 2) : (qn.v > 0 ? 1 : 3);
+                V2 qo = q;
+                for (int s = 0; s < 60 && fabsf(qo.u - B->u) < B->w / 2 + 1 + cell && fabsf(qo.v - B->v) < B->d / 2 + 1 + cell; ++s) { qo.u += du[qd]; qo.v += dv[qd]; }
+                size_t gc = (size_t)cj(qo.v) * W + ci(qo.u);
+                goal[gc] |= 4;
+                std::vector<V2> line;
+                float price = route(p, pn, 2, *A, line);
+                goal[gc] &= ~4;
+                if (price < 0) { ++r.utilNoLine[net]; return; }
+                line.push_back(q);
+                for (size_t k = 0; k + 1 < line.size(); ++k) {
+                    float len = hypotf(line[k + 1].u - line[k].u, line[k + 1].v - line[k].v);
+                    if (len < 0.05f) continue;
+                    r.utilLines.push_back({ net, line[k].u, line[k].v, line[k + 1].u, line[k + 1].v });
+                    r.utilLen[net] += len;
+                }
+            };
+            for (int k = 0; k < 4; ++k) {
+                std::vector<const Placed*> nodes, helps;
+                for (auto& b : r.buildings) if (b.net == k) (b.role ? helps : nodes).push_back(&b);
+                if (k == 3) {
+                    std::vector<int> used(helps.size(), 0);
+                    for (auto* n : nodes) {
+                        int best = -1; float bd = 1e9f;
+                        for (size_t h = 0; h < helps.size(); ++h) {
+                            float d = hypotf(helps[h]->u - n->u, helps[h]->v - n->v);
+                            if (port(*helps[h], 9, used[h]) && d < bd) { bd = d; best = (int)h; }
+                        }
+                        if (best < 0) { ++r.utilNoLine[k]; continue; }
+                        pipe(k, helps[best], port(*helps[best], 9, used[best]), n, port(*n, 8, 0));
+                        ++used[best];
+                    }
+                    continue;
+                }
+                const int nodeKind = k == 0 ? 2 : k == 1 ? 5 : 6, downKind = k == 0 ? 3 : k == 1 ? 4 : 6, upKind = nodeKind;
+                const int upNth = k == 2 ? 2 : 0;
+                const Placed* prev = nullptr; int prevPort = 0;
+                for (auto* n : nodes) {
+                    const Placed* H = nullptr;
+                    for (auto* h : helps) if (h->grp == n->grp) H = h;
+                    if (H) {
+                        if (prev) pipe(k, prev, port(*prev, downKind, prevPort++), H, port(*H, upKind, upNth));
+                        pipe(k, H, port(*H, downKind, 0), n, port(*n, nodeKind, 0));
+                        prev = H; prevPort = 1;
+                    } else if (prev) pipe(k, prev, port(*prev, downKind, prevPort++), n, port(*n, nodeKind, 0));
+                }
+            }
+        }
     }
     for (auto& p : r.paths) r.pathLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
     for (auto& p : r.drives) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
@@ -425,32 +536,15 @@ PlanResult MakePlan(const PlanInput& in) {
         r.maxWalkToShop = std::max(r.maxWalkToShop, shop);
     }
 
-    // Utilities follow the footpath network (so they never run under a building); substations stand beside the
-    // streets, chosen greedily so that every building is within the service radius (measured along the grid).
-    r.utilLength = std::max(0.0f, r.pathLength - r.roadLength);     // both pavements of a street share one trench
+    // Coverage: houses take water, heat and power from a node within its service radius, no line to the house itself.
     for (int k = 0; k < 4; ++k) {
-        std::vector<V2> cand;
-        for (auto& rd : r.roads) {
-            float off = rd.width / 2 + 4.5f;
-            for (float u = rd.u1 + 12 + k * 6.0f; u < rd.u2 - 6; u += 15) { cand.push_back({ u, rd.v1 + off }); cand.push_back({ u, rd.v1 - off }); }
+        if (!in.utilBuild[k]) continue;
+        for (auto& b : r.buildings) {
+            if (b.net >= 0) continue;
+            bool ok = false;
+            for (auto& nd : r.utilNodes[k]) if (hypotf(nd.u - b.u, nd.v - b.v) <= in.utilRadius[k]) { ok = true; break; }
+            if (!ok) ++r.utilUncovered[k];
         }
-        std::vector<char> covered(r.buildings.size(), 0);
-        size_t left = r.buildings.size();
-        float R = in.utilRadius[k];
-        while (left > 0 && !cand.empty() && r.utilNodes[k].size() < 200) {
-            int best = -1, bestN = 0;
-            for (size_t ci = 0; ci < cand.size(); ++ci) {
-                int n = 0;
-                for (size_t bi = 0; bi < r.buildings.size(); ++bi)
-                    if (!covered[bi] && fabsf(r.buildings[bi].u - cand[ci].u) + fabsf(r.buildings[bi].v - cand[ci].v) <= R) ++n;
-                if (n > bestN) { bestN = n; best = (int)ci; }
-            }
-            if (best < 0) break;
-            r.utilNodes[k].push_back(cand[best]);
-            for (size_t bi = 0; bi < r.buildings.size(); ++bi)
-                if (!covered[bi] && fabsf(r.buildings[bi].u - cand[best].u) + fabsf(r.buildings[bi].v - cand[best].v) <= R) { covered[bi] = 1; --left; }
-        }
-        r.utilUncovered[k] = (int)left;
     }
     return r;
 }

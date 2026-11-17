@@ -36,11 +36,13 @@ namespace eng {
     void StartScript(const std::vector<V3>& pos, const std::vector<int>& action, const std::vector<int>& frames, float sw, float sh);
     bool InstantSupported();                        // direct build calls exist for this game build
     // one direct call into the game: kind 0 = building "type" at a turned by rot, 1 = road a->b, 2 = footpath a->b
-    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; };
+    // kind 3 = a utility line a->b: mgr = offset of the network manager in the game state, lineType / sub / arg as the game's own tool passes them
+    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; int mgr = 0, sub = 0, arg = -20; };
     void QueueInstant(const std::vector<InstantJob>& jobs);
     bool InstantBusy();
     void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed
     void DebugDumpTools();
+    void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
     void StopAutoBuild();
     bool ScriptActive();                            // a line script is driving the real mouse
@@ -56,6 +58,7 @@ namespace eng {
 
 // ---- building catalog ----
 // Where a footpath (kind 0) or a road (kind 1) joins the building: model coordinates, direction pointing outwards.
+// Utilities: 2 water in, 3 water out, 4 sewage in, 5 sewage out, 6 heating (small pipe), 8 power in, 9 power out (medium voltage).
 struct Conn { int kind; float x, z, dx, dz; };
 struct BuildingType {
     std::string id;         // ini file name without extension
@@ -97,6 +100,7 @@ struct PlanInput {
     float roadV = 0;                                // where the street crosses the district
     std::vector<float> stopsU;                      // bus stops along the street
     float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
+    bool  utilBuild[4] = {};                        // put this network's buildings and lines into the plan
     float utilRadius[4] = { 200, 200, 250, 150 };   // water, sewage, heating, power: how far a node serves, m
     float walkRadius = 400;                         // how tooFar residents walk to a stop
     float maxDiff = 3.0f;                           // allowed height difference under one building
@@ -109,7 +113,10 @@ struct Placed {
     float ou = 0, ov = 0;                           // where the model origin goes (the game's cursor point)
     float pad = 0, cut = 0, fill = 0;               // levelled height, earth to remove / add (m3)
     bool tooFar = false;                               // too tooFar from every stop
+    signed char net = -1, role = 0;                 // utility building: network 0..3; role 0 = node serving houses, 1 = switch / transformer
+    short grp = 0;                                  // node and its switch share a number
 };
+struct UtilSeg { int net; float u1, v1, u2, v2; };
 struct PathSeg { float u1, v1, u2, v2; };
 struct RoadSeg { float u1, v1, u2, v2, width; };
 struct PlanResult {
@@ -123,7 +130,9 @@ struct PlanResult {
     int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0, jobs = 0, busySkipped = 0;
     std::vector<V2> utilNodes[4];                   // substations next to the streets
     int   utilUncovered[4] = {};                    // buildings out of reach of every node
-    float utilLength = 0;                           // trench length of one network (it follows the footpaths)
+    std::vector<UtilSeg> utilLines;                 // pipes / wires between the utility buildings
+    float utilLen[4] = {};                          // their length per network, m
+    int   utilNoLine[4] = {};                       // connections that found no way or no free port
     float pathLength = 0, roadLength = 0, maxWalkToShop = -1, maxWalkToStop = -1, cut = 0, fill = 0;
 };
 PlanResult MakePlan(const PlanInput& in);

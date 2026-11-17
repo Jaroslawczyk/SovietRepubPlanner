@@ -86,7 +86,11 @@ void Load() {
             }
             collecting = false;
             int kind = key == "CONNECTION_PEDESTRIAN" || key == "CONNECTION_PEDESTRIAN_ALLOWPASS" ? 0
-                     : key == "CONNECTION_ROAD" || key == "CONNECTION_ROAD_ALLOWPASS" || key == "CONNECTION_ROAD_INPUT" || key == "CONNECTION_ROAD_OUTPUT" ? 1 : -1;
+                     : key == "CONNECTION_ROAD" || key == "CONNECTION_ROAD_ALLOWPASS" || key == "CONNECTION_ROAD_INPUT" || key == "CONNECTION_ROAD_OUTPUT" ? 1
+                     : key == "CONNECTION_WATERPIPE_INPUT" ? 2 : key == "CONNECTION_WATERPIPE_OUTPUT" ? 3
+                     : key == "CONNECTION_SEWAGE_INPUT" ? 4 : key == "CONNECTION_SEWAGE_OUTPUT" ? 5
+                     : key == "CONNECTION_HEATING_SMALL" ? 6
+                     : key == "CONNECTION_ELETRIC_LOW_INPUT" ? 8 : key == "CONNECTION_ELETRIC_LOW_OUTPUT" ? 9 : -1;
             if (kind >= 0) { connPts.emplace_back(); connKind.push_back(kind); collecting = true; continue; }
             if (key == "NAME") ls >> nameId;
             else if (key.rfind("TYPE_", 0) == 0) { if (b.category.empty()) b.category = key.substr(5); }
@@ -123,7 +127,8 @@ void Load() {
             if (pts.empty()) continue;
             Conn cn{ connKind[c], pts[0].u, pts[0].v, 0, 0 };
             if (pts.size() > 1) { cn.dx = pts[0].u - pts[1].u; cn.dz = pts[0].v - pts[1].v; }
-            if (fabsf(cn.dx) + fabsf(cn.dz) < 0.05f) { cn.dx = cn.x - b.cx; cn.dz = cn.z - b.cz; }
+            // wire points are a row of insulators, not an inner / outer pair
+            if (cn.kind >= 8 || fabsf(cn.dx) + fabsf(cn.dz) < 0.05f) { cn.dx = cn.x - b.cx; cn.dz = cn.z - b.cz; }
             bool dup = false;
             for (auto& o : b.conns) if (o.kind == cn.kind && fabsf(o.x - cn.x) + fabsf(o.z - cn.z) < 0.5f) dup = true;
             if (!dup) b.conns.push_back(cn);

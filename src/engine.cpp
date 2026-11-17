@@ -555,28 +555,44 @@ static int PlaceRaw(const char* nm, void* tool, const V3& pos, float rot, int st
 
 // A piece of road / footpath / pipe the way paste does it: snap the point like the cursor would (this is what
 // catches building connections and existing ends), start, update to the end point, commit if a preview exists.
+// Where a caught fault happened, for the log (module + offset), so a refused call can be looked up in the disassembly.
+static int CrashInfo(EXCEPTION_POINTERS* ep, const char* what, int stage) {
+    static int n = 0;
+    if (n++ < 12) {
+        void* a = ep->ExceptionRecord->ExceptionAddress; HMODULE mod = nullptr; char nm[MAX_PATH] = "?";
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)a, &mod) && mod) GetModuleFileNameA(mod, nm, MAX_PATH);
+        const char* base = strrchr(nm, '\\');
+        Log("FAULT in %s stage %d: code %08lx at %s+0x%llx, touching %p", what, stage, ep->ExceptionRecord->ExceptionCode, base ? base + 1 : nm,
+            (unsigned long long)((BYTE*)a - (BYTE*)mod), ep->ExceptionRecord->NumberParameters > 1 ? (void*)ep->ExceptionRecord->ExceptionInformation[1] : nullptr);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 typedef void (*Snap_t)(void*, void*, int, int);
 typedef void* (*PStart_t)(void*, V3*, UINT64, unsigned char, int, UINT64, V3*);
 typedef void* (*PUpdate_t)(void*, V3*, int, int, unsigned char, unsigned char, unsigned char, UINT64, unsigned char, unsigned char);
 typedef void* (*PCommit_t)(void*, UINT64, UINT64, UINT64, unsigned char, unsigned char, unsigned char);
 typedef void* (*PCancel_t)(void*);
-static int LineRaw(int mgrOffset, int type, int sub, V3 a, V3 b) {
+static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolName, V3 a, V3 b) {
     BYTE* G = Game();
     void* m = *(void**)(G + mgrOffset);
     if (!m) return -100;
     V3 sp = *(V3*)(G + 0xf6c);
-    int r = -200;
+    // the snap reads the current tool when it meets a building connection (a null tool faults at exe+0x3c7712)
+    void* st = *(void**)(G + 0xd428); void* tool = nullptr;
+    if (toolName && FindTool(toolName, &tool)) *(void**)(G + 0xd428) = tool;
+    int r = -200; volatile int stage = 0;
     __try {
         *(V3*)(G + 0xf6c) = a; ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub); a = *(V3*)(G + 0xf6c);
-        V3 out{};
-        ((PStart_t)(Base() + 0x4fbfd0))(m, &a, 0, 0, -20, 0, &out);
-        *(V3*)(G + 0xf6c) = b; ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub); b = *(V3*)(G + 0xf6c);
-        ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
+        V3 out{}; stage = 1;
+        ((PStart_t)(Base() + 0x4fbfd0))(m, &a, (UINT64)(unsigned)sub, 0, arg, 0, &out);
+        stage = 2; *(V3*)(G + 0xf6c) = b; ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub); b = *(V3*)(G + 0xf6c);
+        stage = 3; ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
         void* p428 = *(void**)((BYTE*)m + 0x428); void* p430 = *(void**)((BYTE*)m + 0x430);
+        stage = 4;
         if (p430 && p428 != p430) { ((PCommit_t)(Base() + 0x518a10))(m, 0, 0, 0, 0, 0, 0); r = 1; }
         else { ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
-    } __except (EXCEPTION_EXECUTE_HANDLER) { r = -300; }
-    *(V3*)(G + 0xf6c) = sp;
+    } __except (CrashInfo(GetExceptionInformation(), "line", stage)) { r = -300; }
+    *(V3*)(G + 0xf6c) = sp; *(void**)(G + 0xd428) = st;
     return r;
 }
 
@@ -591,7 +607,7 @@ static int MgrOffset(void* m) {
 static void* d_PathUpdate(void* m, void* p, UINT64 a3, UINT64 a4, UINT64 a5, UINT64 a6, UINT64 a7, UINT64 a8, UINT64 a9, UINT64 a10) {
     static void* lm; static UINT64 l[8]; static int n = 0;
     UINT64 c[8] = { a3 & 0xffffffff, a4 & 0xffffffff, a5 & 0xff, a6 & 0xff, a7 & 0xff, a8, a9 & 0xff, a10 & 0xff };
-    if (n < 60 && (m != lm || memcmp(c, l, sizeof(c)) != 0)) {
+    if (n < 400 && (m != lm || memcmp(c, l, sizeof(c)) != 0)) {
         ++n; lm = m; memcpy(l, c, sizeof(c));
         const float* f = (const float*)p;
         Log("PATH update mgr %p (game+0x%x) pos %.1f %.1f %.1f type %d sub %d a5 %d a6 %d a7 %d a8 %p a9 %d a10 %d thread %lu",
@@ -601,13 +617,13 @@ static void* d_PathUpdate(void* m, void* p, UINT64 a3, UINT64 a4, UINT64 a5, UIN
 }
 static void* d_PathStart(void* m, void* p, UINT64 a3, UINT64 a4, UINT64 a5, UINT64 a6, UINT64 a7, UINT64 a8, UINT64 a9, UINT64 a10) {
     static int n = 0;
-    if (n < 40) { ++n; const float* f = (const float*)p;
+    if (n < 400) { ++n; const float* f = (const float*)p;
         Log("PATH start mgr %p (game+0x%x) pos %.1f %.1f %.1f r8 %llx r9 %d a5 %d a6 %llx a7 %p", m, MgrOffset(m), f ? f[0] : 0, f ? f[1] : 0, f ? f[2] : 0, a3, (int)(a4 & 0xff), (int)a5, a6, (void*)a7); }
     return t_PathStart(m, p, a3, a4, a5, a6, a7, a8, a9, a10);
 }
 static void* d_PathCommit(void* m, void* p, UINT64 a3, UINT64 a4, UINT64 a5, UINT64 a6, UINT64 a7, UINT64 a8, UINT64 a9, UINT64 a10) {
     static int n = 0;
-    if (n < 40) { ++n; Log("PATH commit mgr %p (game+0x%x) rdx %p r8 %llx r9 %llx a5 %d a6 %d a7 %d | preview %p %p", m, MgrOffset(m), p, a3, a4, (int)(a5 & 0xff), (int)(a6 & 0xff), (int)(a7 & 0xff),
+    if (n < 400) { ++n; Log("PATH commit mgr %p (game+0x%x) rdx %p r8 %llx r9 %llx a5 %d a6 %d a7 %d | preview %p %p", m, MgrOffset(m), p, a3, a4, (int)(a5 & 0xff), (int)(a6 & 0xff), (int)(a7 & 0xff),
                        *(void**)((BYTE*)m + 0x428), *(void**)((BYTE*)m + 0x430)); }
     return t_PathCommit(m, p, a3, a4, a5, a6, a7, a8, a9, a10);
 }
@@ -640,6 +656,7 @@ static void InstallPathLogging() {
 static std::vector<InstantJob> g_inst; static std::vector<int> g_instRes; static size_t g_instAt = 0; static std::mutex g_instMx;
 static std::atomic<bool> g_instBusy{ false };
 static std::atomic<bool> g_dumpTools{ false };
+static char g_dbgTool[96] = ""; static std::atomic<bool> g_dbgToolSet{ false };
 bool InstantSupported() { return gx::Supported(); }
 void QueueInstant(const std::vector<InstantJob>& jobs) {
     std::lock_guard<std::mutex> l(g_instMx);
@@ -652,6 +669,11 @@ void InstantResults(std::vector<int>& codes) { std::lock_guard<std::mutex> l(g_i
 static void GameThreadTick() {
     if (!gx::Supported()) return;
     if (g_dumpTools.exchange(false)) gx::DumpTools();
+    if (g_dbgToolSet.exchange(false)) {
+        void* tool = nullptr; const char* nm = gx::FindTool(g_dbgTool, &tool);
+        if (nm) *(void**)(gx::Game() + 0xd428) = tool;
+        Log("debug: current tool set to '%s' -> %p", g_dbgTool, tool);
+    }
     if (!g_instBusy) return;
     for (int k = 0; k < 12; ++k) {
         InstantJob j; size_t at;
@@ -671,14 +693,22 @@ static void GameThreadTick() {
             k += 3;         // a building is heavier than a line
         } else {
             V3 a{ j.a.x, TerrainHeight(j.a.x, j.a.z), j.a.z }, b{ j.b.x, TerrainHeight(j.b.x, j.b.z), j.b.z };
-            code = gx::LineRaw(j.kind == 1 ? 0xf7a0 : 0xf968, j.lineType, 0, a, b);
-            if (code != 1) Log("instant build: %s %.0f %.0f -> %.0f %.0f: %s (code %d)", j.kind == 1 ? "road" : "footpath", a.x, a.z, b.x, b.z,
+            // networks seen in the game's own calls: roads G+0xf7a0 (type -1 mud, 0 gravel, 1 asphalt, 2 asphalt with pavements), footpaths G+0xf968,
+            // pipes G+0xfaf0 (type 20; sub 0/1 water small/big, 5/6 sewage), heating G+0xfa98 (type 10; sub 0 small, 1 big),
+            // medium voltage G+0xfa20 and high voltage G+0xfa18 (type = start argument = 10 overhead, 20 underground); the start argument is -20 elsewhere
+            const char* tn = j.kind == 1 ? (j.lineType < 0 ? "road_mud" : j.lineType == 0 ? "road_gravel" : j.lineType == 2 ? "road_asphaltside" : "road_asphalt")
+                           : j.kind == 2 ? (j.lineType < 0 ? "pedestrianway_mud" : j.lineType == 0 ? "pedestrianway" : "pedestrianway_asplhalt")
+                           : j.mgr == 0xfaf0 ? (j.sub >= 5 ? "sewagepipe_0" : "waterpipe_0") : j.mgr == 0xfa98 ? "heating_pipe_small" : j.lineType == 20 ? "eletric_ulow0" : "eletric_low0";
+            if (j.kind == 3) code = gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, a, b);
+            else code = gx::LineRaw(j.kind == 1 ? 0xf7a0 : 0xf968, j.lineType, 0, -20, tn, a, b);
+            if (code != 1) Log("instant build: %s %.0f %.0f -> %.0f %.0f: %s (code %d)", j.kind == 1 ? "road" : j.kind == 3 ? (j.mgr == 0xfaf0 ? (j.sub >= 5 ? "sewage" : "water") : j.mgr == 0xfa98 ? "heating" : "power") : "footpath", a.x, a.z, b.x, b.z,
                                code == -300 ? "CRASH caught" : "refused by the game", code);
         }
         { std::lock_guard<std::mutex> l(g_instMx); if (at < g_instRes.size()) g_instRes[at] = code; }
     }
 }
 void DebugDumpTools() { g_dumpTools = true; }
+void DebugSetTool(const char* name) { strncpy(g_dbgTool, name, sizeof(g_dbgTool) - 1); g_dbgToolSet = true; }
 void InstallPathLogging() { gx::InstallPathLogging(); }
 
 static IatHook g_hooks[] = {

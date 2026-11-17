@@ -53,6 +53,8 @@ const char* const kUtilNode[4] = { "водораспределитель", "ка
 const char* const kUtilUnit[4] = { "м³/сут", "м³/сут", "кВт", "кВт" };
 const ImU32 kUtilCol[4] = { IM_COL32(70, 150, 255, 255), IM_COL32(165, 110, 55, 255), IM_COL32(245, 85, 60, 255), IM_COL32(250, 220, 60, 255) };
 bool  g_utilShow[4] = { false, false, false, false };
+bool  g_utilBuild[4] = { false, false, false, false };   // the network goes into the plan and gets built
+bool  g_powerUnder = true;                                // medium-voltage lines as underground cable
 float g_utilRadius[4] = { 200, 200, 250, 150 };
 float g_utilNorm[4] = { 0.12f, 0.12f, 0.9f, 0.25f };   // per resident; rough guesses, editable in the panel
 std::vector<std::vector<V3>> g_utilLines[4];
@@ -191,7 +193,7 @@ void Regenerate() {
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
-    for (int k = 0; k < 4; ++k) in.utilRadius[k] = g_utilRadius[k];
+    for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; }
     in.occupied = [&a](float u, float v) { return eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0; };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     g_plan = MakePlan(in);
@@ -219,8 +221,7 @@ void Regenerate() {
     }
     for (int k = 0; k < 4; ++k) {
         g_utilLines[k].clear(); g_utilPts[k].clear();
-        float off = (k - 1.5f) * 1.3f;          // each network beside the footpath, not on top of the others
-        for (auto& p : g_plan.paths) g_utilLines[k].push_back(Sample(a, p.u1 + off, p.v1 + off, p.u2 + off, p.v2 + off));
+        for (auto& s : g_plan.utilLines) if (s.net == k) g_utilLines[k].push_back(Sample(a, s.u1, s.v1, s.u2, s.v2));
         for (auto& nd : g_plan.utilNodes[k]) g_utilPts[k].push_back(LocalToWorld(a, nd.u, nd.v, 1.0f));
     }
     for (auto& p : g_plan.drives) g_driveLines.push_back(Sample(a, p.u1, p.v1, p.u2, p.v2, 5.0f));
@@ -628,7 +629,8 @@ struct InstantRun {
     std::vector<eng::InstantJob> jobs;
     std::vector<int> plan;              // per job: index of the plan building, -1 for lines
     std::vector<int> retry;             // plan buildings waiting for levelling
-    int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0;
+    std::vector<eng::InstantJob> lineRetry;     // utility lines that failed while some buildings were still missing
+    int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0, nOk = 0, nAll = 0;
     std::string note;
 } g_inst;
 void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2) {
@@ -660,6 +662,14 @@ void InstantStart() {
     }
     for (auto& rd : g_plan.drives) InstantLine(1, g_roadKind, rd.u1, rd.v1, rd.u2, rd.v2);
     for (auto& ps : g_plan.paths) InstantLine(2, g_pathKind - 1, ps.u1, ps.v1, ps.u2, ps.v2);
+    for (auto& s : g_plan.utilLines) {      // after the buildings, so the ends snap to their connections
+        // manager offset, type, sub-type, start argument - as logged from the game's own tools
+        const int pw = g_powerUnder ? 20 : 10;
+        const int net[4][4] = { { 0xfaf0, 20, 0, -20 }, { 0xfaf0, 20, 5, -20 }, { 0xfa98, 10, 0, -20 }, { 0xfa20, pw, 0, pw } };
+        size_t from = g_inst.jobs.size();
+        InstantLine(3, net[s.net][1], s.u1, s.v1, s.u2, s.v2);
+        for (size_t k = from; k < g_inst.jobs.size(); ++k) { g_inst.jobs[k].mgr = net[s.net][0]; g_inst.jobs[k].sub = net[s.net][2]; g_inst.jobs[k].arg = net[s.net][3]; }
+    }
     if (g_inst.jobs.empty()) { g_inst.note = "Нечего строить."; return; }
     eng::QueueInstant(g_inst.jobs);
     g_inst.phase = 1;
@@ -671,12 +681,15 @@ void InstantTick() {
         if (eng::LevelPending()) return;
         r.jobs.clear(); r.plan.clear();
         for (int bi : r.retry) { r.jobs.push_back(InstantBuilding(g_plan.buildings[bi])); r.plan.push_back(bi); }
+        for (auto& j : r.lineRetry) { r.jobs.push_back(j); r.plan.push_back(-1); }
+        r.lineRetry.clear();
         r.retry.clear();
         eng::QueueInstant(r.jobs);
         r.phase = 3;
         return;
     }
     std::vector<int> codes; eng::InstantResults(codes);
+    std::vector<eng::InstantJob> failedLines;
     for (size_t i = 0; i < r.jobs.size() && i < codes.size(); ++i) {
         const eng::InstantJob& j = r.jobs[i];
         if (j.kind == 0) {
@@ -684,9 +697,11 @@ void InstantTick() {
             if (codes[i] == -1) ++r.bOk;
             else if (r.phase == 1 && codes[i] == 10) r.retry.push_back(r.plan[i]);
         } else if (j.kind == 1) { ++r.rAll; if (codes[i] == 1) ++r.rOk; }
+        else if (j.kind == 3) { if (r.phase == 1) ++r.nAll; if (codes[i] == 1) ++r.nOk; else if (r.phase == 1) failedLines.push_back(j); }
         else { ++r.pAll; if (codes[i] == 1) ++r.pOk; }
     }
     if (r.phase == 1 && !r.retry.empty()) {
+        r.lineRetry = failedLines;
         std::vector<V3> pts;
         for (int bi : r.retry) {
             const Placed& b = g_plan.buildings[bi];
@@ -701,9 +716,9 @@ void InstantTick() {
         return;
     }
     char t[260];
-    snprintf(t, sizeof(t), "Поставлено: зданий %d из %d, дорог %d из %d отрезков, дорожек %d из %d отрезков.", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll);
+    snprintf(t, sizeof(t), "Поставлено: зданий %d из %d, дорог %d из %d отрезков, дорожек %d из %d отрезков, сетей %d из %d отрезков.", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll);
     r.note = t; r.phase = 0;
-    Log("instant build summary: buildings %d/%d, roads %d/%d, footpaths %d/%d", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll);
+    Log("instant build summary: buildings %d/%d, roads %d/%d, footpaths %d/%d, utility lines %d/%d", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll);
 }
 void InstantUi() {
     InstantTick();
@@ -791,32 +806,36 @@ void TabRoads() {
 }
 
 void TabUtils() {
-    ImGui::TextWrapped("Сети идут вдоль дорожек и улиц — под домами не проходят. Узлы (квадраты на карте) стоят у улиц так, "
-                       "чтобы каждое здание было в радиусе обслуживания. Это план-подсказка: в игре сети пока строятся вручную.");
+    ImGui::TextWrapped("По правилам игры: дома берут воду, тепло и свет от узла в радиусе обслуживания, к самим домам линии не нужны. "
+                       "Труба соединяет только два здания, поэтому узлы висят на распределителях, а те идут цепочкой; провод среднего "
+                       "напряжения идёт от трансформатора прямо к подстанции (до 6 на трансформатор). Начало каждой цепочки и "
+                       "высокую сторону трансформатора подключаете вы — к своему источнику. Радиусы в игре не подписаны: проверьте их и поправьте здесь.");
     ImGui::Spacing();
     int people = g_plan.capacity;
     for (int k = 0; k < 4; ++k) {
         ImGui::PushID(k);
         ImGui::PushStyleColor(ImGuiCol_CheckMark, ImGui::ColorConvertU32ToFloat4(kUtilCol[k]));
-        ImGui::Checkbox(kUtilName[k], &g_utilShow[k]);
+        if (ImGui::Checkbox(kUtilName[k], &g_utilBuild[k])) { g_dirty = true; g_utilShow[k] = g_utilBuild[k]; }
         ImGui::PopStyleColor();
+        ImGui::SameLine(); ImGui::Checkbox("показывать", &g_utilShow[k]);
+        if (k == 3) { ImGui::SameLine(); ImGui::Checkbox("кабель под землёй", &g_powerUnder); }
         ImGui::SetNextItemWidth(200);
         if (ImGui::SliderFloat("радиус узла, м", &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
         ImGui::SetNextItemWidth(120);
         ImGui::InputFloat("на жителя", &g_utilNorm[k], 0, 0, "%.2f");
         ImGui::SameLine(); ImGui::TextDisabled("%s (прикидка)", kUtilUnit[k]);
-        if (g_area.ok && !g_plan.buildings.empty()) {
-            int nodes = (int)g_plan.utilNodes[k].size();
-            ImGui::Text("Узлов (%s): %d  ·  нагрузка %.0f %s  ·  траншей %.0f м", kUtilNode[k], nodes, people * g_utilNorm[k], kUtilUnit[k], g_plan.utilLength);
-            if (g_plan.roads.empty()) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Нет улицы — узлы ставить негде.");
-            else if (g_plan.utilUncovered[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Вне радиуса зданий: %d — увеличьте радиус или добавьте улицу.", g_plan.utilUncovered[k]);
+        if (g_utilBuild[k] && g_area.ok && !g_plan.buildings.empty()) {
+            int nodes = (int)g_plan.utilNodes[k].size(), helpers = 0;
+            for (auto& b : g_plan.buildings) if (b.net == k && b.role == 1) ++helpers;
+            ImGui::Text("Узлов (%s): %d  ·  %s: %d  ·  линий %.0f м  ·  нагрузка %.0f %s", kUtilNode[k], nodes,
+                        k == 3 ? "трансформаторов" : "распределителей", helpers, g_plan.utilLen[k], people * g_utilNorm[k], kUtilUnit[k]);
+            if (g_plan.utilUncovered[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Вне радиуса зданий: %d.", g_plan.utilUncovered[k]);
+            if (g_plan.utilNoLine[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Не удалось проложить соединений: %d.", g_plan.utilNoLine[k]);
         }
         ImGui::Separator();
         ImGui::PopID();
     }
-    if (ImGui::SmallButton("Показать все")) for (bool& b : g_utilShow) b = true;
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Скрыть все")) for (bool& b : g_utilShow) b = false;
+    ImGui::TextDisabled("Отмеченные сети ставятся вместе со всем планом кнопкой мгновенной постройки.");
 }
 
 void Footer() {
@@ -1035,6 +1054,13 @@ void SelfTest() {
         ImVec2 d = ImGui::GetIO().DisplaySize;
         if (job.lines) eng::StartScript(job.pos, job.action, job.frames, d.x, d.y);
     }
+    std::wstring tlFlag = GameDir() + L"DistrictPlanner.tool";         // debug: select a game tool by name and log the path calls
+    if (GetFileAttributesW(tlFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        char nm[96] = ""; FILE* f = _wfopen(tlFlag.c_str(), L"r"); if (f) { fscanf(f, "%95s", nm); fclose(f); }
+        DeleteFileW(tlFlag.c_str());
+        eng::InstallPathLogging();
+        if (nm[0]) eng::DebugSetTool(nm);
+    }
     std::wstring inFlag = GameDir() + L"DistrictPlanner.instant";      // debug: place the first N plan buildings by direct game calls
     if (GetFileAttributesW(inFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
         DeleteFileW(inFlag.c_str());
@@ -1070,6 +1096,7 @@ void SelfTest() {
         const auto& all = catalog::All();
         for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = all[i].id == "residental_brick_2";
         for (auto& sv : g_services) sv.enabled = false;
+        for (int k = 0; k < 4; ++k) { g_utilBuild[k] = g_utilShow[k] = true; g_utilRadius[k] = 110; }      // small radius: several nodes, so the chains get tested
     }
     SetArea(pts);
 }
