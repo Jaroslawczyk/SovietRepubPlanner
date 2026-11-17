@@ -32,6 +32,8 @@ namespace eng {
     std::string SelectedType(DWORD* tick);          // ini name of the building picked last in the game menu
     std::string CursorTypeName();                   // engine identifier of that building type
     void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh);
+    // scripted clicks: action 0 = move only, 1 = left click, 2 = right click at the end of the step
+    void StartScript(const std::vector<V3>& pos, const std::vector<int>& action, const std::vector<int>& frames, float sw, float sh);
     void StopAutoBuild();
     bool AutoBuildActive();
     void AutoBuildStats(int& done, int& failed, int& left);

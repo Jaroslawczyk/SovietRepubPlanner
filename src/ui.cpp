@@ -540,7 +540,69 @@ void TabServices() {
     }
 }
 
+// A world point can be clicked through the game only if it is on screen, clear of the game HUD, and not hidden
+// behind a hill (the game picks the first terrain point under the cursor).
+bool Clickable(const V3& w) {
+    ImVec2 ds = ImGui::GetIO().DisplaySize;
+    float sx, sy;
+    V3 p{ w.x, eng::TerrainHeight(w.x, w.z), w.z };
+    if (!eng::WorldToScreen(p, ds.x, ds.y, sx, sy)) return false;
+    if (sx < 60 || sy < 70 || sx > ds.x - 60 || sy > ds.y - 190) return false;
+    V3 hit;
+    if (!eng::ScreenToTerrain(sx, sy, ds.x, ds.y, hit)) return false;
+    return fabsf(hit.x - w.x) + fabsf(hit.z - w.z) < 5.0f;
+}
+
+// Lines of the plan (footpaths or the street) drawn with the game's own line tool: click at every point of a
+// polyline, right click to end it. Long pieces are split so the line follows the ground.
+struct LineJob { std::vector<V3> pos; std::vector<int> action, frames; int lines = 0, skipped = 0; };
+void AddLine(LineJob& job, float u1, float v1, float u2, float v2) {
+    float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
+    if (len < 3.0f) return;
+    int n = std::max(1, (int)ceilf(len / 70.0f));
+    std::vector<V3> pts;
+    for (int i = 0; i <= n; ++i) {
+        float t = (float)i / n;
+        pts.push_back(LocalToWorld(g_area, u1 + (u2 - u1) * t, v1 + (v2 - v1) * t, 0));
+        if (!Clickable(pts.back())) { ++job.skipped; return; }
+    }
+    for (auto& w : pts) {
+        job.pos.push_back(w); job.action.push_back(0); job.frames.push_back(18);
+        job.pos.push_back(w); job.action.push_back(1); job.frames.push_back(6);
+    }
+    job.pos.push_back(pts.back()); job.action.push_back(2); job.frames.push_back(14);
+    ++job.lines;
+}
+void LineButton(const char* what, const char* tool, LineJob& job) {
+    char t[220];
+    if (job.lines == 0) snprintf(t, sizeof(t), "%s: нечего строить%s", what, job.skipped ? " (всё за экраном или за холмом)" : "");
+    else if (job.skipped) snprintf(t, sizeof(t), "Проложить в игре %s — %d отрезков (не видно ещё %d)", what, job.lines, job.skipped);
+    else snprintf(t, sizeof(t), "Проложить в игре %s — %d отрезков", what, job.lines);
+    ImGui::BeginDisabled(job.lines == 0 || eng::AutoBuildActive());
+    if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) { ImVec2 ds = ImGui::GetIO().DisplaySize; eng::StartScript(job.pos, job.action, job.frames, ds.x, ds.y); }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Сначала выберите в игровом меню «Транспортная отрасль» %s.\n"
+                          "Мод сам прокликает начало и конец каждого отрезка игровым инструментом; платит игра.\n"
+                          "Отрезки, концы которых за экраном, под панелями игры или закрыты холмом, пропускаются —\n"
+                          "поднимите камеру выше и смотрите на участок сверху. Камеру во время работы не двигайте.", tool);
+}
+
 void TabRoads() {
+    if (g_area.ok && !g_plan.buildings.empty()) {
+        ImGui::SeparatorText("Построить в игре");
+        if (eng::AutoBuildActive()) {
+            int done, failed, left; eng::AutoBuildStats(done, failed, left);
+            char t[120]; snprintf(t, sizeof(t), "Стоп  ·  кликов сделано %d, шагов осталось %d", done, left);
+            if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) eng::StopAutoBuild();
+        } else {
+            LineJob paths, roads;
+            for (auto& ps : g_plan.paths) AddLine(paths, ps.u1, ps.v1, ps.u2, ps.v2);
+            for (auto& rd : g_plan.roads) AddLine(roads, rd.u1, rd.v1, rd.u2, rd.v2);
+            LineButton("дорожки", "тип пешеходной дорожки", paths);
+            if (!g_plan.roads.empty()) LineButton("улицу", "тип дороги", roads);
+        }
+    }
     ImGui::SeparatorText("Улица через район");
     const char* types[] = { "без дороги (только дорожки)", "улица, 2 полосы", "проспект, 4 полосы" };
     ImGui::SetNextItemWidth(280);
@@ -803,6 +865,15 @@ int g_selfTest = 0;
 void SelfTest() {
     static int tick = 0;
     if (++tick % 120 != 0 || !eng::Ready()) return;
+    std::wstring ptFlag = GameDir() + L"DistrictPlanner.pathtest";     // debug: draw the longest plan footpath with the selected game tool
+    if (GetFileAttributesW(ptFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(ptFlag.c_str());
+        LineJob job;
+        for (auto& ps : g_plan.paths) AddLine(job, ps.u1, ps.v1, ps.u2, ps.v2);
+        Log("pathtest: %d lines, %d skipped (hidden or off screen)", job.lines, job.skipped);
+        ImVec2 d = ImGui::GetIO().DisplaySize;
+        if (job.lines) eng::StartScript(job.pos, job.action, job.frames, d.x, d.y);
+    }
     std::wstring abFlag = GameDir() + L"DistrictPlanner.autobuild";    // debug: place the selected game building on the first plan spots
     if (GetFileAttributesW(abFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
         DeleteFileW(abFlag.c_str());

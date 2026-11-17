@@ -80,11 +80,15 @@ float CursorRot();
 bool CursorActive();
 static std::atomic<int> g_dbgSet{ 0 }, g_dbgClear{ 0 }, g_dbgPoll{ 0 };
 
+static void ScriptTick();
+static bool g_abRClick = false; static int g_abMode = 0;   // 0 = buildings, 1 = scripted clicks (roads, paths)
 #define MB_HOOK(name, orig) static bool name(void* s) { if (g_abActive) return false; return g_blockMouseButtons ? false : orig(s); }
 static bool h_LPress(void* s) { if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LPress(s); }
 static bool h_LDown(void* s) { static DWORD t = 0; if (t != GetCurrentThreadId()) { t = GetCurrentThreadId(); Log("input polled on thread %lu", t); } if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LDown(s); }   // polled every frame
 static bool h_LPressA(void* s) { if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LPressA(s); }
-MB_HOOK(h_RPress, o_RPress) MB_HOOK(h_RDown, o_RDown) MB_HOOK(h_RPressA, o_RPressA)
+static bool h_RPress(void* s)  { if (g_abActive) return g_abRClick; return g_blockMouseButtons ? false : o_RPress(s); }
+static bool h_RDown(void* s)   { if (g_abActive) return g_abRClick; return g_blockMouseButtons ? false : o_RDown(s); }
+static bool h_RPressA(void* s) { if (g_abActive) return g_abRClick; return g_blockMouseButtons ? false : o_RPressA(s); }
 MB_HOOK(h_MDown, o_MDown)
 static bool h_KeyDown(void* s, int k)  { return g_blockKeys ? false : o_KeyDown(s, k); }
 static bool h_KeyPress(void* s, int k) { return g_blockKeys ? false : o_KeyPress(s, k); }
@@ -361,7 +365,46 @@ std::string SelectedType(DWORD* tick) {
     return g_typeTick ? std::string(g_lastTypeName) : std::string();
 }
 std::string CursorTypeName() { return SelectedType(nullptr); }
+// Scripted clicks for the game's line tools (footpaths, roads): each step moves the fake mouse to a world point,
+// waits, and optionally presses the left or right button during its last frames.
+struct ScriptStep { V3 pos; int action; int frames; };
+static std::vector<ScriptStep> g_scr;
+static size_t g_scrIdx = 0; static int g_scrTicks = 0;
+static void ScriptTick() {
+    std::lock_guard<std::mutex> l(g_abMx);
+    if (!g_abActive) return;
+    if (g_scrIdx >= g_scr.size()) { g_abActive = false; g_abClick = g_abRClick = false; Log("script: finished, %d clicks", (int)g_abDone); return; }
+    const ScriptStep& st = g_scr[g_scrIdx];
+    float sx, sy;
+    if (!WorldToScreen({ st.pos.x, TerrainHeight(st.pos.x, st.pos.z), st.pos.z }, g_abW, g_abH, sx, sy) ||
+        sx < 60 || sy < 70 || sx > g_abW - 60 || sy > g_abH - 190) {
+        // cannot reach this point: cancel the current line with a right click and stop
+        Log("script: step %d is off screen or under the game HUD, stopped", (int)g_scrIdx);
+        g_abActive = false; g_abClick = g_abRClick = false; ++g_abFailed; return;
+    }
+    g_abSpoofX = sx; g_abSpoofY = sy;
+    ++g_scrTicks;
+    bool press = g_scrTicks > st.frames - 3;
+    g_abClick = st.action == 1 && press;
+    g_abRClick = st.action == 2 && press;
+    if (g_scrTicks >= st.frames) {
+        if (st.action == 1) ++g_abDone;
+        ++g_scrIdx; g_scrTicks = 0; g_abClick = g_abRClick = false;
+        g_abLeft = (int)(g_scr.size() - g_scrIdx);
+    }
+}
+void StartScript(const std::vector<V3>& pos, const std::vector<int>& action, const std::vector<int>& frames, float sw, float sh) {
+    std::lock_guard<std::mutex> l(g_abMx);
+    g_scr.clear();
+    for (size_t i = 0; i < pos.size(); ++i) g_scr.push_back({ pos[i], action[i], frames[i] });
+    g_scrIdx = 0; g_scrTicks = 0; g_abClick = g_abRClick = false; g_abAxis = 0;
+    g_abDone = 0; g_abFailed = 0; g_abLeft = (int)g_scr.size(); g_abW = sw; g_abH = sh;
+    if (g_scr.empty()) return;
+    Log("script: %d steps", (int)g_scr.size());
+    g_abMode = 1; g_abActive = true;
+}
 void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh) {
+    g_abMode = 0;
     std::lock_guard<std::mutex> l(g_abMx);
     g_abJobs.clear();
     for (size_t i = 0; i < pos.size(); ++i) g_abJobs.push_back({ pos[i], rot[i] });
@@ -372,7 +415,7 @@ void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, f
     Log("autobuild: %d targets, cursor type %d '%s'", (int)g_abJobs.size(), g_curType, CursorTypeName().c_str());
     g_abActive = true;
 }
-void StopAutoBuild() { g_abActive = false; g_abClick = false; g_abAxis = 0; }
+void StopAutoBuild() { g_abActive = false; g_abClick = false; g_abRClick = false; g_abAxis = 0; }
 bool AutoBuildActive() {
     return g_abActive;
 }
@@ -491,7 +534,7 @@ static bool Invert(const M4& in, M4& out) {
 }
 
 void BeginFrame() {
-    if (g_abActive) AutoTick();
+    if (g_abActive) { if (g_abMode) ScriptTick(); else AutoTick(); }
     { static DWORD last = 0; static int n = 0; static char prev[200] = ""; DWORD now = GetTickCount();
       if (now - last > 2000 && n < 150) { last = now;
         int a = g_nRotStep.exchange(0), b = g_nRotMat.exchange(0), c = g_nTypeIdx.exchange(0), d = g_nTypeName.exchange(0), e = g_nTypeByIdx.exchange(0);
