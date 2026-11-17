@@ -32,7 +32,8 @@ namespace eng {
     std::string SelectedType(DWORD* tick);          // ini name of the building picked last in the game menu
     std::string CursorTypeName();                   // engine identifier of that building type
     void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh);
-    // scripted clicks: action 0 = move only, 1 = left click, 2 = right click at the end of the step
+    // scripted clicks: action 0 = move only, 1 = left click, 2 = right click at the end of the step,
+    // 3 = left button held for the whole step (drag)
     void StartScript(const std::vector<V3>& pos, const std::vector<int>& action, const std::vector<int>& frames, float sw, float sh);
     void StopAutoBuild();
     bool AutoBuildActive();
@@ -45,6 +46,8 @@ namespace eng {
 }
 
 // ---- building catalog ----
+// Where a footpath (kind 0) or a road (kind 1) joins the building: model coordinates, direction pointing outwards.
+struct Conn { int kind; float x, z, dx, dz; };
 struct BuildingType {
     std::string id;         // ini file name without extension
     std::string name;       // localized, UTF-8
@@ -56,6 +59,9 @@ struct BuildingType {
     int   workers = 0;
     float sx = 0, sz = 0;   // footprint size, meters
     float height = 0;
+    float cx = 0, cz = 0;   // footprint centre in model coordinates (the model origin is rarely the centre)
+    std::vector<Conn> conns;
+    bool  needsRoad = false; // cannot work without a road for vehicles
 };
 namespace catalog {
     void Load();
@@ -89,6 +95,8 @@ struct PlanInput {
 };
 struct Placed {
     int type; float u, v, w, d; bool rotated;
+    int rot = 0;                                    // quarter turns: model X along +u, +v, -u, -v
+    float ou = 0, ov = 0;                           // where the model origin goes (the game's cursor point)
     float pad = 0, cut = 0, fill = 0;               // levelled height, earth to remove / add (m3)
     bool tooFar = false;                               // too tooFar from every stop
 };
@@ -99,6 +107,9 @@ struct PlanResult {
     std::vector<PathSeg> paths;
     std::vector<RoadSeg> roads;
     std::vector<V2>      stops, crossings;
+    std::vector<PathSeg> drives;                    // driveways from the street to road connections
+    std::vector<V2>      pedPts, roadPts;           // connection points that got a footpath / a driveway
+    int noPath = 0, noRoad = 0;                     // buildings left without a footpath / without a needed road
     int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0, jobs = 0, busySkipped = 0;
     std::vector<V2> utilNodes[4];                   // substations next to the streets
     int   utilUncovered[4] = {};                    // buildings out of reach of every node

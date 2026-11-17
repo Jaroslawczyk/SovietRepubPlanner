@@ -4,6 +4,7 @@
 #include <sstream>
 #include <map>
 #include <algorithm>
+#include <cmath>
 
 static std::vector<BuildingType> g_types;
 
@@ -64,11 +65,29 @@ void Load() {
         int nameId = -1;
         std::istringstream ss(std::string(data.begin(), data.end()));
         std::string line;
+        // connections: the keyword, then its points on the next lines (bare "x y z" or $CONNECTION_ADVANCED_POINT);
+        // the first point is the outer end, where a footpath / road joins
+        std::vector<std::vector<V2>> connPts; std::vector<int> connKind; bool collecting = false;
         while (std::getline(ss, line)) {
             size_t s = line.find_first_not_of(" \t");
-            if (s == std::string::npos || line[s] != '$') continue;
+            if (s == std::string::npos) continue;
+            if (line[s] != '$') {
+                float x, y, z;
+                if (collecting && sscanf(line.c_str() + s, "%f %f %f", &x, &y, &z) == 3) connPts.back().push_back({ x, z });
+                else if (line.find("$CONNECTION") != std::string::npos && line.find("ADVANCED_POINT") == std::string::npos) collecting = false;
+                continue;
+            }
             std::istringstream ls(line.substr(s + 1));
             std::string key; ls >> key;
+            if (key == "CONNECTION_ADVANCED_POINT") {
+                float x, y, z;
+                if (collecting && (ls >> x >> y >> z)) connPts.back().push_back({ x, z });
+                continue;
+            }
+            collecting = false;
+            int kind = key == "CONNECTION_PEDESTRIAN" || key == "CONNECTION_PEDESTRIAN_ALLOWPASS" ? 0
+                     : key == "CONNECTION_ROAD" || key == "CONNECTION_ROAD_ALLOWPASS" || key == "CONNECTION_ROAD_INPUT" || key == "CONNECTION_ROAD_OUTPUT" ? 1 : -1;
+            if (kind >= 0) { connPts.emplace_back(); connKind.push_back(kind); collecting = true; continue; }
             if (key == "NAME") ls >> nameId;
             else if (key.rfind("TYPE_", 0) == 0) { if (b.category.empty()) b.category = key.substr(5); }
             else if (key == "STORAGE") {
@@ -86,10 +105,30 @@ void Load() {
         if (b.category.empty()) continue;
         auto bb = ReadAll(dir + stem + L".bbox");
         if (bb.size() < 24) continue;
-        float f[6];
-        memcpy(f, bb.data() + bb.size() - 24, 24);
+        // the file is a count and that many 540-byte parts, each ending with its box (min xyz, max xyz)
+        float f[6] = { 1e9f, 1e9f, 1e9f, -1e9f, -1e9f, -1e9f };
+        int parts = 0;
+        if (bb.size() >= 4) memcpy(&parts, bb.data(), 4);
+        if (parts < 1 || bb.size() != 4 + (size_t)parts * 540) parts = 1;
+        for (int p = 0; p < parts; ++p) {
+            float g[6];
+            memcpy(g, bb.data() + bb.size() - 24 - (size_t)(parts - 1 - p) * 540, 24);
+            for (int k = 0; k < 3; ++k) { f[k] = std::min(f[k], g[k]); f[k + 3] = std::max(f[k + 3], g[k + 3]); }
+        }
         b.sx = f[3] - f[0]; b.sz = f[5] - f[2]; b.height = f[4];
+        b.cx = (f[0] + f[3]) / 2; b.cz = (f[2] + f[5]) / 2;
         if (!(b.sx > 0.5f && b.sz > 0.5f && b.sx < 2000 && b.sz < 2000)) continue;
+        for (size_t c = 0; c < connPts.size(); ++c) {
+            auto& pts = connPts[c];
+            if (pts.empty()) continue;
+            Conn cn{ connKind[c], pts[0].u, pts[0].v, 0, 0 };
+            if (pts.size() > 1) { cn.dx = pts[0].u - pts[1].u; cn.dz = pts[0].v - pts[1].v; }
+            if (fabsf(cn.dx) + fabsf(cn.dz) < 0.05f) { cn.dx = cn.x - b.cx; cn.dz = cn.z - b.cz; }
+            bool dup = false;
+            for (auto& o : b.conns) if (o.kind == cn.kind && fabsf(o.x - cn.x) + fabsf(o.z - cn.z) < 0.5f) dup = true;
+            if (!dup) b.conns.push_back(cn);
+        }
+        for (auto& cn : b.conns) if (cn.kind == 1 && b.category != "LIVING") b.needsRoad = true;
         auto it = names.find(nameId);
         b.name = (it != names.end() && !it->second.empty()) ? WideToUtf8(it->second) : b.id;
         g_types.push_back(b);
@@ -102,7 +141,10 @@ void Load() {
     });
     int living = 0;
     for (auto& t : g_types) if (t.category == "LIVING") ++living;
-    Log("catalog: %d buildings, %d residential, %d names", (int)g_types.size(), living, (int)names.size());
+    int ped = 0, road = 0;
+    for (auto& t : g_types) { if (t.needsRoad) ++road; for (auto& c : t.conns) if (c.kind == 0) { ++ped; break; } }
+    Log("catalog: %d buildings, %d residential, %d names, %d with a footpath entrance, %d need a road",
+        (int)g_types.size(), living, (int)names.size(), ped, road);
 }
 
 } // namespace catalog

@@ -67,7 +67,9 @@ struct Cell { V3 c[4]; ImU32 col; };
 std::vector<Quad> g_quads;
 std::vector<Cell> g_slope, g_roadQuads;
 std::vector<std::vector<V3>> g_lines, g_outline;
-std::vector<V3> g_stopPts, g_crossPts;
+std::vector<V3> g_stopPts, g_crossPts, g_pedPts, g_roadPts;
+std::vector<std::vector<V3>> g_driveLines;
+int   g_lineMode = 0;               // how the game's line tool is driven: 0 two clicks a piece, 1 chain, 2 hold and drag
 
 // ---------- geometry helpers ----------
 V3 LocalToWorld(const Area& a, float u, float v, float lift = 0.3f) {
@@ -175,6 +177,7 @@ void Regenerate() {
     }
     g_dirty = false;
     g_quads.clear(); g_lines.clear(); g_outline.clear(); g_roadQuads.clear(); g_stopPts.clear(); g_crossPts.clear();
+    g_pedPts.clear(); g_roadPts.clear(); g_driveLines.clear();
     g_plan = PlanResult();
     if (g_areaChanged) { g_areaChanged = false; RebuildSlope(); }
     if (!g_area.ok) return;
@@ -216,6 +219,9 @@ void Regenerate() {
         for (auto& p : g_plan.paths) g_utilLines[k].push_back(Sample(a, p.u1 + off, p.v1 + off, p.u2 + off, p.v2 + off));
         for (auto& nd : g_plan.utilNodes[k]) g_utilPts[k].push_back(LocalToWorld(a, nd.u, nd.v, 1.0f));
     }
+    for (auto& p : g_plan.drives) g_driveLines.push_back(Sample(a, p.u1, p.v1, p.u2, p.v2, 5.0f));
+    for (auto& s : g_plan.pedPts) g_pedPts.push_back(LocalToWorld(a, s.u, s.v, 0.5f));
+    for (auto& s : g_plan.roadPts) g_roadPts.push_back(LocalToWorld(a, s.u, s.v, 0.5f));
     for (auto& s : g_plan.stops) g_stopPts.push_back(LocalToWorld(a, s.u, s.v, 1.0f));
     for (auto& s : g_plan.crossings) g_crossPts.push_back(LocalToWorld(a, s.u, s.v, 0.6f));
     size_t n = a.local.size();
@@ -308,8 +314,16 @@ void DrawWorld() {
             dl->AddRect(ImVec2(sp.x - 7, sp.y - 7), ImVec2(sp.x + 7, sp.y + 7), IM_COL32(30, 30, 30, 255), 2.0f, 0, 1.5f);
         }
     }
+    for (auto& l : g_driveLines) DrawPolyline(dl, l, IM_COL32(70, 70, 78, 235), 5.0f);
     for (auto& q : g_quads) DrawBuilding(dl, q);
     ImVec2 s;
+    for (auto& c : g_pedPts) if (Proj(c, s)) {          // footpath entrance of a building
+        dl->AddCircleFilled(s, 4.5f, IM_COL32(60, 200, 90, 255)); dl->AddCircle(s, 4.5f, IM_COL32(20, 20, 20, 255), 0, 1.2f);
+    }
+    for (auto& c : g_roadPts) if (Proj(c, s)) {         // road connection of a building
+        dl->AddRectFilled(ImVec2(s.x - 5, s.y - 5), ImVec2(s.x + 5, s.y + 5), IM_COL32(255, 150, 40, 255));
+        dl->AddRect(ImVec2(s.x - 5, s.y - 5), ImVec2(s.x + 5, s.y + 5), IM_COL32(20, 20, 20, 255), 0, 0, 1.2f);
+    }
     for (auto& c : g_crossPts) if (Proj(c, s)) {       // pedestrian crossing
         for (int k = -2; k <= 2; ++k) dl->AddLine(ImVec2(s.x + k * 4.0f, s.y - 6), ImVec2(s.x + k * 4.0f, s.y + 6), IM_COL32(255, 255, 255, 255), 2.0f);
     }
@@ -566,11 +580,19 @@ void AddLine(LineJob& job, float u1, float v1, float u2, float v2) {
         pts.push_back(LocalToWorld(g_area, u1 + (u2 - u1) * t, v1 + (v2 - v1) * t, 0));
         if (!Clickable(pts.back())) { ++job.skipped; return; }
     }
-    for (auto& w : pts) {
-        job.pos.push_back(w); job.action.push_back(0); job.frames.push_back(18);
-        job.pos.push_back(w); job.action.push_back(1); job.frames.push_back(6);
+    auto step = [&](const V3& w, int action, int frames) { job.pos.push_back(w); job.action.push_back(action); job.frames.push_back(frames); };
+    if (g_lineMode == 1) {              // chain: a click at every point, right click ends the line
+        for (auto& w : pts) { step(w, 0, 18); step(w, 1, 6); }
+        step(pts.back(), 2, 14);
+    } else for (size_t i = 0; i + 1 < pts.size(); ++i) {
+        const V3& a = pts[i]; const V3& b = pts[i + 1];
+        if (g_lineMode == 0) {          // every piece on its own: click the start, click the end
+            step(a, 0, 16); step(a, 1, 6); step(b, 0, 16); step(b, 1, 6); step(b, 0, 6);
+        } else {                        // press at the start, drag, release at the end
+            V3 mid{ (a.x + b.x) / 2, 0, (a.z + b.z) / 2 };
+            step(a, 0, 16); step(a, 3, 8); step(mid, 3, 10); step(b, 3, 14); step(b, 0, 8);
+        }
     }
-    job.pos.push_back(pts.back()); job.action.push_back(2); job.frames.push_back(14);
     ++job.lines;
 }
 void LineButton(const char* what, const char* tool, LineJob& job) {
@@ -584,6 +606,8 @@ void LineButton(const char* what, const char* tool, LineJob& job) {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("Сначала выберите в игровом меню «Транспортная отрасль» %s.\n"
                           "Мод сам прокликает начало и конец каждого отрезка игровым инструментом; платит игра.\n"
+                          "Отрезок к зданию начинается точно в его точке подключения, чтобы игра к ней привязалась.\n"
+                          "Порядок: сначала улицы и подъезды, потом дорожки.\n"
                           "Отрезки, концы которых за экраном, под панелями игры или закрыты холмом, пропускаются —\n"
                           "поднимите камеру выше и смотрите на участок сверху. Камеру во время работы не двигайте.", tool);
 }
@@ -596,12 +620,22 @@ void TabRoads() {
             char t[120]; snprintf(t, sizeof(t), "Стоп  ·  кликов сделано %d, шагов осталось %d", done, left);
             if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) eng::StopAutoBuild();
         } else {
-            LineJob paths, roads;
+            LineJob paths, roads, drives;
             for (auto& ps : g_plan.paths) AddLine(paths, ps.u1, ps.v1, ps.u2, ps.v2);
             for (auto& rd : g_plan.roads) AddLine(roads, rd.u1, rd.v1, rd.u2, rd.v2);
+            for (auto& rd : g_plan.drives) AddLine(drives, rd.u1, rd.v1, rd.u2, rd.v2);
+            if (!g_plan.roads.empty()) LineButton("улицы", "тип дороги", roads);
+            if (!g_plan.drives.empty()) LineButton("подъезды к зданиям", "тип дороги (подъезд можно попроще)", drives);
             LineButton("дорожки", "тип пешеходной дорожки", paths);
-            if (!g_plan.roads.empty()) LineButton("улицу", "тип дороги", roads);
         }
+        const char* modes[] = { "два клика на отрезок", "цепочкой, правый клик в конце", "зажать и тянуть" };
+        ImGui::SetNextItemWidth(280);
+        ImGui::Combo("как прокладывать", &g_lineMode, modes, 3);
+        ImGui::SetItemTooltip("Способ, которым мод управляет игровым инструментом линии.\nЕсли отрезки не появляются или тянутся лишние — попробуйте другой.");
+        ImGui::TextDisabled("Зелёные точки — пешеходные входы зданий, оранжевые квадраты — подъезды для машин.");
+        const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
+        if (g_plan.noRoad) ImGui::TextColored(red, g_plan.roads.empty() ? "Зданиям нужна автодорога: %d — включите улицу ниже." : "Не удалось подвести автодорогу к зданиям: %d.", g_plan.noRoad);
+        if (g_plan.noPath) ImGui::TextColored(red, "Не удалось подвести дорожку к зданиям: %d.", g_plan.noPath);
     }
     ImGui::SeparatorText("Улица через район");
     const char* types[] = { "без дороги (только дорожки)", "улица, 2 полосы", "проспект, 4 полосы" };
@@ -719,8 +753,8 @@ void Footer() {
                 if (b.type != type) continue;
                 V3 w = LocalToWorld(g_area, b.u, b.v, 0);
                 if (eng::Occupied(w.x, w.z) & 1) continue;              // already built
-                pos.push_back(w);
-                rot.push_back(g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + (b.rotated ? kPi / 2 : 0)));
+                pos.push_back(LocalToWorld(g_area, b.ou, b.ov, 0));     // the game's cursor holds the model origin
+                rot.push_back(g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + b.rot * kPi / 2));
             }
         };
         auto start = [&](int type) {
@@ -867,10 +901,15 @@ void SelfTest() {
     if (++tick % 120 != 0 || !eng::Ready()) return;
     std::wstring ptFlag = GameDir() + L"DistrictPlanner.pathtest";     // debug: draw the longest plan footpath with the selected game tool
     if (GetFileAttributesW(ptFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        DeleteFileW(ptFlag.c_str());
         LineJob job;
-        for (auto& ps : g_plan.paths) AddLine(job, ps.u1, ps.v1, ps.u2, ps.v2);
-        Log("pathtest: %d lines, %d skipped (hidden or off screen)", job.lines, job.skipped);
+        {   // the file may hold the line mode (0, 1, 2) and how many of the last plan lines to draw (the newest are the house links)
+            FILE* f = _wfopen(ptFlag.c_str(), L"r"); int m = -1, n = 0;
+            if (f) { if (fscanf(f, "%d %d", &m, &n) >= 1 && m >= 0 && m <= 2) g_lineMode = m; fclose(f); }
+            size_t from = n > 0 && (size_t)n < g_plan.paths.size() ? g_plan.paths.size() - n : 0;
+            for (size_t k = from; k < g_plan.paths.size(); ++k) { auto& ps = g_plan.paths[k]; AddLine(job, ps.u1, ps.v1, ps.u2, ps.v2); }
+        }
+        DeleteFileW(ptFlag.c_str());
+        Log("pathtest: mode %d, %d lines, %d skipped (hidden or off screen)", g_lineMode, job.lines, job.skipped);
         ImVec2 d = ImGui::GetIO().DisplaySize;
         if (job.lines) eng::StartScript(job.pos, job.action, job.frames, d.x, d.y);
     }
@@ -880,8 +919,8 @@ void SelfTest() {
         std::vector<V3> pos; std::vector<float> rot;
         for (size_t i = 0; i < g_plan.buildings.size() && pos.size() < 3; i += 4) {
             const Placed& b = g_plan.buildings[i];
-            pos.push_back(LocalToWorld(g_area, b.u, b.v, 0));
-            rot.push_back(g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + (b.rotated ? kPi / 2 : 0)));
+            pos.push_back(LocalToWorld(g_area, b.ou, b.ov, 0));
+            rot.push_back(g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + b.rot * kPi / 2));
         }
         Log("autobuild test: cursor active %d, type '%s', %d targets", (int)eng::CursorActive(), eng::CursorTypeName().c_str(), (int)pos.size());
         if (!pos.empty()) { ImVec2 d = ImGui::GetIO().DisplaySize; eng::StartAutoBuild(pos, rot, d.x, d.y); }

@@ -384,12 +384,13 @@ static void ScriptTick() {
     }
     g_abSpoofX = sx; g_abSpoofY = sy;
     ++g_scrTicks;
-    bool press = g_scrTicks > st.frames - 3;
-    g_abClick = st.action == 1 && press;
+    bool press = st.action == 3 || g_scrTicks > st.frames - 3;
+    g_abClick = (st.action == 1 || st.action == 3) && press;
     g_abRClick = st.action == 2 && press;
     if (g_scrTicks >= st.frames) {
         if (st.action == 1) ++g_abDone;
-        ++g_scrIdx; g_scrTicks = 0; g_abClick = g_abRClick = false;
+        bool keep = st.action == 3 && g_scrIdx + 1 < g_scr.size() && g_scr[g_scrIdx + 1].action == 3;   // drag goes on
+        ++g_scrIdx; g_scrTicks = 0; g_abClick = keep; g_abRClick = false;
         g_abLeft = (int)(g_scr.size() - g_scrIdx);
     }
 }

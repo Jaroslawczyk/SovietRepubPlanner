@@ -3,6 +3,7 @@
 #include "common.h"
 #include <cmath>
 #include <algorithm>
+#include <queue>
 
 bool PolyScan(const std::vector<V2>& poly, float v, float& left, float& right) {
     std::vector<float> xs;
@@ -30,13 +31,28 @@ bool PolyContains(const std::vector<V2>& poly, float u, float v) {
 }
 
 namespace {
-struct Item { int type; float w, d; bool rotated; };
+struct Item { int type; float w, d; bool rotated; int rot; };
 const float kApron = 9.0f, kSide = 3.0f;   // extra depth / width the game needs beyond the model's bounding box
 
+// A model point after "rot" quarter turns, in plan axes (model X along +u, +v, -u, -v).
+V2 Turn(int rot, float x, float z) {
+    switch (rot & 3) { case 0: return { x, z }; case 1: return { -z, x }; case 2: return { -x, -z }; default: return { z, -x }; }
+}
+// Quarter turns that make the entrance (the first footpath connection, else the first road one) face +v.
+int EntranceTurn(const BuildingType& b) {
+    const Conn* c = nullptr;
+    for (auto& k : b.conns) if (k.kind == 0) { c = &k; break; }
+    if (!c && !b.conns.empty()) c = &b.conns[0];
+    if (!c) return -1;
+    if (fabsf(c->dz) >= fabsf(c->dx)) return c->dz > 0 ? 0 : 2;
+    return c->dx > 0 ? 1 : 3;
+}
 Item MakeItem(int type) {
     const BuildingType& b = catalog::All()[type];
-    Item it{ type, b.sx, b.sz, false };
-    if (it.d > it.w) { std::swap(it.w, it.d); it.rotated = true; }   // long side along the path
+    int rot = EntranceTurn(b);
+    if (rot < 0) rot = b.sz > b.sx ? 1 : 0;                         // no connections: long side along the path
+    Item it{ type, b.sx, b.sz, (rot & 1) != 0, rot };
+    if (it.rotated) std::swap(it.w, it.d);
     it.w += kSide; it.d += kApron;   // room for the entrance apron / construction zone the game adds around a building
     return it;
 }
@@ -119,9 +135,12 @@ PlanResult MakePlan(const PlanInput& in) {
             float cv = north ? vlo + it.d / 2 : vhi - it.d / 2;
             if (busy(cu, cv, it.w, it.d)) { u += 6; ++r.busySkipped; continue; }                        // something is already built here
             if (heightRange(cu, cv, it.w, it.d) > in.maxDiff) { u += 6; ++r.steepSkipped; continue; }   // too steep here
-            r.buildings.push_back({ it.type, cu, cv, it.w - kSide, it.d - kApron, it.rotated });
-            r.paths.push_back({ cu, pathV, cu, north ? pathV + band / 2 : pathV - band / 2 });
-            rowL = std::min(rowL, cu); rowR = std::max(rowR, cu);
+            Placed pb{ it.type, cu, cv, it.w - kSide, it.d - kApron, it.rotated };
+            pb.rot = (it.rot + (north ? 2 : 0)) & 3;                // the entrance looks at this row's footpath
+            V2 off = Turn(pb.rot, all[it.type].cx, all[it.type].cz);
+            pb.ou = cu - off.u; pb.ov = cv - off.v;
+            r.buildings.push_back(pb);
+            rowL = std::min(rowL, cu - it.w / 2 + 4); rowR = std::max(rowR, cu + it.w / 2 - 4);
             u += it.w + gap; ++i; ++placed;
         }
         return placed;
@@ -231,7 +250,138 @@ PlanResult MakePlan(const PlanInput& in) {
     }
     if (roadHalf > 0 && !r.roads.empty() && (!stripsUp.empty() || !stripsDown.empty()))
         r.crossings.push_back({ spineU, roadV });
+    // Connections: a footpath from every building's footpath entrance to the nearest footpath, and a driveway from
+    // the road connection of buildings that need vehicles to the nearest street. A search on a 2 m grid with a
+    // price on turns keeps the lines straight and out of the buildings.
+    {
+        const float cell = 2.0f, gu = minU - 12, gv = minV - 12;
+        const int W = (int)((maxU - minU + 24) / cell) + 1, H = (int)((maxV - minV + 24) / cell) + 1;
+        const size_t nBase = r.paths.size();
+        std::vector<unsigned char> block, goal, slow;
+        std::vector<float> dist; std::vector<int> parent, touched;
+        bool gridOk = (long long)W * H <= 1200000;
+        auto ci = [&](float u) { return std::clamp((int)floorf((u - gu) / cell), 0, W - 1); };
+        auto cj = [&](float v) { return std::clamp((int)floorf((v - gv) / cell), 0, H - 1); };
+        auto mark = [&](std::vector<unsigned char>& a, unsigned char bit, float u1, float v1, float u2, float v2) {
+            int i1 = ci(std::min(u1, u2)), i2 = ci(std::max(u1, u2)), j1 = cj(std::min(v1, v2)), j2 = cj(std::max(v1, v2));
+            for (int j = j1; j <= j2; ++j) for (int i = i1; i <= i2; ++i) a[(size_t)j * W + i] |= bit;
+        };
+        if (gridOk) {
+            block.assign((size_t)W * H, 0); goal = block; slow = block;
+            dist.assign((size_t)W * H * 4, 1e9f); parent.assign((size_t)W * H * 4, -1);
+            for (auto& b : r.buildings) {
+                mark(block, 1, b.u - b.w / 2 - 1, b.v - b.d / 2 - 1, b.u + b.w / 2 + 1, b.v + b.d / 2 + 1);
+                mark(block, 2, b.u - b.w / 2 - 3, b.v - b.d / 2 - 3, b.u + b.w / 2 + 3, b.v + b.d / 2 + 3);
+            }
+            for (auto& p : r.paths) { mark(goal, 1, p.u1, p.v1, p.u2, p.v2); mark(slow, 1, p.u1, p.v1, p.u2, p.v2); }
+            for (auto& rd : r.roads) {
+                mark(goal, 2, rd.u1, rd.v1, rd.u2, rd.v2);
+                mark(block, 1, rd.u1, rd.v1 - rd.width / 2 + 0.5f, rd.u2, rd.v1 + rd.width / 2 - 0.5f);    // nobody walks on the roadway
+            }
+        }
+        const int du[4] = { 1, 0, -1, 0 }, dv[4] = { 0, 1, 0, -1 };
+        // mode 0 = footpath, 1 = driveway; returns the price of the line, < 0 = no way
+        auto route = [&](V2 p, V2 n, int mode, const Placed& own, std::vector<V2>& out) {
+            const unsigned char bit = mode ? 2 : 1;
+            const float infl = (mode ? 3.0f : 1.0f) + cell;
+            int dir = fabsf(n.u) >= fabsf(n.v) ? (n.u > 0 ? 0 : 2) : (n.v > 0 ? 1 : 3);
+            V2 q = p; float walked = 0;         // straight out of the own building first
+            while (fabsf(q.u - own.u) < own.w / 2 + infl && fabsf(q.v - own.v) < own.d / 2 + infl) {
+                q.u += du[dir] * 1.0f; q.v += dv[dir] * 1.0f; walked += 1;
+                if (walked > 60) return -1.0f;
+            }
+            int si = ci(q.u), sj = cj(q.v);
+            if (block[(size_t)sj * W + si] & bit) return -1.0f;
+            typedef std::pair<float, int> QE;
+            std::priority_queue<QE, std::vector<QE>, std::greater<QE>> pq;
+            int start = (sj * W + si) * 4 + dir, found = -1, pops = 0;
+            dist[start] = 0; parent[start] = -1; touched.push_back(start); pq.push({ 0.0f, start });
+            while (!pq.empty() && pops++ < 40000) {
+                QE e = pq.top(); pq.pop();
+                if (e.first > dist[e.second]) continue;
+                int c = e.second / 4, d = e.second % 4, i = c % W, j = c / W;
+                if (goal[c] & bit) { found = e.second; break; }
+                if (e.first > 260) break;
+                for (int nd = 0; nd < 4; ++nd) {
+                    if (nd == (d + 2) % 4) continue;
+                    int ni = i + du[nd], nj = j + dv[nd];
+                    if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+                    int nc = nj * W + ni;
+                    if (block[nc] & bit) continue;
+                    float cost = e.first + 1 + (nd != d ? 6 : 0) + (mode && (slow[nc] & 1) ? 12 : 0);
+                    int ns = nc * 4 + nd;
+                    if (cost < dist[ns]) {
+                        if (dist[ns] > 1e8f) touched.push_back(ns);
+                        dist[ns] = cost; parent[ns] = e.second; pq.push({ cost, ns });
+                    }
+                }
+            }
+            float price = -1;
+            if (found >= 0) {
+                price = dist[found] + walked / cell;
+                std::vector<V2> cells;
+                for (int s = found; s >= 0; s = parent[s]) { int c = s / 4; cells.push_back({ gu + (c % W + 0.5f) * cell, gv + (c / W + 0.5f) * cell }); }
+                std::reverse(cells.begin(), cells.end());
+                std::vector<V2> corner;         // keep the corners only
+                for (size_t k = 0; k < cells.size(); ++k) {
+                    if (k > 0 && k + 1 < cells.size() &&
+                        ((cells[k - 1].u == cells[k].u && cells[k].u == cells[k + 1].u) || (cells[k - 1].v == cells[k].v && cells[k].v == cells[k + 1].v))) continue;
+                    corner.push_back(cells[k]);
+                }
+                // the first leg leaves the connection point exactly along its direction
+                bool alongU = dir == 0 || dir == 2;
+                if (alongU) corner[0].v = p.v; else corner[0].u = p.u;
+                if (corner.size() > 1 && (alongU ? corner[1].v == cells[0].v : corner[1].u == cells[0].u)) { if (alongU) corner[1].v = p.v; else corner[1].u = p.u; }
+                out.clear(); out.push_back(p);
+                for (auto& c : corner) out.push_back(c);
+                // the last leg ends exactly on the footpath / street it reached
+                V2& last = out.back(); const V2 prev = out[out.size() - 2];
+                float best = 1e9f; V2 hit = last; bool horiz = true;
+                auto consider = [&](float u1, float v1, float u2, float v2) {
+                    float cu = std::clamp(last.u, std::min(u1, u2), std::max(u1, u2)), cv = std::clamp(last.v, std::min(v1, v2), std::max(v1, v2));
+                    float dd = fabsf(cu - last.u) + fabsf(cv - last.v);
+                    if (dd < best) { best = dd; hit = { cu, cv }; horiz = fabsf(u2 - u1) >= fabsf(v2 - v1); }
+                };
+                if (mode) for (auto& rd : r.roads) consider(rd.u1, rd.v1, rd.u2, rd.v2);
+                else for (size_t k = 0; k < nBase; ++k) consider(r.paths[k].u1, r.paths[k].v1, r.paths[k].u2, r.paths[k].v2);
+                bool legVertical = fabsf(last.v - prev.v) >= fabsf(last.u - prev.u);
+                if (horiz && legVertical) last = { prev.u, hit.v };
+                else if (!horiz && !legVertical) last = { hit.u, prev.v };
+                else last = hit;
+            }
+            for (int s : touched) { dist[s] = 1e9f; parent[s] = -1; }
+            touched.clear();
+            return price;
+        };
+        std::vector<PathSeg> extra;
+        for (auto& b : r.buildings) {
+            const BuildingType& t = all[b.type];
+            for (int mode = 0; mode < 2; ++mode) {
+                if (mode == 1 && !t.needsRoad) continue;
+                bool has = false; float best = -1; std::vector<V2> line, bestLine;
+                int tried = 0;
+                for (auto& c : t.conns) {
+                    if (c.kind != mode) continue;
+                    has = true;
+                    if (!gridOk || (mode == 1 && r.roads.empty()) || tried++ >= 4) continue;
+                    V2 o = Turn(b.rot, c.x, c.z), n = Turn(b.rot, c.dx, c.dz);
+                    float price = route({ b.ou + o.u, b.ov + o.v }, n, mode, b, line);
+                    if (price >= 0 && (best < 0 || price < best)) { best = price; bestLine = line; }
+                }
+                if (!has) continue;
+                if (best < 0) { ++(mode ? r.noRoad : r.noPath); continue; }
+                (mode ? r.roadPts : r.pedPts).push_back(bestLine[0]);
+                for (size_t k = 0; k + 1 < bestLine.size(); ++k) {
+                    PathSeg sg{ bestLine[k].u, bestLine[k].v, bestLine[k + 1].u, bestLine[k + 1].v };
+                    if (fabsf(sg.u2 - sg.u1) + fabsf(sg.v2 - sg.v1) < 0.05f) continue;
+                    if (mode) r.drives.push_back(sg); else extra.push_back(sg);
+                }
+            }
+        }
+        r.paths.insert(r.paths.end(), extra.begin(), extra.end());
+    }
     for (auto& p : r.paths) r.pathLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
+    for (auto& p : r.drives) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
     for (auto& p : r.roads) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
 
     for (auto& b : r.buildings) {
