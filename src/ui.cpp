@@ -880,6 +880,11 @@ void TabUtils() {
                 ImGui::Text("Спрос района %.*f %s · самый загруженный узел %.0f %% (игра предупреждает с 90 %%, ёмкость узла %g)",
                             k == 3 ? 2 : 0, g_plan.utilDemand[k], kUtilUnit[k], g_plan.utilMaxLoad[k] * 100, cap);
                 if (g_plan.utilOverloaded[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Перегружено узлов: %d.", g_plan.utilOverloaded[k]);
+                if (k == 3) {   // what the district actually draws at night: services add the lighting half
+                    float night = 0;
+                    for (auto& b : g_plan.buildings) night += catalog::All()[b.type].powerNight;
+                    ImGui::TextDisabled("Ночью район берёт из сети до %.2f МВт (освещение служб); ёмкость узлов это не меняет — учитывайте для электростанции.", night);
+                }
             }
             if (g_plan.utilNoLine[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Не удалось проложить соединений: %d.", g_plan.utilNoLine[k]);
         }

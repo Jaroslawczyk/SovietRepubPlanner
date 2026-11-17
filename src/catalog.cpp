@@ -80,6 +80,9 @@ static void ComputeLoads(BuildingType& b) {
     // in the resource definitions 0x2a1d50, resource + transport code x 32 + 0xd8 / 0xdc): 0.05 MW for liquids (oil,
     // fuel, bitumen, liquid fertiliser - transport code 3) and for water / used water (codes 15, 16), 0 for the rest
     b.powerLoad += 0.05f * b.fuelStorages;
+    // night: the per-tick draw (0x1bca60, once per worker on site) adds 0.0005 x darkness x (lighting factor +
+    // able-to-serve x lighting able-to-serve factor) per worker; at full darkness that is the lighting half on top
+    b.powerNight = b.powerLoad + (c != "LIVING" && wp > 0 ? wp * 0.0005f * b.fLight + (b.serve > 0 ? wp * b.serve * 0.0005f * b.fLightServe : 0.0f) : 0.0f);
     // water (0x11a46b): living = residents x 0.045; with workers = (workers + professors) x 0.02 x water factor, plus
     // workers x able-to-serve x 0.045 for hotels, orphanages and prisons; sewage the same amount (0x11a725)
     if (c == "LIVING") b.waterLoad = b.capacity * 0.045f;
@@ -93,7 +96,8 @@ static void ComputeLoads(BuildingType& b) {
     if (b.noSewage) b.sewageLoad = 0;
     if (b.engineSpeed > 0) b.powerLoad += b.engineSpeed * 0.01f;      // pumps (0x11a1db)
     if (c != "SUBSTATION" && c != "TRANSFORMATOR" && c != "RAIL_TRAFO" && (b.powerLoad > 0 || c == "LIVING" || wp > 0)) b.powerLoad = std::max(0.05f, b.powerLoad);
-    if (b.noPower) b.powerLoad = 0;
+    if (b.noPower) b.powerLoad = b.powerNight = 0;
+    if (b.powerNight < b.powerLoad) b.powerNight = b.powerLoad;
 }
 
 void Load() {

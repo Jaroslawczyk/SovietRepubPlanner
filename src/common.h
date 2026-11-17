@@ -90,6 +90,7 @@ struct BuildingType {
     float sewageLoad = 0;   // the same for sewage
     float heatLoad = 0;     // hot-water tank units the building asks for (game value; 50 residents = 35)
     float powerLoad = 0;    // MW the building asks for
+    float powerNight = 0;   // MW drawn at full darkness with every worker present (adds the lighting half, 0x1bca60)
     float heatCap = 0;      // heat exchanger / heat pumping station: what it can serve (1000, big 3000)
     float powerCap = 0;     // substation 2.5, transformer 19, rail trafo 14 MW
 };
