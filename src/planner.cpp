@@ -1098,6 +1098,31 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         }
     }
     for (size_t k = 0; k < r.paths.size(); ++k) if (r.pathBuild[k]) r.pathLength += fabsf(r.paths[k].u2 - r.paths[k].u1) + fabsf(r.paths[k].v2 - r.paths[k].v1);
+    // streets go round steep ground: a street stops where the slope along it exceeds 15 % over 10 m (the game refuses
+    // roads there, levelling helps only part of the way, see docs/internals.md)
+    if (in.height && !r.roads.empty()) {
+        std::vector<RoadSeg> keep;
+        for (auto& s : r.roads) {
+            float du = s.u2 - s.u1, dv = s.v2 - s.v1, len = sqrtf(du * du + dv * dv);
+            int n = std::max(1, (int)(len / 5));
+            std::vector<char> bad(n, 0);
+            for (int k = 0; k < n; ++k) {           // step k covers [k, k+1] / n; judged over 10 m around it
+                float t0 = std::max(0.0f, (k - 0.5f) / n), t1 = std::min(1.0f, (k + 1.5f) / n);
+                float h0 = in.height(s.u1 + du * t0, s.v1 + dv * t0), h1 = in.height(s.u1 + du * t1, s.v1 + dv * t1);
+                if (fabsf(h1 - h0) > 0.15f * std::max(1.0f, (t1 - t0) * len)) bad[k] = 1;
+            }
+            int k = 0;
+            while (k < n) {
+                if (bad[k]) { r.steepCut += len / n; ++k; continue; }
+                int e = k; while (e < n && !bad[e]) ++e;
+                float ta = (float)k / n, tb = (float)e / n;
+                if ((tb - ta) * len >= 12) keep.push_back({ s.u1 + du * ta, s.v1 + dv * ta, s.u1 + du * tb, s.v1 + dv * tb, s.width });
+                else r.steepCut += (tb - ta) * len;
+                k = e;
+            }
+        }
+        r.roads = keep;
+    }
     // roads already in the game: do not lay a plan piece over one, and tie loose street ends to the nearest one
     if (!in.extRoads.empty() && !r.roads.empty()) {
         auto segDist = [](float pu, float pv, float au, float av, float bu, float bv, float& qu, float& qv) {

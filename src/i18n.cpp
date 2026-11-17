@@ -225,6 +225,7 @@ static const char* const kPairs[][2] = {
     { "Улицы плана идут вдоль дорог, которые уже есть в игре, главная улица ложится на самую длинную из них.", "Plan streets follow roads already in the game, the main street lies on the longest of them." },
     { "по %d отрезкам дорог", "by %d road pieces" },
     { "дорог игры рядом нет", "no game roads nearby" },
+    { "Улицы обходят крутые места (> 15 %%): не проложено %.0f м.", "Streets go round steep spots (> 15 %%): %.0f m left out." },
     { "не изучено", "not researched" },
 };
 const char* T(const char* ru) {

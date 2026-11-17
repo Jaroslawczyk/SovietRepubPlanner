@@ -343,7 +343,7 @@ void Regenerate() {
         if (lastN != in.extPorts.size()) { lastN = in.extPorts.size(); Log("plan: %d standing buildings, %d of their ports can feed the district", (int)world.size(), (int)lastN); }
     }
     g_plan = MakePlan(in);
-    Log("plan: %d game roads, %d game footpaths seen; %d street ends joined, %d plan pieces dropped", (int)in.extRoads.size(), (int)g_extPaths.size(), g_plan.joinedRoads, g_plan.droppedRoads);
+    Log("plan: %d game roads, %d game footpaths seen; %d street ends joined, %d plan pieces dropped, %.0f m of street left out on steep ground", (int)in.extRoads.size(), (int)g_extPaths.size(), g_plan.joinedRoads, g_plan.droppedRoads, g_plan.steepCut);
     {   // air pollution over the district: the worst cell of the game's 200 m grid under the outline
         g_polA = g_polB = 0; g_polOk = false;
         static bool gridLogged = false; if (!gridLogged) { gridLogged = true; eng::LogPollutionGrid(); }
@@ -1527,6 +1527,7 @@ void Footer() {
         }
         if (g_plan.unplaced > 0) ImGui::TextColored(red, T("Вмещается около %d жит., не влезло зданий: %d — нужен участок больше."), g_plan.capacity, g_plan.unplaced);
         else if (g_plan.steepSkipped > 0 || g_plan.busySkipped > 0) ImGui::TextDisabled(T("Обойдено: крутые места %d раз, существующая застройка %d раз."), g_plan.steepSkipped, g_plan.busySkipped);
+        if (g_plan.steepCut > 0) ImGui::TextDisabled(T("Улицы обходят крутые места (> 15 %%): не проложено %.0f м."), g_plan.steepCut);
         if (g_plan.joinedRoads || g_plan.droppedRoads) ImGui::TextDisabled(T("Дороги игры: %d концов улиц подведено к ним, %d отрезков плана уже построено."), g_plan.joinedRoads, g_plan.droppedRoads);
     }
     if (g_polOk) {
