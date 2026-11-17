@@ -64,6 +64,7 @@ int   g_population = 1000;
 float g_gap = 8.0f;
 int   g_density = 90;               // 0..100: gaps between buildings and rows
 std::vector<std::vector<V2>> g_extPaths, g_extRoadsL;   // footpaths / roads already in the game (local frame)   // footpaths already in the game (local frame)
+bool  g_cutAtTrails = false;       // cut streets at game trails they cross (tested v0.38.0: does not help, the game still refuses)
 bool  g_autoHouse = true;          // the house ticked by default; the first manual tick replaces it
 bool  g_fillAll = true;    // no empty corners: houses until nothing fits
 int   g_roadType = 1;
@@ -1026,7 +1027,26 @@ void InstantStart() {
         if (eng::Occupied(w.x, w.z) & 1) continue;      // already there
         g_inst.jobs.push_back(InstantBuilding(b)); g_inst.plan.push_back((int)i);
     }
-    for (int k = 0; k < nStreets; ++k) InstantLine(1, g_roadKind, rd[k].u1, rd[k].v1, rd[k].u2, rd[k].v2);
+    // a street is cut where it crosses a trail / footpath of the game, so each crossing becomes a joint of two pieces
+    // (whole pieces across trails were refused, v0.38.0 test)
+    for (int k = 0; k < nStreets; ++k) {
+        const PathSeg& sg = rd[k];
+        float du = sg.u2 - sg.u1, dv = sg.v2 - sg.v1, len = sqrtf(du * du + dv * dv);
+        std::vector<float> ts{ 0.0f, 1.0f };
+        if (g_cutAtTrails) for (auto& L : g_extPaths) for (size_t q = 0; q + 1 < L.size(); ++q) {
+            const V2 &c = L[q], &d = L[q + 1];
+            float r2u = d.u - c.u, r2v = d.v - c.v, den = du * r2v - dv * r2u;
+            if (fabsf(den) < 1e-6f) continue;
+            float t = ((c.u - sg.u1) * r2v - (c.v - sg.v1) * r2u) / den, w = ((c.u - sg.u1) * dv - (c.v - sg.v1) * du) / den;
+            if (t > 0 && t < 1 && w >= 0 && w <= 1) ts.push_back(t);
+        }
+        std::sort(ts.begin(), ts.end());
+        std::vector<float> cut{ 0.0f };          // drop cuts closer than 12 m to the previous one (the game refuses short roads)
+        for (size_t q = 1; q + 1 < ts.size(); ++q) if ((ts[q] - cut.back()) * len >= 12 && (1 - ts[q]) * len >= 12) cut.push_back(ts[q]);
+        cut.push_back(1.0f);
+        for (size_t q = 0; q + 1 < cut.size(); ++q)
+            InstantLine(1, g_roadKind, sg.u1 + du * cut[q], sg.v1 + dv * cut[q], sg.u1 + du * cut[q + 1], sg.v1 + dv * cut[q + 1]);
+    }
     for (auto& pc : roadPieces) if (pc.second >= nStreets) InstantLine(1, g_roadKind, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
     // footpaths: the lines that run along a street at the pavement distance are the street's own pavements when the
     // street has them; the rest is built
@@ -1234,7 +1254,49 @@ void InstantTick() {
                     catalog::All()[b.type].id.c_str(), game, plan, drive);
             }
             else if (r.phase == 1 && codes[i] == 10) r.retry.push_back(r.plan[i]);
-        } else if (j.kind == 1) { ++r.rAll; if (codes[i] == 1) { ++r.rOk; r.built.push_back(j); } }
+        } else if (j.kind == 1) {
+            ++r.rAll;
+            if (codes[i] == 1) { ++r.rOk; r.built.push_back(j); }
+            else {      // refused street: what does it cross?
+                V2 a1 = WorldToLocal(g_area, j.a), b1 = WorldToLocal(g_area, j.b);
+                auto cross = [&](const std::vector<std::vector<V2>>& set, float& minAng, float& minEnd) {
+                    int n = 0;
+                    for (auto& L : set) for (size_t k = 0; k + 1 < L.size(); ++k) {
+                        const V2 &c = L[k], &d = L[k + 1];
+                        float r1u = b1.u - a1.u, r1v = b1.v - a1.v, r2u = d.u - c.u, r2v = d.v - c.v;
+                        float den = r1u * r2v - r1v * r2u;
+                        if (fabsf(den) < 1e-6f) continue;
+                        float t = ((c.u - a1.u) * r2v - (c.v - a1.v) * r2u) / den, q = ((c.u - a1.u) * r1v - (c.v - a1.v) * r1u) / den;
+                        if (t < 0 || t > 1 || q < 0 || q > 1) continue;
+                        ++n;
+                        float l1 = sqrtf(r1u * r1u + r1v * r1v), l2 = sqrtf(r2u * r2u + r2v * r2v);
+                        minAng = std::min(minAng, acosf(std::min(1.0f, fabsf(r1u * r2u + r1v * r2v) / (l1 * l2))) * 57.3f);
+                        minEnd = std::min(minEnd, std::min(t, 1 - t) * l1);
+                    }
+                    return n;
+                };
+                float aP = 99, eP = 1e9f, aR = 99, eR = 1e9f;
+                int nP = cross(g_extPaths, aP, eP), nR = cross(g_extRoadsL, aR, eR);
+                float grade = 0, side = 0;     // steepest 5 m step along the piece and across it
+                float len = sqrtf((j.b.x - j.a.x) * (j.b.x - j.a.x) + (j.b.z - j.a.z) * (j.b.z - j.a.z));
+                float tx = (j.b.x - j.a.x) / std::max(1.0f, len), tz = (j.b.z - j.a.z) / std::max(1.0f, len);
+                for (float d = 0; d + 5 <= len; d += 5) {
+                    float x = j.a.x + tx * d, z = j.a.z + tz * d;
+                    grade = std::max(grade, fabsf(eng::TerrainHeight(x + tx * 5, z + tz * 5) - eng::TerrainHeight(x, z)) / 5);
+                    side = std::max(side, fabsf(eng::TerrainHeight(x - tz * 5, z + tx * 5) - eng::TerrainHeight(x + tz * 5, z - tx * 5)) / 10);
+                }
+                Log("street refused %.0f %.0f -> %.0f %.0f (%.0f m): crosses %d trails (min angle %.0f, nearest to an end %.1f m), %d game roads (angle %.0f, %.1f m), grade %.0f %%, cross slope %.0f %%",
+                    j.a.x, j.a.z, j.b.x, j.b.z, len, nP, aP, eP, nR, aR, eR, grade * 100, side * 100);
+            }
+            if (codes[i] == 1) {
+                float len = sqrtf((j.b.x - j.a.x) * (j.b.x - j.a.x) + (j.b.z - j.a.z) * (j.b.z - j.a.z)), grade = 0;
+                for (float d = 0; d + 5 <= len; d += 5) {
+                    float x = j.a.x + (j.b.x - j.a.x) * d / len, z = j.a.z + (j.b.z - j.a.z) * d / len;
+                    grade = std::max(grade, fabsf(eng::TerrainHeight(x + (j.b.x - j.a.x) * 5 / len, z + (j.b.z - j.a.z) * 5 / len) - eng::TerrainHeight(x, z)) / 5);
+                }
+                Log("street built (%.0f m), grade %.0f %%", len, grade * 100);
+            }
+        }
         else if (j.kind == 3) { if (r.phase == 1) ++r.nAll; if (codes[i] == 1) ++r.nOk; else if (r.phase == 1) failedLines.push_back(j); }
         else { ++r.pAll; if (codes[i] == 1) { ++r.pOk; r.built.push_back(j); } }
     }
