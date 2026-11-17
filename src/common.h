@@ -27,6 +27,12 @@ namespace eng {
     int  LevelPending();                            // points still being levelled, 0 = idle
     int  Occupied(float x, float z);                // 1 = an existing building here, 2 = an existing engine path
     bool OccupancyReady();
+    bool CursorActive();                            // the player has a building selected in the game's build menu
+    std::string CursorTypeName();                   // engine identifier of that building type
+    void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh);
+    void StopAutoBuild();
+    bool AutoBuildActive();
+    void AutoBuildStats(int& done, int& failed, int& left);
     void BeginFrame();                              // refresh cached matrices
     extern bool g_blockMouseButtons;                // game sees no mouse buttons
     extern bool g_blockMouseMove;                   // game sees no wheel / relative motion

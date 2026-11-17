@@ -5,6 +5,8 @@
 #include <cfloat>
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
+#include <cctype>
 
 namespace {
 
@@ -52,6 +54,7 @@ float g_utilRadius[4] = { 200, 200, 250, 150 };
 float g_utilNorm[4] = { 0.12f, 0.12f, 0.9f, 0.25f };   // per resident; rough guesses, editable in the panel
 std::vector<std::vector<V3>> g_utilLines[4];
 std::vector<V3> g_utilPts[4];
+float g_buildRotSign = 1.0f;       // sign between the plan angle and the game cursor rotation
 float g_streetGap = 250.0f;        // parallel streets every N metres, 0 = off
 bool  g_showSlope = true, g_showLevel = false;
 bool  g_dirty = true, g_areaChanged = false, g_inited = false;
@@ -640,9 +643,47 @@ void Footer() {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("Землю под зданиями плана сразу ставит на высоту площадок. "
                           "Бесплатно, без техники; отменить нельзя — сохранитесь заранее.");
-    ImGui::BeginDisabled(true);
-    ImGui::Button("Построить в игре (в разработке)", ImVec2(-FLT_MIN, 0));
-    ImGui::EndDisabled();
+    // Building in the game: the player selects the same building in the game's own build menu and turns it the
+    // way the plan shows; the mod then drives the game's cursor to every spot of the plan and clicks.
+    if (eng::AutoBuildActive()) {
+        int done, failed, left; eng::AutoBuildStats(done, failed, left);
+        char b[128]; snprintf(b, sizeof(b), "Стоп  ·  поставлено %d, не вышло %d, осталось %d", done, failed, left);
+        if (ImGui::Button(b, ImVec2(-FLT_MIN, 0))) eng::StopAutoBuild();
+    } else if (!g_plan.buildings.empty()) {
+        const auto& all = catalog::All();
+        static int sel = -1;
+        std::vector<int> types;
+        for (auto& b : g_plan.buildings) if (std::find(types.begin(), types.end(), b.type) == types.end()) types.push_back(b.type);
+        if (std::find(types.begin(), types.end(), sel) == types.end()) sel = types[0];
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.48f);
+        if (ImGui::BeginCombo("##abtype", all[sel].name.c_str())) {
+            for (int t : types) {
+                char label[200]; snprintf(label, sizeof(label), "%s##ab%d", all[t].name.c_str(), t);
+                if (ImGui::Selectable(label, t == sel)) sel = t;
+            }
+            ImGui::EndCombo();
+        }
+        std::vector<V3> pos; std::vector<float> rot;
+        for (auto& b : g_plan.buildings) {
+            if (b.type != sel) continue;
+            V3 w = LocalToWorld(g_area, b.u, b.v, 0);
+            if (eng::Occupied(w.x, w.z) & 1) continue;                  // already built
+            pos.push_back(w); rot.push_back(0);
+        }
+        ImGui::SameLine();
+        char b[160];
+        if (pos.empty()) snprintf(b, sizeof(b), "Все уже стоят");
+        else snprintf(b, sizeof(b), "Поставить в игре — %d шт.", (int)pos.size());
+        ImGui::BeginDisabled(pos.empty());
+        if (ImGui::Button(b, ImVec2(-FLT_MIN, 0))) { ImVec2 ds = ImGui::GetIO().DisplaySize; eng::StartAutoBuild(pos, rot, ds.x, ds.y); }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("1. В игровом меню строительства выберите это же здание.\n"
+                              "2. Поверните его (колесо мыши, R) так, как стоят здания на плане.\n"
+                              "3. Поставьте камеру так, чтобы весь участок был на экране, и не двигайте её.\n"
+                              "Мод сам наведёт игровой курсор и кликнет в каждом месте плана; платит игра как обычно.\n"
+                              "На неровном месте мод удерживает кнопку, чтобы игра выровняла площадку, и пробует ещё раз.");
+    }
 }
 
 void Panel() {
@@ -733,6 +774,18 @@ int g_selfTest = 0;
 void SelfTest() {
     static int tick = 0;
     if (++tick % 120 != 0 || !eng::Ready()) return;
+    std::wstring abFlag = GameDir() + L"DistrictPlanner.autobuild";    // debug: place the selected game building on the first plan spots
+    if (GetFileAttributesW(abFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(abFlag.c_str());
+        std::vector<V3> pos; std::vector<float> rot;
+        for (size_t i = 0; i < g_plan.buildings.size() && pos.size() < 3; i += 4) {
+            const Placed& b = g_plan.buildings[i];
+            pos.push_back(LocalToWorld(g_area, b.u, b.v, 0));
+            rot.push_back(g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + (b.rotated ? kPi / 2 : 0)));
+        }
+        Log("autobuild test: cursor active %d, type '%s', %d targets", (int)eng::CursorActive(), eng::CursorTypeName().c_str(), (int)pos.size());
+        if (!pos.empty()) { ImVec2 d = ImGui::GetIO().DisplaySize; eng::StartAutoBuild(pos, rot, d.x, d.y); }
+    }
     std::wstring flag = GameDir() + L"DistrictPlanner.selftest";
     if (GetFileAttributesW(flag.c_str()) == INVALID_FILE_ATTRIBUTES) return;
     DeleteFileW(flag.c_str());

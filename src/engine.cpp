@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <map>
 #include <atomic>
 
@@ -48,10 +49,35 @@ static bool h_TerrRay(void* self, V3* a, V3* b, V3* out, bool f1, bool f2, float
     if (g_terrain != self) { Log("terrain = %p (ray)", self); g_terrain = self; }
     return o_TerrRay(self, a, b, out, f1, f2, f);
 }
-#define MB_HOOK(name, orig) static bool name(void* s) { return g_blockMouseButtons ? false : orig(s); }
-MB_HOOK(h_LPress, o_LPress)
-static bool h_LDown(void* s) { static DWORD t = 0; if (t != GetCurrentThreadId()) { t = GetCurrentThreadId(); Log("input polled on thread %lu", t); } return g_blockMouseButtons ? false : o_LDown(s); }   // polled every frame
- MB_HOOK(h_LPressA, o_LPressA)
+// ---- auto-build through the game's own construction tool ----
+// While the player has a building selected in the game's build menu, the game reports its cursor every frame
+// (EditorSetCursorSingle: type, position, rotation). The mod then feeds the game a fake mouse position, a fake
+// rotation-wheel value and a fake click, so the game itself places the building (and charges for it) exactly as
+// if the player had clicked there.
+struct AutoJob { V3 pos; float rot; };
+static std::mutex g_abMx;
+static std::vector<AutoJob> g_abJobs;
+static std::atomic<bool> g_abActive{ false };
+static std::atomic<int> g_abDone{ 0 }, g_abFailed{ 0 }, g_abLeft{ 0 };
+static size_t g_abIdx = 0;
+static int g_abPhase = 0, g_abTicks = 0, g_abStable = 0, g_abRotTries = 0;
+static V3 g_abAim{};
+static float g_abSpoofX = 0, g_abSpoofY = 0, g_abAxis = 0, g_abRadPerNotch = 0, g_abRotBefore = 0;
+static bool g_abClick = false, g_abAxisSent = false;
+static float g_abLastNotches = 0;
+static void* g_bld = nullptr; static void* g_path = nullptr;
+int Occupied(float x, float z);
+bool WorldToScreen(const V3& w, float sw, float sh, float& sx, float& sy);
+float TerrainHeight(float x, float z);
+static std::atomic<DWORD> g_curTick{ 0 };
+static int g_curType = -1; static V3 g_curPos{}; static float g_curRot = 0;
+static float g_abW = 1920, g_abH = 1080;
+static std::atomic<int> g_dbgSet{ 0 }, g_dbgClear{ 0 }, g_dbgPoll{ 0 };
+
+#define MB_HOOK(name, orig) static bool name(void* s) { if (g_abActive) return false; return g_blockMouseButtons ? false : orig(s); }
+static bool h_LPress(void* s) { if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LPress(s); }
+static bool h_LDown(void* s) { static DWORD t = 0; if (t != GetCurrentThreadId()) { t = GetCurrentThreadId(); Log("input polled on thread %lu", t); } if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LDown(s); }   // polled every frame
+static bool h_LPressA(void* s) { if (g_abActive) return g_abClick; return g_blockMouseButtons ? false : o_LPressA(s); }
 MB_HOOK(h_RPress, o_RPress) MB_HOOK(h_RDown, o_RDown) MB_HOOK(h_RPressA, o_RPressA)
 MB_HOOK(h_MDown, o_MDown)
 static bool h_KeyDown(void* s, int k)  { return g_blockKeys ? false : o_KeyDown(s, k); }
@@ -66,15 +92,24 @@ static V3* h_MouseRel(void* s, V3* out) {
 // buttons and tooltips underneath do not react.
 static V3* h_MouseSolid(void* s, V3* out) {
     V3* r = o_MouseSolid(s, out);
-    if (g_hideMouse && r) { r->x = -10000; r->y = -10000; }
+    { static DWORD last = 0; static int n = 0; DWORD now = GetTickCount();
+      if (r && n < 40 && now - last > 1500) { ++n; last = now; POINT pt; GetCursorPos(&pt); Log("MOUSESOLID %.2f %.2f %.2f | screen cursor %ld %ld", r->x, r->y, r->z, pt.x, pt.y); } }
+    if (g_abActive && r) { r->x = g_abSpoofX; r->y = g_abSpoofY; }
     return r;
 }
 static V3* h_MouseSolidInv(void* s, V3* out) {
     V3* r = o_MouseSolidInv(s, out);
-    if (g_hideMouse && r) { r->x = -10000; r->y = -10000; }
+    if (g_abActive && r) { r->x = g_abSpoofX; r->y = g_abSpoofY; }
     return r;
 }
 static float h_AxisValue(void* s, char* name, int* a, float b, float c) {
+    { static std::vector<std::string> seen; static std::mutex mx; std::lock_guard<std::mutex> l(mx);
+      bool known = false; for (auto& k : seen) if (name && k == name) known = true;
+      if (name && !known && seen.size() < 80) { seen.push_back(name); float v = o_AxisValue(s, name, a, b, c); Log("AXIS '%s' a=%d b=%.3f c=%.3f -> %.3f", name, a ? *a : -999, b, c, v); } }
+    { float v = o_AxisValue(s, name, a, b, c); static int n = 0; if (v != 0 && n < 40 && name) { ++n; Log("AXISVAL '%s' = %.4f", name, v); } }
+    if (g_abActive) {
+        return 0.0f;                         // no zoom / camera motion while the mod is placing buildings
+    }
     return g_blockMouseMove ? 0.0f : o_AxisValue(s, name, a, b, c);   // camera zoom / rotation axes
 }
 
@@ -88,11 +123,58 @@ static void h_EditToHeight(void* s, V3* a, V3* b, float f1, float f2, float f3, 
     if (n < 40) { ++n; Log("EditToHeight this=%p a=(%.1f %.1f %.1f) b=(%.1f %.1f %.1f) f=%.3f %.3f %.3f flag=%d", s, a->x, a->y, a->z, b->x, b->y, b->z, f1, f2, f3, (int)flag); }
     o_EditToHeight(s, a, b, f1, f2, f3, flag);
 }
+static float WrapPi(float a) { while (a > 3.14159265f) a -= 6.2831853f; while (a < -3.14159265f) a += 6.2831853f; return a; }
+static void AutoNext(bool ok) {
+    if (ok) ++g_abDone; else ++g_abFailed;
+    ++g_abIdx; g_abPhase = 0; g_abTicks = 0; g_abStable = 0; g_abRotTries = 0; g_abAxis = 0; g_abClick = false;
+    g_abLeft = (int)(g_abJobs.size() - g_abIdx);
+    if (g_abIdx >= g_abJobs.size()) { g_abActive = false; Log("autobuild: finished, placed %d, failed %d", (int)g_abDone, (int)g_abFailed); }
+    else g_abAim = g_abJobs[g_abIdx].pos;
+}
+// One step per rendered frame. The game does not report where its building cursor is, so the mod simply puts
+// the fake mouse on the screen point of the target, clicks, and then checks whether a building appeared there.
+// If nothing appeared, the left button is held for a while (the game then levels the site itself) and the
+// click is repeated once.
+static void AutoTick() {
+    std::lock_guard<std::mutex> l(g_abMx);
+    if (!g_abActive || g_abIdx >= g_abJobs.size()) return;
+    const AutoJob& job = g_abJobs[g_abIdx];
+    ++g_abTicks;
+    float sx, sy;
+    if (!WorldToScreen({ job.pos.x, TerrainHeight(job.pos.x, job.pos.z), job.pos.z }, g_abW, g_abH, sx, sy) ||
+        sx < 60 || sy < 70 || sx > g_abW - 60 || sy > g_abH - 190) {
+        Log("autobuild: target %d is off screen or under the game HUD, skipped", (int)g_abIdx); AutoNext(false); return;
+    }
+    g_abSpoofX = sx; g_abSpoofY = sy;
+    switch (g_abPhase) {
+    case 0:                                  // aim: let the game move its cursor to the spot
+        g_abClick = false;
+        if (g_abTicks >= 25) { g_abPhase = 1; g_abTicks = 0; g_abClick = true; }
+        break;
+    case 1:                                  // click
+        if (g_abTicks >= 3) { g_abClick = false; g_abPhase = 2; g_abTicks = 0; }
+        break;
+    case 2:                                  // did a building appear?
+        if (g_abTicks >= 25) {
+            bool ok = (Occupied(job.pos.x, job.pos.z) & 1) != 0;
+            Log("autobuild: target %d at (%.0f %.0f), screen (%.0f %.0f), try %d -> %s", (int)g_abIdx, job.pos.x, job.pos.z, sx, sy, g_abRotTries, ok ? "placed" : "not placed");
+            if (ok) AutoNext(true);
+            else if (g_abRotTries++ == 0) { g_abPhase = 3; g_abTicks = 0; g_abClick = true; }
+            else AutoNext(false);
+        }
+        break;
+    case 3:                                  // hold the button: the game levels the ground under the cursor
+        if (g_abTicks >= 240) { g_abClick = false; g_abPhase = 0; g_abTicks = 0; }
+        break;
+    }
+}
 static void h_SetCursorSingle(void* s, int type, V3* pos, float rot, bool b1, float f2, bool b2) {
-    static int n = 0, lastType = -1;
-    if (n < 40 && type != lastType) { ++n; lastType = type; Log("EditorSetCursorSingle this=%p type=%d pos=(%.1f %.1f %.1f) rot=%.3f b=%d f=%.3f b=%d", s, type, pos->x, pos->y, pos->z, rot, (int)b1, f2, (int)b2); }
+    g_curType = type; g_curPos = *pos; g_curRot = rot; g_curTick = GetTickCount(); ++g_dbgSet;
+    if (g_bld != s) g_bld = s;
     o_SetCursorSingle(s, type, pos, rot, b1, f2, b2);
 }
+static BldVoid_t o_ClearCursor;
+static void h_ClearCursor(void* s) { ++g_dbgClear; o_ClearCursor(s); }
 static void h_AddCursor(void* s) {
     static int n = 0;
     if (n < 40) { ++n; Log("AddCursorBuildings this=%p", s); }
@@ -227,7 +309,6 @@ void LevelTick() {
 // ---- existing buildings / paths ----
 // The game keeps its buildings in the engine's C3D_BUILDING manager and asks it for 2D bounding-box hits itself,
 // so the same query tells the planner where something already stands.
-static void* g_bld = nullptr; static void* g_path = nullptr;
 static BldVoid_t o_BldRenderSel;
 typedef void (*PathRefresh_t)(void*, void*, void*, unsigned, float, float);
 static PathRefresh_t o_PathRefresh;
@@ -250,6 +331,32 @@ int Occupied(float x, float z) {
 }
 bool OccupancyReady() { return g_bld != nullptr; }
 
+bool CursorActive() { return GetTickCount() - g_curTick < 400; }
+std::string CursorTypeName() {
+    typedef char* (*TypeName_t)(void*, int);
+    static TypeName_t f;
+    if (!f) f = (TypeName_t)GetProcAddress(GetModuleHandleW(L"C3DDLL64.dll"), "?EditorGetTypeIndexIdentifier@C3D_BUILDING@@QEAAPEADH@Z");
+    if (!f || !g_bld || !CursorActive() || g_curType < 0) return {};
+    char* n = f(g_bld, g_curType);
+    return n ? std::string(n) : std::string();
+}
+void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh) {
+    std::lock_guard<std::mutex> l(g_abMx);
+    g_abJobs.clear();
+    for (size_t i = 0; i < pos.size(); ++i) g_abJobs.push_back({ pos[i], rot[i] });
+    g_abIdx = 0; g_abPhase = 0; g_abTicks = 0; g_abStable = 0; g_abRotTries = 0; g_abAxis = 0; g_abClick = false;
+    g_abDone = 0; g_abFailed = 0; g_abLeft = (int)g_abJobs.size(); g_abW = sw; g_abH = sh;
+    if (g_abJobs.empty()) return;
+    g_abAim = g_abJobs[0].pos;
+    Log("autobuild: %d targets, cursor type %d '%s'", (int)g_abJobs.size(), g_curType, CursorTypeName().c_str());
+    g_abActive = true;
+}
+void StopAutoBuild() { g_abActive = false; g_abClick = false; g_abAxis = 0; }
+bool AutoBuildActive() {
+    return g_abActive;
+}
+void AutoBuildStats(int& done, int& failed, int& left) { done = g_abDone; failed = g_abFailed; left = g_abLeft; }
+
 struct IatHook { const char* name; void* hook; void** orig; };
 static IatHook g_hooks[] = {
     { "?ViewSetPosition@C3D_CAMERA@@QEAAXVC3DVECTOR3@@@Z", h_ViewSetPosition, (void**)&o_ViewSetPosition },
@@ -270,6 +377,7 @@ static IatHook g_hooks[] = {
     { "?EditToHeight@C3D_TERRAIN@@QEAAXVC3DVECTOR3@@0MMM_N@Z", h_EditToHeight, (void**)&o_EditToHeight },
     { "?EditorSetCursorSingle@C3D_BUILDING@@QEAAXHVC3DVECTOR3@@M_NM1@Z", h_SetCursorSingle, (void**)&o_SetCursorSingle },
     { "?AddCursorBuildings@C3D_BUILDING@@QEAAXXZ", h_AddCursor, (void**)&o_AddCursor },
+    { "?EditorClearCursor@C3D_BUILDING@@QEAAXXZ", h_ClearCursor, (void**)&o_ClearCursor },
     { "?EditLevel@C3D_TERRAIN@@QEAAXVC3DVECTOR3@@MMM_N@Z", h_EdLevel, (void**)&o_EdLevel },
     { "?EditSmooth@C3D_TERRAIN@@QEAAXVC3DVECTOR3@@MMM_N@Z", h_EdSmooth, (void**)&o_EdSmooth },
     { "?EditRaiseLower@C3D_TERRAIN@@QEAAXVC3DVECTOR3@@MMMM_N@Z", h_EdRL, (void**)&o_EdRL },
@@ -339,6 +447,10 @@ static bool Invert(const M4& in, M4& out) {
 }
 
 void BeginFrame() {
+    if (g_abActive) AutoTick();
+    { static DWORD last = 0; static int n = 0; DWORD now = GetTickCount();
+      if (now - last > 3000 && n < 60) { last = now; int a = g_dbgSet.exchange(0), b = g_dbgClear.exchange(0);
+        if (a || b) { ++n; Log("cursor calls in 3 s: set %d, clear %d, type %d, rot %.3f", a, b, g_curType, g_curRot); } } }
     g_matOk = false;
     if (!g_camera) return;
     if (!f_ViewGetMatrix) {
