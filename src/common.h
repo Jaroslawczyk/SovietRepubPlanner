@@ -34,6 +34,14 @@ namespace eng {
     void StartAutoBuild(const std::vector<V3>& pos, const std::vector<float>& rot, float sw, float sh);
     // line script with the real mouse: action 0 = move only, 3 = left button held for the step (drag)
     void StartScript(const std::vector<V3>& pos, const std::vector<int>& action, const std::vector<int>& frames, float sw, float sh);
+    bool InstantSupported();                        // direct build calls exist for this game build
+    // one direct call into the game: kind 0 = building "type" at a turned by rot, 1 = road a->b, 2 = footpath a->b
+    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; };
+    void QueueInstant(const std::vector<InstantJob>& jobs);
+    bool InstantBusy();
+    void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed
+    void DebugDumpTools();
+    void InstallPathLogging();
     void StopAutoBuild();
     bool ScriptActive();                            // a line script is driving the real mouse
     bool AutoBuildActive();
@@ -83,6 +91,7 @@ struct PlanInput {
     int   population = 1000;
     float gap = 8.0f;
     std::vector<int> houseTypes;                    // catalog indices
+    std::vector<float> houseWeights;                // share of each type among the houses (any scale); empty = equal
     std::vector<ServiceRule>* services = nullptr;
     int   roadType = 1;                             // 0 none, 1 street, 2 avenue
     float roadV = 0;                                // where the street crosses the district

@@ -77,9 +77,21 @@ PlanResult MakePlan(const PlanInput& in) {
         for (int i = 0; i < std::max(1, n); ++i) items.push_back(MakeItem(s.typeIndex));
     }
     int cap = 0;
+    // houses in the requested proportion: each time take the type that is furthest behind its share
+    std::vector<int> made(in.houseTypes.size(), 0);
+    std::vector<float> share(in.houseTypes.size(), 1.0f);
+    float wsum = 0;
+    for (size_t k = 0; k < share.size(); ++k) { if (k < in.houseWeights.size()) share[k] = std::max(0.0f, in.houseWeights[k]); wsum += share[k]; }
+    for (auto& w : share) w = wsum > 0 ? w / wsum : 1.0f / share.size();
     for (size_t i = 0; cap < in.population && i < 5000; ++i) {
-        int t = in.houseTypes[i % in.houseTypes.size()];
-        if (all[t].capacity <= 0) { if (i > in.houseTypes.size() * 2 && cap == 0) break; continue; }
+        int pick = -1; float bestD = -1e9f;
+        for (size_t k = 0; k < share.size(); ++k) {
+            if (all[in.houseTypes[k]].capacity <= 0 || share[k] <= 0) continue;
+            float d = share[k] * (float)(i + 1) - (float)made[k];
+            if (d > bestD) { bestD = d; pick = (int)k; }
+        }
+        if (pick < 0) break;
+        int t = in.houseTypes[pick]; ++made[pick];
         items.push_back(MakeItem(t));
         cap += all[t].capacity;
     }

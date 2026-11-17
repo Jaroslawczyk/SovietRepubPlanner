@@ -109,8 +109,10 @@ MB_HOOK(h_MDown, o_MDown)
 typedef bool (*InName_t)(void*, char*);
 static InName_t o_BtnDown, o_BtnPress;
 char g_scriptButton[64] = "MOUSEDRAG";   // the named button the line tools read while the left button is held
+static void GameThreadTick();
 static bool NamedButton(InName_t orig, const char* kind, void* s, char* name) {
     bool v = orig(s, name);
+    if (name && kind[0] == 'p' && strcmp(name, "TOOL_CANCEL") == 0) GameThreadTick();
     if (v && name && strcmp(name, "MOUSEDRAG") == 0) { if (kind[0] == 'd') t_drag = true; else t_dragPress = true; }
     static std::vector<std::string> seen; static std::mutex mx; static int trues = 0;
     std::lock_guard<std::mutex> l(mx);
@@ -494,6 +496,191 @@ static void* h_TypeByName(void* s, char* n, bool b) { if (n) strncpy(g_lastTypeN
 static void* h_TypeByIdx(void* s, int i) { g_lastTypeIdx = i; ++g_nTypeByIdx; return o_TypeByIdx(s, i); }
 
 struct IatHook { const char* name; void* hook; void** orig; };
+
+// ---------------------------------------------------------------------------------------------------------
+// Direct calls into SOVIET64.exe, learnt from the game's own "copy area / paste area" tool (paste = function
+// at RVA 0x2168F0). Paste places a copied building by pointing the build tool at it and calling the building
+// tool's update function with "place without a click"; we do the same for the buildings of the plan.
+// The addresses are for game build 1.1.1.13 only and are checked before use.
+namespace gx {
+static BYTE* Base() { return (BYTE*)GetModuleHandleW(nullptr); }
+static BYTE* Game() { return Base() + 0x9d4f10; }                 // the game state object (a global)
+static const BYTE kSigBuild[16] = { 0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8d,0xac };
+static const BYTE kSigFind[16]  = { 0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7c,0x24,0x18,0x4c };
+static bool Supported() {
+    static int ok = -1;
+    if (ok < 0) {
+        BYTE* b = Base();
+        auto* nt = (IMAGE_NT_HEADERS*)(b + ((IMAGE_DOS_HEADER*)b)->e_lfanew);
+        ok = nt->OptionalHeader.SizeOfImage == 0xa9d000 && memcmp(b + 0x2bad60, kSigBuild, 16) == 0 && memcmp(b + 0x3aaa0, kSigFind, 16) == 0;
+        Log("direct build calls: %s", ok ? "available" : "this game build is not supported");
+    }
+    return ok == 1;
+}
+// building tool update: (game, type name, force place, place if the spot is valid, unused, rotation step, 0, 0)
+typedef void (*BuildTool_t)(void*, const char*, unsigned char, unsigned char, UINT64, int, unsigned char, unsigned char);
+// tools: vector at game+0xd280 of 0x2d0-byte records, the name is at the start of a record
+static const char* FindTool(const char* name, void** tool) {
+    BYTE* G = Game();
+    BYTE* b = *(BYTE**)(G + 0xd280); BYTE* e = *(BYTE**)(G + 0xd288);
+    for (; b && b < e; b += 0x2d0) if (_stricmp((const char*)b, name) == 0) { *tool = b; return (const char*)b; }
+    return nullptr;
+}
+static void DumpTools() {
+    BYTE* G = Game();
+    BYTE* b = *(BYTE**)(G + 0xd280); BYTE* e = *(BYTE**)(G + 0xd288);
+    int n = 0, shown = 0;
+    for (; b && b < e; b += 0x2d0, ++n) {
+        const char* nm = (const char*)b;
+        if (shown < 150 && (strstr(nm, "road") || strstr(nm, "pedestrian") || strstr(nm, "pipe") || strstr(nm, "eletric") || strstr(nm, "heating") || strstr(nm, "sewage"))) {
+            ++shown;
+            const int* f = (const int*)(b + 0x40);
+            Log("TOOL %d '%s' | %d %d %d %d %d %d %d %d %d %d %d %d", n, nm, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10], f[11]);
+        }
+    }
+    Log("tools in the game: %d", n);
+}
+static int PlaceRaw(const char* nm, void* tool, const V3& pos, float rot, int step) {
+    BYTE* G = Game();
+    V3 sp = *(V3*)(G + 0xf6c); float sr = *(float*)(G + 0xf94); void* st = *(void**)(G + 0xd428); BYTE sm = G[0x11db0];
+    int code = -200;
+    __try {
+        *(V3*)(G + 0xf6c) = pos; *(float*)(G + 0xf94) = rot; G[0x11db0] = 0; *(void**)(G + 0xd428) = tool;
+        ((BuildTool_t)(Base() + 0x2bad60))(G, nm, 0, 1, 0, step, 0, 0);
+        code = *(int*)(G + 0x11a10);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { code = -300; }
+    *(V3*)(G + 0xf6c) = sp; *(float*)(G + 0xf94) = sr; *(void**)(G + 0xd428) = st; G[0x11db0] = sm;
+    return code;
+}
+
+// A piece of road / footpath / pipe the way paste does it: snap the point like the cursor would (this is what
+// catches building connections and existing ends), start, update to the end point, commit if a preview exists.
+typedef void (*Snap_t)(void*, void*, int, int);
+typedef void* (*PStart_t)(void*, V3*, UINT64, unsigned char, int, UINT64, V3*);
+typedef void* (*PUpdate_t)(void*, V3*, int, int, unsigned char, unsigned char, unsigned char, UINT64, unsigned char, unsigned char);
+typedef void* (*PCommit_t)(void*, UINT64, UINT64, UINT64, unsigned char, unsigned char, unsigned char);
+typedef void* (*PCancel_t)(void*);
+static int LineRaw(int mgrOffset, int type, int sub, V3 a, V3 b) {
+    BYTE* G = Game();
+    void* m = *(void**)(G + mgrOffset);
+    if (!m) return -100;
+    V3 sp = *(V3*)(G + 0xf6c);
+    int r = -200;
+    __try {
+        *(V3*)(G + 0xf6c) = a; ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub); a = *(V3*)(G + 0xf6c);
+        V3 out{};
+        ((PStart_t)(Base() + 0x4fbfd0))(m, &a, 0, 0, -20, 0, &out);
+        *(V3*)(G + 0xf6c) = b; ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub); b = *(V3*)(G + 0xf6c);
+        ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
+        void* p428 = *(void**)((BYTE*)m + 0x428); void* p430 = *(void**)((BYTE*)m + 0x430);
+        if (p430 && p428 != p430) { ((PCommit_t)(Base() + 0x518a10))(m, 0, 0, 0, 0, 0, 0); r = 1; }
+        else { ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { r = -300; }
+    *(V3*)(G + 0xf6c) = sp;
+    return r;
+}
+
+// Logging detours on the path tool functions, to learn their arguments from the game's own use.
+typedef void* (*P10)(void*, void*, UINT64, UINT64, UINT64, UINT64, UINT64, UINT64, UINT64, UINT64);
+static P10 t_PathUpdate, t_PathStart, t_PathCommit;
+static int MgrOffset(void* m) {
+    BYTE* G = Game();
+    for (int o = 0xf000; o < 0xfc00; o += 8) if (*(void**)(G + o) == m) return o;
+    return 0;
+}
+static void* d_PathUpdate(void* m, void* p, UINT64 a3, UINT64 a4, UINT64 a5, UINT64 a6, UINT64 a7, UINT64 a8, UINT64 a9, UINT64 a10) {
+    static void* lm; static UINT64 l[8]; static int n = 0;
+    UINT64 c[8] = { a3 & 0xffffffff, a4 & 0xffffffff, a5 & 0xff, a6 & 0xff, a7 & 0xff, a8, a9 & 0xff, a10 & 0xff };
+    if (n < 60 && (m != lm || memcmp(c, l, sizeof(c)) != 0)) {
+        ++n; lm = m; memcpy(l, c, sizeof(c));
+        const float* f = (const float*)p;
+        Log("PATH update mgr %p (game+0x%x) pos %.1f %.1f %.1f type %d sub %d a5 %d a6 %d a7 %d a8 %p a9 %d a10 %d thread %lu",
+            m, MgrOffset(m), f ? f[0] : 0, f ? f[1] : 0, f ? f[2] : 0, (int)c[0], (int)c[1], (int)c[2], (int)c[3], (int)c[4], (void*)a8, (int)c[6], (int)c[7], GetCurrentThreadId());
+    }
+    return t_PathUpdate(m, p, a3, a4, a5, a6, a7, a8, a9, a10);
+}
+static void* d_PathStart(void* m, void* p, UINT64 a3, UINT64 a4, UINT64 a5, UINT64 a6, UINT64 a7, UINT64 a8, UINT64 a9, UINT64 a10) {
+    static int n = 0;
+    if (n < 40) { ++n; const float* f = (const float*)p;
+        Log("PATH start mgr %p (game+0x%x) pos %.1f %.1f %.1f r8 %llx r9 %d a5 %d a6 %llx a7 %p", m, MgrOffset(m), f ? f[0] : 0, f ? f[1] : 0, f ? f[2] : 0, a3, (int)(a4 & 0xff), (int)a5, a6, (void*)a7); }
+    return t_PathStart(m, p, a3, a4, a5, a6, a7, a8, a9, a10);
+}
+static void* d_PathCommit(void* m, void* p, UINT64 a3, UINT64 a4, UINT64 a5, UINT64 a6, UINT64 a7, UINT64 a8, UINT64 a9, UINT64 a10) {
+    static int n = 0;
+    if (n < 40) { ++n; Log("PATH commit mgr %p (game+0x%x) rdx %p r8 %llx r9 %llx a5 %d a6 %d a7 %d | preview %p %p", m, MgrOffset(m), p, a3, a4, (int)(a5 & 0xff), (int)(a6 & 0xff), (int)(a7 & 0xff),
+                       *(void**)((BYTE*)m + 0x428), *(void**)((BYTE*)m + 0x430)); }
+    return t_PathCommit(m, p, a3, a4, a5, a6, a7, a8, a9, a10);
+}
+static void* Detour(DWORD rva, int stolen, void* hook) {
+    BYTE* fn = Base() + rva;
+    BYTE* tr = (BYTE*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!tr) return nullptr;
+    memcpy(tr, fn, stolen);
+    BYTE jmp[14] = { 0xff, 0x25, 0, 0, 0, 0 };
+    UINT64 back = (UINT64)(fn + stolen); memcpy(jmp + 6, &back, 8); memcpy(tr + stolen, jmp, 14);
+    DWORD old;
+    if (!VirtualProtect(fn, 32, PAGE_EXECUTE_READWRITE, &old)) return nullptr;
+    UINT64 to = (UINT64)hook; memcpy(jmp + 6, &to, 8); memcpy(fn, jmp, 14);
+    for (int i = 14; i < stolen; ++i) fn[i] = 0x90;
+    VirtualProtect(fn, 32, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), fn, 32);
+    return tr;
+}
+static void InstallPathLogging() {
+    static bool done = false;
+    if (done || !Supported()) return;
+    done = true;
+    t_PathUpdate = (P10)Detour(0x4fca80, 21, d_PathUpdate);
+    t_PathStart  = (P10)Detour(0x4fbfd0, 15, d_PathStart);
+    t_PathCommit = (P10)Detour(0x518a10, 19, d_PathCommit);
+    Log("path logging detours: %p %p %p", t_PathUpdate, t_PathStart, t_PathCommit);
+}
+} // namespace gx
+
+static std::vector<InstantJob> g_inst; static std::vector<int> g_instRes; static size_t g_instAt = 0; static std::mutex g_instMx;
+static std::atomic<bool> g_instBusy{ false };
+static std::atomic<bool> g_dumpTools{ false };
+bool InstantSupported() { return gx::Supported(); }
+void QueueInstant(const std::vector<InstantJob>& jobs) {
+    std::lock_guard<std::mutex> l(g_instMx);
+    g_inst = jobs; g_instRes.assign(jobs.size(), -999); g_instAt = 0; g_instBusy = !jobs.empty();
+    Log("instant build: %d jobs queued", (int)jobs.size());
+}
+bool InstantBusy() { return g_instBusy; }
+void InstantResults(std::vector<int>& codes) { std::lock_guard<std::mutex> l(g_instMx); codes = g_instRes; }
+// Runs on the game's own update thread (from one of its per-frame input polls).
+static void GameThreadTick() {
+    if (!gx::Supported()) return;
+    if (g_dumpTools.exchange(false)) gx::DumpTools();
+    if (!g_instBusy) return;
+    for (int k = 0; k < 12; ++k) {
+        InstantJob j; size_t at;
+        { std::lock_guard<std::mutex> l(g_instMx); if (g_instAt >= g_inst.size()) { g_instBusy = false; Log("instant build: done"); return; } at = g_instAt++; j = g_inst[at]; }
+        int code;
+        if (j.kind == 0) {
+            void* tool = nullptr;
+            const char* nm = gx::FindTool(j.type.c_str(), &tool);
+            code = -100;
+            if (nm) {
+                V3 p{ j.a.x, TerrainHeight(j.a.x, j.a.z), j.a.z };
+                int step = (o_RotStep && g_bld) ? o_RotStep(g_bld, j.rot + 6.2831853f / 256.0f) : 0;
+                code = gx::PlaceRaw(nm, tool, p, j.rot, step);
+            }
+            if (code != -1) Log("instant build: '%s' at %.0f %.0f -> %s (code %d)", j.type.c_str(), j.a.x, j.a.z,
+                                code == -100 ? "no such build tool" : code == -300 ? "CRASH caught" : "refused by the game", code);
+            k += 3;         // a building is heavier than a line
+        } else {
+            V3 a{ j.a.x, TerrainHeight(j.a.x, j.a.z), j.a.z }, b{ j.b.x, TerrainHeight(j.b.x, j.b.z), j.b.z };
+            code = gx::LineRaw(j.kind == 1 ? 0xf7a0 : 0xf968, j.lineType, 0, a, b);
+            if (code != 1) Log("instant build: %s %.0f %.0f -> %.0f %.0f: %s (code %d)", j.kind == 1 ? "road" : "footpath", a.x, a.z, b.x, b.z,
+                               code == -300 ? "CRASH caught" : "refused by the game", code);
+        }
+        { std::lock_guard<std::mutex> l(g_instMx); if (at < g_instRes.size()) g_instRes[at] = code; }
+    }
+}
+void DebugDumpTools() { g_dumpTools = true; }
+void InstallPathLogging() { gx::InstallPathLogging(); }
+
 static IatHook g_hooks[] = {
     { "?ViewSetPosition@C3D_CAMERA@@QEAAXVC3DVECTOR3@@@Z", h_ViewSetPosition, (void**)&o_ViewSetPosition },
     { "?CollisionTerrainHeightOverPoint@C3D_TERRAIN@@QEAAMVC3DVECTOR3@@@Z", h_TerrHeight, (void**)&o_TerrHeight },

@@ -26,6 +26,9 @@ struct Area {
 float g_angle = 0;                  // extra rotation of the building grid, degrees
 
 std::vector<char> g_houseSel;       // per catalog index
+std::vector<int> g_houseShare;      // per catalog index: weight of the type among the houses
+int   g_roadKind = 1;               // street surface for instant building: 0 gravel, 1 asphalt
+int   g_pathKind = 1;               // footpath: 0 dirt trail, 1 gravel, 2 asphalt
 std::vector<ServiceRule> g_services = {
     { "SHOP",         "Магазин",          true,  2000, -1 },
     { "PUB",          "Пивная",           true,  3000, -1 },
@@ -125,6 +128,7 @@ void SetArea(const std::vector<V3>& pts) {
 void InitDefaults() {
     const auto& all = catalog::All();
     g_houseSel.assign(all.size(), 0);
+    g_houseShare.assign(all.size(), 50);
     bool any = false;
     for (size_t i = 0; i < all.size(); ++i) if (all[i].id == "hrusevka") { g_houseSel[i] = 1; any = true; }
     for (size_t i = 0; i < all.size() && !any; ++i) if (all[i].category == "LIVING" && all[i].capacity > 0) { g_houseSel[i] = 1; any = true; }
@@ -184,7 +188,7 @@ void Regenerate() {
     const Area& a = g_area;
     PlanInput in;
     in.poly = a.local; in.population = g_population; in.gap = g_gap;
-    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) in.houseTypes.push_back((int)i);
+    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     for (int k = 0; k < 4; ++k) in.utilRadius[k] = g_utilRadius[k];
@@ -488,9 +492,12 @@ void TabHouses() {
     if (ImGui::SmallButton("Снять все")) { std::fill(g_houseSel.begin(), g_houseSel.end(), 0); g_dirty = true; }
     const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                                   ImGuiTableFlags_Sortable | ImGuiTableFlags_Resizable;
-    if (ImGui::BeginTable("houses", 6, flags, ImVec2(0, ImGui::GetContentRegionAvail().y))) {
+    int shareSum = 0;
+    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) shareSum += std::max(0, g_houseShare[i]);
+    if (ImGui::BeginTable("houses", 7, flags, ImVec2(0, ImGui::GetContentRegionAvail().y))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("Дом", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Доля", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, 112);
         ImGui::TableSetupColumn("Жителей", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_PreferSortDescending, 70);
         ImGui::TableSetupColumn("Размер, м", ImGuiTableColumnFlags_WidthFixed, 80);
         ImGui::TableSetupColumn("Кач.", ImGuiTableColumnFlags_WidthFixed, 46);
@@ -509,6 +516,13 @@ void TabHouses() {
             bool sel = g_houseSel[i] != 0;
             if (ImGui::Checkbox(b.name.c_str(), &sel)) { g_houseSel[i] = sel; g_dirty = true; }
             ImGui::SetItemTooltip("%s", b.id.c_str());
+            ImGui::TableNextColumn();
+            if (sel) {      // share of this type among the houses of the district
+                ImGui::SetNextItemWidth(58);
+                if (ImGui::DragInt("##share", &g_houseShare[i], 1.0f, 0, 100, "%d")) { g_houseShare[i] = std::clamp(g_houseShare[i], 0, 100); g_dirty = true; }
+                ImGui::SetItemTooltip("Вес этого типа. Потяните мышью или дважды кликните и введите число.\nСправа — получившаяся доля среди домов района.");
+                ImGui::SameLine(); ImGui::Text("%d %%", shareSum > 0 ? (int)lroundf(100.0f * g_houseShare[i] / shareSum) : 0);
+            }
             ImGui::PopID();
             ImGui::TableNextColumn(); ImGui::Text("%d", b.capacity);
             ImGui::TableNextColumn(); ImGui::Text("%.0fx%.0f", b.sx, b.sz);
@@ -606,8 +620,125 @@ void LineButton(const char* what, const char* tool, LineJob& job) {
                           "поднимите камеру выше и смотрите на участок сверху. Камеру во время работы не двигайте.", tool);
 }
 
+// Everything of the plan placed at once by direct calls into the game (the mechanism behind the game's own
+// "paste area"): streets, buildings, driveways, footpaths. Buildings the game refuses because the ground is
+// uneven get their pad levelled and one more try.
+struct InstantRun {
+    int phase = 0;                      // 0 idle, 1 first batch, 2 levelling, 3 retry batch
+    std::vector<eng::InstantJob> jobs;
+    std::vector<int> plan;              // per job: index of the plan building, -1 for lines
+    std::vector<int> retry;             // plan buildings waiting for levelling
+    int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0;
+    std::string note;
+} g_inst;
+void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2) {
+    float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
+    if (len < 1.5f) return;
+    int n = std::max(1, (int)ceilf(len / 60.0f));       // short pieces follow the ground
+    for (int i = 0; i < n; ++i) {
+        float t0 = (float)i / n, t1 = (float)(i + 1) / n;
+        eng::InstantJob j; j.kind = kind; j.lineType = lineType;
+        j.a = LocalToWorld(g_area, u1 + (u2 - u1) * t0, v1 + (v2 - v1) * t0, 0);
+        j.b = LocalToWorld(g_area, u1 + (u2 - u1) * t1, v1 + (v2 - v1) * t1, 0);
+        g_inst.jobs.push_back(j); g_inst.plan.push_back(-1);
+    }
+}
+eng::InstantJob InstantBuilding(const Placed& b) {
+    eng::InstantJob j; j.kind = 0; j.type = catalog::All()[b.type].id;
+    j.a = LocalToWorld(g_area, b.ou, b.ov, 0);
+    j.rot = g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + b.rot * kPi / 2);
+    return j;
+}
+void InstantStart() {
+    g_inst = InstantRun();
+    for (auto& rd : g_plan.roads) InstantLine(1, g_roadKind, rd.u1, rd.v1, rd.u2, rd.v2);
+    for (size_t i = 0; i < g_plan.buildings.size(); ++i) {
+        const Placed& b = g_plan.buildings[i];
+        V3 w = LocalToWorld(g_area, b.u, b.v, 0);
+        if (eng::Occupied(w.x, w.z) & 1) continue;      // already there
+        g_inst.jobs.push_back(InstantBuilding(b)); g_inst.plan.push_back((int)i);
+    }
+    for (auto& rd : g_plan.drives) InstantLine(1, g_roadKind, rd.u1, rd.v1, rd.u2, rd.v2);
+    for (auto& ps : g_plan.paths) InstantLine(2, g_pathKind - 1, ps.u1, ps.v1, ps.u2, ps.v2);
+    if (g_inst.jobs.empty()) { g_inst.note = "Нечего строить."; return; }
+    eng::QueueInstant(g_inst.jobs);
+    g_inst.phase = 1;
+}
+void InstantTick() {
+    InstantRun& r = g_inst;
+    if (r.phase == 0 || eng::InstantBusy()) return;
+    if (r.phase == 2) {                 // pads levelled: try those buildings again
+        if (eng::LevelPending()) return;
+        r.jobs.clear(); r.plan.clear();
+        for (int bi : r.retry) { r.jobs.push_back(InstantBuilding(g_plan.buildings[bi])); r.plan.push_back(bi); }
+        r.retry.clear();
+        eng::QueueInstant(r.jobs);
+        r.phase = 3;
+        return;
+    }
+    std::vector<int> codes; eng::InstantResults(codes);
+    for (size_t i = 0; i < r.jobs.size() && i < codes.size(); ++i) {
+        const eng::InstantJob& j = r.jobs[i];
+        if (j.kind == 0) {
+            if (r.phase == 1) ++r.bAll;
+            if (codes[i] == -1) ++r.bOk;
+            else if (r.phase == 1 && codes[i] == 10) r.retry.push_back(r.plan[i]);
+        } else if (j.kind == 1) { ++r.rAll; if (codes[i] == 1) ++r.rOk; }
+        else { ++r.pAll; if (codes[i] == 1) ++r.pOk; }
+    }
+    if (r.phase == 1 && !r.retry.empty()) {
+        std::vector<V3> pts;
+        for (int bi : r.retry) {
+            const Placed& b = g_plan.buildings[bi];
+            for (float du = -b.w / 2 - 4; du <= b.w / 2 + 4.01f; du += 2.5f)
+                for (float dv = -b.d / 2 - 4; dv <= b.d / 2 + 4.01f; dv += 2.5f) {
+                    V3 w = LocalToWorld(g_area, b.u + du, b.v + dv, 0);
+                    pts.push_back({ w.x, b.pad, w.z });
+                }
+        }
+        eng::QueueLevel(pts);
+        r.phase = 2;
+        return;
+    }
+    char t[260];
+    snprintf(t, sizeof(t), "Поставлено: зданий %d из %d, дорог %d из %d отрезков, дорожек %d из %d отрезков.", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll);
+    r.note = t; r.phase = 0;
+    Log("instant build summary: buildings %d/%d, roads %d/%d, footpaths %d/%d", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll);
+}
+void InstantUi() {
+    InstantTick();
+    InstantRun& r = g_inst;
+    if (r.phase) {
+        ImGui::BeginDisabled();
+        ImGui::Button(r.phase == 2 ? "Выравниваю площадки под отклонённые здания…" : "Строю…", ImVec2(-FLT_MIN, 0));
+        ImGui::EndDisabled();
+        return;
+    }
+    char t[160]; snprintf(t, sizeof(t), "Построить всё сразу — %d зданий, улицы, подъезды, дорожки", (int)g_plan.buildings.size());
+    ImGui::BeginDisabled(g_plan.buildings.empty() && g_plan.paths.empty());
+    if (ImGui::Button(t, ImVec2(-FLT_MIN, 0))) InstantStart();
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Весь план ставится в игру одним действием, тем же способом, каким игра вставляет скопированную зону:\n"
+                          "ничего выбирать в меню стройки и кликать не нужно, камера может стоять как угодно.\n"
+                          "Порядок: улицы, здания, подъезды, дорожки. Игра сама проверяет каждое место и берёт плату\n"
+                          "в текущем режиме стройки. Где земля слишком неровная, мод выравнивает площадку и повторяет.");
+    if (!r.note.empty()) ImGui::TextWrapped("%s", r.note.c_str());
+}
+
 void TabRoads() {
-    if (g_area.ok && !g_plan.buildings.empty()) {
+    if (eng::InstantSupported()) {
+        ImGui::SeparatorText("Покрытие");
+        const char* rk[] = { "гравийная дорога", "асфальтовая дорога" };
+        const char* pk[] = { "тропинка", "гравийная дорожка", "асфальтовая дорожка" };
+        ImGui::SetNextItemWidth(280); ImGui::Combo("улицы и подъезды", &g_roadKind, rk, 2);
+        ImGui::SetNextItemWidth(280); ImGui::Combo("дорожки", &g_pathKind, pk, 3);
+        ImGui::TextDisabled("Используется кнопкой «Построить всё сразу» внизу панели.");
+        ImGui::TextDisabled("Зелёные точки — пешеходные входы зданий, оранжевые квадраты — подъезды для машин.");
+        const ImVec4 red(0.65f, 0.1f, 0.1f, 1);
+        if (g_plan.noRoad) ImGui::TextColored(red, g_plan.roads.empty() ? "Зданиям нужна автодорога: %d — включите улицу ниже." : "Не удалось подвести автодорогу к зданиям: %d.", g_plan.noRoad);
+        if (g_plan.noPath) ImGui::TextColored(red, "Не удалось подвести дорожку к зданиям: %d.", g_plan.noPath);
+    } else if (g_area.ok && !g_plan.buildings.empty()) {
         ImGui::SeparatorText("Построить в игре");
         if (eng::AutoBuildActive()) {
             int done, failed, left; eng::AutoBuildStats(done, failed, left);
@@ -732,7 +863,8 @@ void Footer() {
     // Building in the game. The game's own build tool does the work: the player picks a building in the game's
     // build menu, the mod notices which one, turns it as the plan says, puts the game's cursor on every spot of
     // that type and clicks; then it asks for the next type.
-    {
+    if (eng::InstantSupported() && g_area.ok) InstantUi();
+    else {
         static bool seq = false, seqRunning = false;
         static int seqType = -1; static DWORD seqSince = 0;
         static std::vector<int> seqDone;
@@ -902,6 +1034,14 @@ void SelfTest() {
         Log("pathtest: mode %d, %d lines, %d skipped (hidden or off screen)", g_lineMode, job.lines, job.skipped);
         ImVec2 d = ImGui::GetIO().DisplaySize;
         if (job.lines) eng::StartScript(job.pos, job.action, job.frames, d.x, d.y);
+    }
+    std::wstring inFlag = GameDir() + L"DistrictPlanner.instant";      // debug: place the first N plan buildings by direct game calls
+    if (GetFileAttributesW(inFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(inFlag.c_str());
+        eng::DebugDumpTools();
+        Log("instant test: supported %d, plan %d buildings %d roads %d drives %d paths", (int)eng::InstantSupported(), (int)g_plan.buildings.size(),
+            (int)g_plan.roads.size(), (int)g_plan.drives.size(), (int)g_plan.paths.size());
+        if (eng::InstantSupported() && g_area.ok) InstantStart();
     }
     std::wstring abFlag = GameDir() + L"DistrictPlanner.autobuild";    // debug: place the selected game building on the first plan spots
     if (GetFileAttributesW(abFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
