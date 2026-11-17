@@ -750,6 +750,15 @@ static void HexAround(const char* tag, BYTE* b, int off) {
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) { Log("RAW %s fault", tag); }
 }
+// the building's storage vector +0x970: records of 0xE0 bytes, capacity at +0x8c, resource code at +0x90
+static void StorageList(const char* tag, BYTE* b) {
+    __try {
+        BYTE* v = *(BYTE**)(b + 0x970); BYTE* e = *(BYTE**)(b + 0x978);
+        char line[600]; int n = 0;
+        for (BYTE* r = v; r && r < e && n < 560; r += 0xE0) n += snprintf(line + n, sizeof(line) - n, " [code %d cap %g]", *(int*)(r + 0x90), *(float*)(r + 0x8c));
+        Log("STOR %s:%s", tag, n ? line : " none");
+    } __except (EXCEPTION_EXECUTE_HANDLER) { Log("STOR %s fault", tag); }
+}
 static void DumpLoadNow() {
     BYTE** v = *(BYTE***)(gx::Base() + 0x9e6a18); BYTE** e = *(BYTE***)(gx::Base() + 0x9e6a20);
     struct Agg { int id = 0, n = 0; float p = 0, h = 0, pmin = 1e9f, pmax = -1e9f, hmin = 1e9f, hmax = -1e9f; long long pr = 0, hr = 0; int lp = 0, lh = 0; };
@@ -760,6 +769,7 @@ static void DumpLoadNow() {
         a.pmin = std::min(a.pmin, r.p); a.pmax = std::max(a.pmax, r.p); a.hmin = std::min(a.hmin, r.h); a.hmax = std::max(a.hmax, r.h);
         a.lp = r.lp; a.lh = r.lh;
         if (a.n == 1 && (r.id == 2 || r.id == 0x12 || r.id == 0x47)) { HexAround(r.name, *it, 0x10f8); HexAround(r.name, *it, 0x1060); }
+        if (a.n == 1) StorageList(r.name, *it);
     }
     Log("LOAD dump: %d buildings, %d types (name id count | power +0x10f8 avg min max ptr-type | heat +0x1060 avg min max ptr-type | list sizes)", (int)(e - v), (int)m.size());
     for (auto& kv : m) {

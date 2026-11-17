@@ -554,7 +554,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         if (!in.utilBuild[k]) continue;
         std::vector<float> load(r.utilNodes[k].size(), 0.0f);
         for (auto& b : r.buildings) {
-            if (b.net >= 0) continue;
+            if (b.net >= 0 && !(k == 3 && b.net == 2)) continue;     // heat nodes draw power too
             int reach = 0;
             for (auto& nd : r.utilNodes[k]) if (hypotf(nd.u - b.u, nd.v - b.v) <= in.utilRadius[k]) ++reach;
             if (!reach) { ++r.utilUncovered[k]; continue; }
@@ -575,11 +575,8 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
 
 // What a building asks of a network: residents, or the workers of a service building, times the per-person norm.
 // k = 2 heat, 3 power: the game's own per-type values (catalog); water and sewage: per-person guess
-float Demand(const BuildingType& t, float perPerson, int k) {
-    if (k == 2) return t.heatLoad;
-    if (k == 3) return t.powerLoad;
-    int people = t.capacity > 0 ? t.capacity : std::max(1, t.workers);
-    return people * perPerson;
+float Demand(const BuildingType& t, float, int k) {
+    return k == 0 ? t.waterLoad : k == 1 ? t.sewageLoad : k == 2 ? t.heatLoad : t.powerLoad;
 }
 
 // Utility nodes are few and central: a dry layout without them shows where the buildings stand, a greedy cover picks

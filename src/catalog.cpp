@@ -54,20 +54,44 @@ const std::vector<BuildingType>& All() { return g_types; }
 //         + lighting factor) + (workers + professors) * able-to-serve * 0.0005 * (both able-to-serve factors)
 //         (0x11a10a; the lighting part also needs a global > 0 at exe+0x9d5d84); at least 0.05 MW (0x11a248).
 //         Capacity: substation 2.5, transformer 19, rail trafo 14 MW (0x11a1b3).
+//  Own power of heat nodes: tank / 60 x 0.006 (1000 -> 0.1 MW); $ENGINE_SPEED x 0.01 MW (small heat pumping station
+//  10 -> +0.1). Water and sewage nodes have no power storage at all.
 //  Not modelled: storage-based and vehicle loading terms (industry), heating plants (sum of production).
 static void ComputeLoads(BuildingType& b) {
     const std::string& c = b.category;
     int wp = b.workers + b.profs;
     if (c == "LIVING") { b.heatLoad = b.capacity * 0.7f; b.powerLoad = b.capacity * 0.002f; }
-    else if (c == "HEATING_ENDSTATION" || c == "HEATING_SWITCH") { b.heatCap = b.heatBig ? 3000.0f : 1000.0f; }
+    else if (c == "HEATING_ENDSTATION" || c == "HEATING_SWITCH") {
+        // the node's own power: its heat tank / 60 x 0.003, doubled (0x119c2e), plus the pump (below)
+        b.heatCap = b.heatBig ? 3000.0f : 1000.0f;
+        b.powerLoad = b.heatCap / 60.0f * 0.003f * 2.0f;
+    }
     else if (c == "SUBSTATION") b.powerCap = 2.5f;
     else if (c == "TRANSFORMATOR") b.powerCap = 19.0f;
     else if (c == "RAIL_TRAFO") b.powerCap = 14.0f;
     else if (wp > 0) {
         b.heatLoad = 0.7f * wp + 0.49f * b.workers * b.serve;
-        b.powerLoad = wp * 0.0005f * (b.fLive + b.fLight) + (b.serve > 0 ? wp * b.serve * 0.0005f * (b.fLiveServe + b.fLightServe) : 0.0f);
+        // the "lighting" half needs the global at exe+0x9d5d84 > 0; it was 0 in the game it was checked in (school 0.05,
+        // hospital 0.13 MW), so only the "living" half is counted
+        b.powerLoad = wp * 0.0005f * b.fLive + (b.serve > 0 ? wp * b.serve * 0.0005f * b.fLiveServe : 0.0f);
     }
-    if (c != "SUBSTATION" && c != "TRANSFORMATOR" && c != "RAIL_TRAFO" && (b.powerLoad > 0 || c == "LIVING")) b.powerLoad = std::max(0.05f, b.powerLoad);
+    // a fuel storage adds 0.05 MW (fitted: hospital 0.08 by the formula, 0.13 in the game; the code adds a per-resource
+    // value for every storage, loop at 0x119fc1, table not read yet)
+    b.powerLoad += 0.05f * b.fuelStorages;
+    // water (0x11a46b): living = residents x 0.045; with workers = (workers + professors) x 0.02 x water factor, plus
+    // workers x able-to-serve x 0.045 for hotels, orphanages and prisons; sewage the same amount (0x11a725)
+    if (c == "LIVING") b.waterLoad = b.capacity * 0.045f;
+    else if (wp > 0) {
+        b.waterLoad = wp * 0.02f * b.fWater;
+        if (c == "HOTEL" || c == "ORPHANAGE" || c == "PRISON") b.waterLoad += b.workers * b.serve * 0.045f;
+    }
+    b.sewageLoad = b.waterLoad;
+    if (b.noHeat) b.heatLoad = 0;
+    if (b.noWater) b.waterLoad = 0;
+    if (b.noSewage) b.sewageLoad = 0;
+    if (b.engineSpeed > 0) b.powerLoad += b.engineSpeed * 0.01f;      // pumps (0x11a1db)
+    if (c != "SUBSTATION" && c != "TRANSFORMATOR" && c != "RAIL_TRAFO" && (b.powerLoad > 0 || c == "LIVING" || wp > 0)) b.powerLoad = std::max(0.05f, b.powerLoad);
+    if (b.noPower) b.powerLoad = 0;
 }
 
 void Load() {
@@ -136,6 +160,13 @@ void Load() {
             else if (key == "ELETRIC_CONSUMPTION_LIGHTING_WORKER_FACTOR") ls >> b.fLight;
             else if (key == "ELETRIC_CONSUMPTION_LIGHTING_WORKER_FACTOR_ABLE_SERVE") ls >> b.fLightServe;
             else if (key == "CONNECTION_HEATING_BIG") b.heatBig = true;
+            else if (key == "ENGINE_SPEED") ls >> b.engineSpeed;
+            else if (key == "WATER_CONSUMPTION_LIVING_WORKER_FACTOR") ls >> b.fWater;
+            else if (key == "STORAGE_FUEL") ++b.fuelStorages;
+            else if (key == "HEATING_DISABLE") b.noHeat = true;
+            else if (key == "ELECTRIC_DISABLE") b.noPower = true;
+            else if (key == "WATERSEWAGE_DISABLE") b.noWater = b.noSewage = true;
+            else if (key == "SEWAGE_DISABLE") b.noSewage = true;
         }
         if (b.category.empty()) continue;
         auto bb = ReadAll(dir + stem + L".bbox");

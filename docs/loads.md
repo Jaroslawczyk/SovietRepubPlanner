@@ -5,491 +5,491 @@
 
 | Файл | Категория | Жители | Рабочие | Специалисты | Обслуживает | Тепло | Электричество, МВт | Ёмкость узла |
 |---|---|---|---|---|---|---|---|---|
-| airport_road_connection | AIRPLANE_GATE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| airplaneparking_30 | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| airplaneparking_40 | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| airplaneparking_50 | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| airplaneparking_50_3x | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| airplaneparking_75 | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| heliport | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| heliport_3x | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| control_tower | AIRPLANE_TOWER | 0 | 0 | 20 | 0 | 14.00 | 0.0500 |  |
-| co_art_gallery | ATTRACTION | 0 | 15 | 0 | 6 | 54.60 | 0.0500 |  |
-| co_beach | ATTRACTION | 0 | 5 | 0 | 18 | 47.60 | 0.0500 |  |
-| co_chamomile | ATTRACTION | 0 | 2 | 0 | 25 | 25.90 | 0.0500 |  |
-| co_ferris_wheel | ATTRACTION | 0 | 2 | 0 | 17 | 18.06 | 0.0500 |  |
-| co_museum_of_republic | ATTRACTION | 0 | 15 | 0 | 4 | 39.90 | 0.0500 |  |
-| co_museum_snp | ATTRACTION | 0 | 8 | 0 | 5 | 25.20 | 0.0500 |  |
-| co_palace_of_communism | ATTRACTION | 0 | 20 | 0 | 4 | 53.20 | 0.0500 |  |
-| co_sight_tower | ATTRACTION | 0 | 8 | 0 | 8 | 36.96 | 0.0500 |  |
-| co_sight_tower_2 | ATTRACTION | 0 | 10 | 0 | 9 | 51.10 | 0.0500 |  |
-| co_surprise | ATTRACTION | 0 | 2 | 0 | 23 | 23.94 | 0.0500 |  |
-| co_swimmingpool | ATTRACTION | 0 | 10 | 0 | 9 | 51.10 | 0.0500 |  |
-| co_swing_cage | ATTRACTION | 0 | 2 | 0 | 17 | 18.06 | 0.0500 |  |
-| co_zoo | ATTRACTION | 0 | 15 | 0 | 4 | 39.90 | 0.0500 |  |
-| rozhlas | BROADCAST | 0 | 100 | 50 | 0 | 105.00 | 0.1500 |  |
-| rozhlas_v2 | BROADCAST | 0 | 100 | 50 | 0 | 105.00 | 0.1500 |  |
-| televizia | BROADCAST | 0 | 120 | 70 | 0 | 133.00 | 0.1900 |  |
-| televizia_v2 | BROADCAST | 0 | 120 | 70 | 0 | 133.00 | 0.1900 |  |
-| airport_terminal_cargo | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| airport_terminal_cargo2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_rail_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_road_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_gravel_loading_big | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_gravel_loading_small | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_gravel_unloading_big | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_gravel_unloading_small | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| harbor_cargo_medium | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| harbor_cargo_small | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| harbor_container | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| harbor_gravel_loading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| harbor_gravel_unloading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| harbor_pumping | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| heliport_cargo | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| heliport_cargo_3x | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_pumping_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_sewage_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_cargo | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_cargo1 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_cargo2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_cargo3 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_rumble_loading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_rumble_loading_v2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_rumble_unloading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_rumble_unloading_v2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_water_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargo_rumble_loading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargo_rumble_unloading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargo_station_big | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargo_station_small | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargostation | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargostation_deadend_1 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargostation_deadend_2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargostation_oneway | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_cargostation_v2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_pumping_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_pumping_station_v2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_pumping_station_v3 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_sewage_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_water_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| sewage_filling_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_filling_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cardealer | CAR_DEALER | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| civ_dedina7a | CHURCH | 0 | 1 | 1 | 40 | 21.00 | 0.0500 |  |
-| civ_kirche1 | CHURCH | 0 | 2 | 2 | 80 | 81.20 | 0.0680 |  |
-| civ_kirche2 | CHURCH | 0 | 4 | 4 | 80 | 162.40 | 0.1360 |  |
-| civ_kirche3 | CHURCH | 0 | 7 | 7 | 80 | 284.20 | 0.2380 |  |
-| civ_kostolik | CHURCH | 0 | 2 | 2 | 40 | 42.00 | 0.0500 |  |
-| cityhall | CITYHALL | 0 | 25 | 0 | 0 | 17.50 | 0.0500 |  |
-| construction_office | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| construction_office2 | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| construction_office3 | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| construction_office4 | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| construction_office5 | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| construction_office_helicopter | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_construction | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_construction_office | CONSTRUCTION_OFFICE_RAIL | 0 | 60 | 0 | 0 | 42.00 | 0.0500 |  |
-| rail_construction_office_big | CONSTRUCTION_OFFICE_RAIL | 0 | 170 | 0 | 0 | 119.00 | 0.0500 |  |
-| container_packing | CONTAINER_FACILITY | 0 | 60 | 0 | 0 | 42.00 | 0.0600 |  |
-| container_unpacking | CONTAINER_FACILITY | 0 | 60 | 0 | 0 | 42.00 | 0.0600 |  |
-| cooling_tower | COOLING_TOWER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| court | COURT_HOUSE | 0 | 50 | 30 | 0 | 56.00 | 0.0800 |  |
-| court_small | COURT_HOUSE | 0 | 15 | 10 | 0 | 17.50 | 0.0500 |  |
-| zoll_air_soviet | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| zoll_air_west | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| zoll_milhost | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| zoll_sahy | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| zoll_siatre | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| demolition_office | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| demolition_office_big | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| demolition_office_helicopter | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| demolition_office_small | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_demolition | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| distribution_office_medium | DISTRIBUTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| distribution_office_small | DISTRIBUTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_distribution | DISTRIBUTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| distribution_office_rail | DISTRIBUTION_OFFICE_RAIL | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| eletric_transformator_customin | ELETRIC_EXPORT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| foreign_eletric_player | ELETRIC_EXPORT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| eletric_transformator_customout | ELETRIC_IMPORT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_engine | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_engine_3in_e | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_engine_3in_f | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_engine_3in_g | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_engine_3in_h | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_engine_overpasse | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_engine_overpassf | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_engine_overpassg | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_enginf | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_enging | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bulk_enginh | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_pole_heavy_1 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_pole_heavy_2 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_pole_heavy_3 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_pole_heavy_4 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_pole_light_1 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_pole_light_2 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_pole_light_3 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_pole_light_4 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_engine | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_engine_3in_e | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_engine_3in_f | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_engine_3in_g | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_engine_3in_h | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_engine_overpasse | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_engine_overpassf | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_engine_overpassg | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_enginf | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_enging | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| conveyor_enginh | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| pipe_pumping_station | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| pipe_pumping_station2 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| pipe_pumping_station_underground | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| pipe_pumping_station_underground2 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| alumina_plant | FACTORY | 0 | 370 | 0 | 0 | 259.00 | 0.3700 |  |
-| aluminium_plant | FACTORY | 0 | 350 | 0 | 0 | 245.00 | 0.3500 |  |
-| animal_farm | FACTORY | 0 | 50 | 0 | 0 | 35.00 | 0.0575 |  |
-| asphalt_plant | FACTORY | 0 | 5 | 0 | 0 | 3.50 | 0.0500 |  |
-| bauxite_processing | FACTORY | 0 | 25 | 0 | 0 | 17.50 | 0.0500 |  |
-| brick_factory | FACTORY | 0 | 75 | 0 | 0 | 52.50 | 0.0750 |  |
-| brick_factory_v2 | FACTORY | 0 | 75 | 0 | 0 | 52.50 | 0.0750 |  |
-| cement_plant | FACTORY | 0 | 30 | 0 | 0 | 21.00 | 0.0500 |  |
-| cement_plant_v2 | FACTORY | 0 | 30 | 0 | 0 | 21.00 | 0.0500 |  |
-| cement_plant_v3 | FACTORY | 0 | 30 | 0 | 0 | 21.00 | 0.0500 |  |
-| chemical_plant | FACTORY | 0 | 60 | 0 | 0 | 42.00 | 0.0600 |  |
-| clothing_factory | FACTORY | 0 | 80 | 0 | 0 | 56.00 | 0.1100 |  |
-| coal_processing | FACTORY | 0 | 30 | 0 | 0 | 21.00 | 0.0500 |  |
-| concrete_plant | FACTORY | 0 | 5 | 0 | 0 | 3.50 | 0.0500 |  |
-| concrete_plant_v2 | FACTORY | 0 | 5 | 0 | 0 | 3.50 | 0.0500 |  |
-| distillery | FACTORY | 0 | 100 | 0 | 0 | 70.00 | 0.1000 |  |
-| eletronic_components_factory | FACTORY | 0 | 150 | 0 | 0 | 105.00 | 0.1800 |  |
-| eletronic_factory | FACTORY | 0 | 150 | 0 | 0 | 105.00 | 0.1650 |  |
-| explosive_factory | FACTORY | 0 | 75 | 0 | 0 | 52.50 | 0.0750 |  |
-| fabric_factory | FACTORY | 0 | 100 | 0 | 0 | 70.00 | 0.1000 |  |
-| fertilizer | FACTORY | 0 | 25 | 0 | 0 | 17.50 | 0.0500 |  |
-| fertilizer_liquid | FACTORY | 0 | 25 | 0 | 0 | 17.50 | 0.0500 |  |
-| fertilizer_liquid_v2 | FACTORY | 0 | 25 | 0 | 0 | 17.50 | 0.0500 |  |
-| food_factory | FACTORY | 0 | 170 | 0 | 0 | 119.00 | 0.2125 |  |
-| gravel_processing | FACTORY | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| gravel_processing_small | FACTORY | 0 | 5 | 0 | 0 | 3.50 | 0.0500 |  |
-| incinerator_big | FACTORY | 0 | 25 | 0 | 0 | 17.50 | 0.0500 |  |
-| incinerator_small | FACTORY | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| iron_processing | FACTORY | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| mechanical_components_factory | FACTORY | 0 | 150 | 0 | 0 | 105.00 | 0.2250 |  |
-| nuclear_fuel_plant | FACTORY | 0 | 50 | 70 | 0 | 84.00 | 0.1200 |  |
-| oil_rafinery | FACTORY | 0 | 500 | 0 | 0 | 350.00 | 0.5000 |  |
-| oil_rafinery_v2 | FACTORY | 0 | 500 | 0 | 0 | 350.00 | 0.5000 |  |
-| panels_factory | FACTORY | 0 | 65 | 0 | 0 | 45.50 | 0.0650 |  |
-| panels_factory_v2 | FACTORY | 0 | 65 | 0 | 0 | 45.50 | 0.0650 |  |
-| panels_factory_v3 | FACTORY | 0 | 65 | 0 | 0 | 45.50 | 0.0650 |  |
-| plastics_factory | FACTORY | 0 | 60 | 0 | 0 | 42.00 | 0.0600 |  |
-| sawmill | FACTORY | 0 | 20 | 0 | 0 | 14.00 | 0.0500 |  |
-| slaughterhouse | FACTORY | 0 | 50 | 0 | 0 | 35.00 | 0.0625 |  |
-| steel_mill | FACTORY | 0 | 500 | 0 | 0 | 350.00 | 0.5000 |  |
-| steel_mill_v2 | FACTORY | 0 | 500 | 0 | 0 | 350.00 | 0.5000 |  |
-| uranium_conversion | FACTORY | 0 | 80 | 40 | 0 | 84.00 | 0.1200 |  |
-| uranium_processing | FACTORY | 0 | 60 | 15 | 0 | 52.50 | 0.0750 |  |
-| waste_aluminiumrecycling | FACTORY | 0 | 25 | 0 | 0 | 17.50 | 0.0500 |  |
-| waste_aluminiumseparation | FACTORY | 0 | 20 | 0 | 0 | 14.00 | 0.0500 |  |
-| waste_generalseparation | FACTORY | 0 | 50 | 0 | 0 | 35.00 | 0.0500 |  |
-| waste_gravelrecycling | FACTORY | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| waste_plasticrecycling | FACTORY | 0 | 20 | 0 | 0 | 14.00 | 0.0500 |  |
-| waste_steelrecycling | FACTORY | 0 | 30 | 0 | 0 | 21.00 | 0.0500 |  |
-| waste_steelseparation | FACTORY | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| waste_treatment_plant | FACTORY | 0 | 30 | 0 | 0 | 21.00 | 0.0500 |  |
-| waste_treatment_plant_v2 | FACTORY | 0 | 50 | 0 | 0 | 35.00 | 0.0500 |  |
-| farm | FARM | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| farm_large | FARM | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| farm_medium | FARM | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| farm_small | FARM | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| field_big | FIELD | 0 | 250 | 0 | 0 | 175.00 | 0.2500 |  |
-| field_medium | FIELD | 0 | 150 | 0 | 0 | 105.00 | 0.1500 |  |
-| field_small | FIELD | 0 | 75 | 0 | 0 | 52.50 | 0.0750 |  |
-| firestation | FIRESTATION | 0 | 40 | 0 | 0 | 28.00 | 0.0500 |  |
-| foreign_pipe_player | FOREIGN_PIPELINE_EXPORT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| forklift_crossing | FORKLIFT_GARAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| forklift_station | FORKLIFT_GARAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_technical | GARBAGE_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| technical_services | GARBAGE_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| technical_services_big | GARBAGE_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| technical_services_small | GARBAGE_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| gas_station | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| gas_station_v2 | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| gas_station_v3 | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_gasstation | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_gas_station | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| heating_endstation_big | HEATING_ENDSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | тепло 3000 |
-| heating_endstation_small | HEATING_ENDSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | тепло 1000 |
-| heating_plant_big | HEATING_PLANT | 0 | 30 | 0 | 0 | 21.00 | 0.0500 |  |
-| heating_plant_small | HEATING_PLANT | 0 | 7 | 0 | 0 | 4.90 | 0.0500 |  |
-| incinerator_heat | HEATING_PLANT | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| heating_pumpingstation | HEATING_SWITCH | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | тепло 3000 |
-| heating_pumpingstation_small | HEATING_SWITCH | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | тепло 1000 |
-| hospital | HOSPITAL | 0 | 50 | 50 | 3 | 143.50 | 0.1600 |  |
-| hospital_v2 | HOSPITAL | 0 | 30 | 30 | 3 | 86.10 | 0.0960 |  |
-| hotel | HOTEL | 0 | 20 | 0 | 5 | 63.00 | 0.0500 |  |
-| hotel_horsky | HOTEL | 0 | 15 | 0 | 5 | 47.25 | 0.0500 |  |
-| hotel_hutnik_big | HOTEL | 0 | 50 | 0 | 3 | 108.50 | 0.0800 |  |
-| hotel_hutnik_small | HOTEL | 0 | 14 | 0 | 6 | 50.96 | 0.0500 |  |
-| kindergarten | KINDERGARTEN | 0 | 10 | 0 | 10 | 56.00 | 0.0500 |  |
-| co_theatre | KINO | 0 | 20 | 0 | 5 | 63.00 | 0.0500 |  |
-| kino | KINO | 0 | 5 | 0 | 30 | 77.00 | 0.0500 |  |
-| kino_druzba | KINO | 0 | 6 | 0 | 25 | 77.70 | 0.0500 |  |
-| civ_dedina1a | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 |  |
-| civ_dedina1b | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 |  |
-| civ_dedina2a | LIVING | 6 | 0 | 0 | 0 | 4.20 | 0.0500 |  |
-| civ_dedina3a | LIVING | 4 | 0 | 0 | 0 | 2.80 | 0.0500 |  |
-| civ_dedina3b | LIVING | 4 | 0 | 0 | 0 | 2.80 | 0.0500 |  |
-| civ_dedina4a | LIVING | 10 | 0 | 0 | 0 | 7.00 | 0.0500 |  |
-| civ_dedina5a | LIVING | 13 | 0 | 0 | 0 | 9.10 | 0.0500 |  |
-| civ_dedina6a | LIVING | 4 | 0 | 0 | 0 | 2.80 | 0.0500 |  |
-| civ_dedina_drevenica1 | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 |  |
-| civ_dedina_drevenica2 | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 |  |
-| civ_dedina_drevenica5 | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 |  |
-| civ_dedinaru1 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 |  |
-| civ_dedinaru2 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 |  |
-| civ_dedinaru3 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 |  |
-| civ_dedinaru4 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 |  |
-| civ_dedinaru5 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 |  |
-| civ_mesto1 | LIVING | 95 | 0 | 0 | 0 | 66.50 | 0.1900 |  |
-| civ_mesto2 | LIVING | 120 | 0 | 0 | 0 | 84.00 | 0.2400 |  |
-| civ_mesto3 | LIVING | 75 | 0 | 0 | 0 | 52.50 | 0.1500 |  |
-| civ_mesto4 | LIVING | 135 | 0 | 0 | 0 | 94.50 | 0.2700 |  |
-| civ_mesto5 | LIVING | 85 | 0 | 0 | 0 | 59.50 | 0.1700 |  |
-| civ_newoldcity1 | LIVING | 20 | 0 | 0 | 0 | 14.00 | 0.0500 |  |
-| civ_newoldcity10 | LIVING | 25 | 0 | 0 | 0 | 17.50 | 0.0500 |  |
-| civ_newoldcity2 | LIVING | 20 | 0 | 0 | 0 | 14.00 | 0.0500 |  |
-| civ_newoldcity3 | LIVING | 25 | 0 | 0 | 0 | 17.50 | 0.0500 |  |
-| civ_newoldcity4 | LIVING | 25 | 0 | 0 | 0 | 17.50 | 0.0500 |  |
-| civ_newoldcity5 | LIVING | 20 | 0 | 0 | 0 | 14.00 | 0.0500 |  |
-| civ_newoldcity6 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 |  |
-| civ_newoldcity7 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 |  |
-| civ_newoldcity8 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 |  |
-| civ_newoldcity9 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 |  |
-| hrusevka | LIVING | 115 | 0 | 0 | 0 | 80.50 | 0.2300 |  |
-| internat1 | LIVING | 85 | 0 | 0 | 0 | 59.50 | 0.1700 |  |
-| internat2 | LIVING | 85 | 0 | 0 | 0 | 59.50 | 0.1700 |  |
-| panelak_juh1 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 |  |
-| panelak_juh2 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 |  |
-| panelak_juh3 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 |  |
-| panelak_kvp1 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 |  |
-| panelak_kvp2 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 |  |
-| panelak_kvp3 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 |  |
-| panelak_moderny | LIVING | 180 | 0 | 0 | 0 | 126.00 | 0.3600 |  |
-| panelak_moderny_uzky | LIVING | 220 | 0 | 0 | 0 | 154.00 | 0.4400 |  |
-| panelakl4_dlhyA | LIVING | 105 | 0 | 0 | 0 | 73.50 | 0.2100 |  |
-| panelakl4_dlhyB | LIVING | 145 | 0 | 0 | 0 | 101.50 | 0.2900 |  |
-| panelakl4_dlhyC | LIVING | 157 | 0 | 0 | 0 | 109.90 | 0.3140 |  |
-| panelakl4_kocka | LIVING | 27 | 0 | 0 | 0 | 18.90 | 0.0540 |  |
-| panelakl4_veziak | LIVING | 87 | 0 | 0 | 0 | 60.90 | 0.1740 |  |
-| residental_brick_1 | LIVING | 20 | 0 | 0 | 0 | 14.00 | 0.0500 |  |
-| residental_brick_2 | LIVING | 50 | 0 | 0 | 0 | 35.00 | 0.1000 |  |
-| residental_brick_3 | LIVING | 157 | 0 | 0 | 0 | 109.90 | 0.3140 |  |
-| residental_brick_4 | LIVING | 40 | 0 | 0 | 0 | 28.00 | 0.0800 |  |
-| residental_brick_5 | LIVING | 110 | 0 | 0 | 0 | 77.00 | 0.2200 |  |
-| residental_brick_6 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 |  |
-| residental_brick_7 | LIVING | 10 | 0 | 0 | 0 | 7.00 | 0.0500 |  |
-| bauxite_mine | MINE_BAUXITE | 0 | 45 | 0 | 0 | 31.50 | 0.0500 |  |
-| coal_mine | MINE_COAL | 0 | 220 | 0 | 0 | 154.00 | 0.2970 |  |
-| gravel_mine_big | MINE_GRAVEL | 0 | 100 | 0 | 0 | 70.00 | 0.0600 |  |
-| gravelmine | MINE_GRAVEL | 0 | 40 | 0 | 0 | 28.00 | 0.0500 |  |
-| iron_mine | MINE_IRON | 0 | 250 | 0 | 0 | 175.00 | 0.3500 |  |
-| oil_mine | MINE_OIL | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| uranium_mine | MINE_URANIUM | 0 | 100 | 0 | 0 | 70.00 | 0.1400 |  |
-| water_well_big | MINE_WATER | 0 | 7 | 0 | 0 | 4.90 | 0.0500 |  |
-| water_well_small | MINE_WATER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_to_water | MINE_WATER_SURFACE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| woodcutting_post | MINE_WOOD | 0 | 10 | 0 | 0 | 7.00 | 0.0500 |  |
-| co_museum_pyramid | MONUMENT | 0 | 20 | 0 | 5 | 63.00 | 0.0500 |  |
-| fountain1 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| fountain2 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| fountain3 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| monument_emblem | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| monument_molotok1 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| monument_molotok2 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| monument_star | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| monument_statue_big | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| monument_statue_small | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| orphanage | ORPHANAGE | 0 | 40 | 0 | 4 | 106.40 | 0.0720 |  |
-| muddy_parking | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| parking_big | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| parking_medium | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| parking_small | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| parkingoptimized_big | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| parkingoptimized_medium | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| parkingoptimized_medium_v2 | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| parkingoptimized_small | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| airport_terminal | PASSANGER_STATION | 1200 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| airport_terminal_small | PASSANGER_STATION | 400 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| busstop | PASSANGER_STATION | 200 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| busstop_t | PASSANGER_STATION | 200 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_station_big | PASSANGER_STATION | 500 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| cableway_station_small | PASSANGER_STATION | 250 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| harbor_passanger_medium | PASSANGER_STATION | 1000 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| harbor_passanger_small | PASSANGER_STATION | 1000 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_strasicka | PASSANGER_STATION | 600 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_zelivskeho | PASSANGER_STATION | 800 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_zelivskehp | PASSANGER_STATION | 800 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_zelivskehq | PASSANGER_STATION | 800 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_busstop | PASSANGER_STATION | 100 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| passengerheliport | PASSANGER_STATION | 250 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_passanger | PASSANGER_STATION | 1200 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_station_passanger_small | PASSANGER_STATION | 500 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| railstation_aboveground | PASSANGER_STATION | 400 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| railstation_aboveground_big | PASSANGER_STATION | 900 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| railstation_groundlevel | PASSANGER_STATION | 400 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| railstation_groundlevel_big | PASSANGER_STATION | 900 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_busstation | PASSANGER_STATION | 500 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_busstation_small | PASSANGER_STATION | 230 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_busstation_v2 | PASSANGER_STATION | 500 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| tram_stop_big | PASSANGER_STATION | 400 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| tram_stop_small | PASSANGER_STATION | 250 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| fence_gate | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| fence_gate_park_vases | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| fence_gate_rail | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| gate_brick | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| gate_iron | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| gate_mesh | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| gate_plank | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_vchod_eskalator | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_vchod_eskalator_new | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_vchod_eskalator_nex | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_vchod_eskalator_ney | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_vchod_schody | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_vchod_schody_new | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_vchod_schody_nex | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_vchod_schody_ney | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| pedestrian_bridge_concrete | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| pedestrian_bridge_steel | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| pedestrian_tunel_entry | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| police | POLICE_STATION | 0 | 40 | 40 | 0 | 56.00 | 0.0800 |  |
-| police_small | POLICE_STATION | 0 | 12 | 12 | 0 | 16.80 | 0.0500 |  |
-| pollution_meter | POLLUTION_METER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| incinerator_powerplant | POWERPLANT | 0 | 20 | 0 | 0 | 14.00 | 0.0500 |  |
-| powerplant_coal | POWERPLANT | 0 | 20 | 0 | 0 | 14.00 | 0.0500 |  |
-| powerplant_coal_v2 | POWERPLANT | 0 | 20 | 0 | 0 | 14.00 | 0.0500 |  |
-| powerplant_gas | POWERPLANT | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| powerplant_nuclear_double | POWERPLANT | 0 | 80 | 40 | 0 | 84.00 | 0.1200 |  |
-| powerplant_nuclear_single | POWERPLANT | 0 | 40 | 20 | 0 | 42.00 | 0.0600 |  |
-| powerplant_solar | POWERPLANT | 0 | 8 | 0 | 0 | 5.60 | 0.0500 |  |
-| powerplant_wind1 | POWERPLANT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| powerplant_wind2 | POWERPLANT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| prison | PRISON | 0 | 70 | 0 | 3 | 151.90 | 0.1120 |  |
-| drydock | PRODUCTION_LINE | 0 | 400 | 100 | 0 | 350.00 | 1.7500 |  |
-| production_airplane | PRODUCTION_LINE | 0 | 500 | 300 | 0 | 560.00 | 3.2000 |  |
-| production_train | PRODUCTION_LINE | 0 | 400 | 100 | 0 | 350.00 | 1.7500 |  |
-| production_train2 | PRODUCTION_LINE | 0 | 400 | 100 | 0 | 350.00 | 1.7500 |  |
-| production_vehicle | PRODUCTION_LINE | 0 | 400 | 100 | 0 | 350.00 | 1.7500 |  |
-| co_beach_restaurant | PUB | 0 | 7 | 0 | 10 | 39.20 | 0.0500 |  |
-| co_cafe_pearl | PUB | 0 | 8 | 0 | 7 | 33.04 | 0.0500 |  |
-| kiosk_alcohol | PUB | 0 | 1 | 0 | 12 | 6.58 | 0.0500 |  |
-| pub | PUB | 0 | 5 | 0 | 12 | 32.90 | 0.0500 |  |
-| rail_depo | RAILDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| raildepobig | RAILDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_trafo_1 | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 14.0 МВт |
-| metro_trafo_2 | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 14.0 МВт |
-| metro_trafo_3 | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 14.0 МВт |
-| rail_trafo | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 14.0 МВт |
-| road_trafo | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 14.0 МВт |
-| tram_trafo | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 14.0 МВт |
-| garage_big | REPAIR_OFFICE | 0 | 80 | 0 | 0 | 56.00 | 0.0800 |  |
-| garage_small | REPAIR_OFFICE | 0 | 30 | 0 | 0 | 21.00 | 0.0500 |  |
-| garage_tiny | REPAIR_OFFICE | 0 | 15 | 0 | 0 | 10.50 | 0.0500 |  |
-| repair_service_office | REPAIR_OFFICE | 0 | 50 | 0 | 0 | 35.00 | 0.0500 |  |
-| muddy_depot | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_depo | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| road_depo_big | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| tram_depo_big | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| tram_depo_small | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| trolleybus_depo | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| school | SCHOOL | 0 | 10 | 15 | 12 | 76.30 | 0.0850 |  |
-| scrapyard | SCRAPYARD | 0 | 80 | 0 | 0 | 56.00 | 0.0800 |  |
-| scrapyard_ship | SCRAPYARD | 0 | 150 | 0 | 0 | 105.00 | 0.1500 |  |
-| secretpolice | SECRET_POLICE | 0 | 0 | 30 | 0 | 21.00 | 0.0500 |  |
-| sewage_discharge | SEWAGE_DISCHARGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| sewage_substation | SEWAGE_ENDSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| sewage_pump | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| sewage_pump_1 | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| sewage_pump_2 | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| sewage_pump_3 | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| sewage_switch | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| sewage_treatment_big | SEWAGE_TREATMENT | 0 | 20 | 0 | 0 | 14.00 | 0.0500 |  |
-| sewage_treatment_small | SEWAGE_TREATMENT | 0 | 10 | 0 | 0 | 7.00 | 0.0500 |  |
-| ship_dock | SHIP_DOCK | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| ship_dock_small | SHIP_DOCK | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| co_look_out_cafe | SHOP | 0 | 25 | 0 | 2 | 42.00 | 0.0500 |  |
-| kiosk_food | SHOP | 0 | 1 | 0 | 10 | 5.60 | 0.0500 |  |
-| shop_beta | SHOP | 0 | 30 | 0 | 6 | 109.20 | 0.0660 |  |
-| shop_clothes | SHOP | 0 | 15 | 0 | 7 | 61.95 | 0.0500 |  |
-| shop_grocerystore | SHOP | 0 | 15 | 0 | 7 | 61.95 | 0.0500 |  |
-| shop_lipa | SHOP | 0 | 25 | 0 | 6 | 91.00 | 0.0550 |  |
-| shop_mier | SHOP | 0 | 25 | 0 | 6 | 91.00 | 0.0550 |  |
-| shop_prior | SHOP | 0 | 45 | 0 | 9 | 229.95 | 0.1260 |  |
-| playground_football | SPORT | 0 | 1 | 0 | 22 | 11.48 | 0.0500 |  |
-| playground_tenis | SPORT | 0 | 1 | 0 | 5 | 3.15 | 0.0500 |  |
-| playground_tenis2 | SPORT | 0 | 1 | 0 | 5 | 3.15 | 0.0500 |  |
-| alumina_storage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| containerstorage_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| containerstorage_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| livestock_storage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_gravelstorage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_landfill | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| muddy_openstorage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| oil_storage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| oil_storage2 | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| oil_storage3 | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| spaceforvehicles_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| spaceforvehicles_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| storage_cement | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| storage_cement_v2 | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| storage_grain | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| storage_meat | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| storage_rumble_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| storage_rumble_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| warehouse_covered_combined | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| warehouse_open | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| warehouse_open_combined | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| warehouse_open_combined_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| waste_storage_basic_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| waste_storage_basic_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| waste_storage_crane_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| waste_storage_crane_big_rail | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| waste_storage_crane_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| eletric_substation | SUBSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 2.5 МВт |
-| tram_gate | TRAM_GATE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| eletric_switch_high | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 19.0 МВт |
-| eletric_switch_high_big | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 19.0 МВт |
-| eletric_switch_high_priority | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 19.0 МВт |
-| eletric_switch_low | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 19.0 МВт |
-| eletric_switch_low_big | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 19.0 МВт |
-| eletric_switch_low_priority | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 19.0 МВт |
-| eletric_transformator | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 19.0 МВт |
-| bigcontainerstand | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bigcontainerstand_big | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| containerstand_big | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| containerstand_big_pede | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| containerstand_small | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| containerstand_small_pede | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| university_medical | UNIVERSITY | 0 | 75 | 75 | 3 | 215.25 | 0.2400 |  |
-| university_medical_v2 | UNIVERSITY | 0 | 50 | 50 | 6 | 217.00 | 0.2200 |  |
-| university_soviet | UNIVERSITY | 0 | 100 | 100 | 3 | 287.00 | 0.3200 |  |
-| university_soviet_v2 | UNIVERSITY | 0 | 70 | 70 | 6 | 303.80 | 0.3080 |  |
-| university_technical | UNIVERSITY | 0 | 75 | 75 | 3 | 215.25 | 0.2400 |  |
-| university_technical_v2 | UNIVERSITY | 0 | 75 | 75 | 3 | 215.25 | 0.2400 |  |
-| bus_endstation_big | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bus_endstation_big_t | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| bus_endstation_small | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_endstation | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| metro_endstation_ground | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| rail_endstation | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| tram_endstation | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_substation | WATER_ENDSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_pumping_station_big | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_pumping_station_small | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_reservoir_big | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_reservoir_ground | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_reservoir_small | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_switch | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_switch_test | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 |  |
-| water_treatment_big | WATER_TREATMENT | 0 | 10 | 0 | 0 | 7.00 | 0.0500 |  |
-| water_treatment_small | WATER_TREATMENT | 0 | 5 | 0 | 0 | 3.50 | 0.0500 |  |
+| airport_road_connection | AIRPLANE_GATE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| airplaneparking_30 | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| airplaneparking_40 | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| airplaneparking_50 | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| airplaneparking_50_3x | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| airplaneparking_75 | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| heliport | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| heliport_3x | AIRPLANE_PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| control_tower | AIRPLANE_TOWER | 0 | 0 | 20 | 0 | 14.00 | 0.0500 | 0.400 | 0.400 |  |
+| co_art_gallery | ATTRACTION | 0 | 15 | 0 | 6 | 54.60 | 0.0500 | 0.300 | 0.300 |  |
+| co_beach | ATTRACTION | 0 | 5 | 0 | 18 | 0.00 | 0.0500 | 0.100 | 0.100 |  |
+| co_chamomile | ATTRACTION | 0 | 2 | 0 | 25 | 0.00 | 0.0500 | 0.040 | 0.040 |  |
+| co_ferris_wheel | ATTRACTION | 0 | 2 | 0 | 17 | 0.00 | 0.0500 | 0.040 | 0.040 |  |
+| co_museum_of_republic | ATTRACTION | 0 | 15 | 0 | 4 | 39.90 | 0.0500 | 0.300 | 0.300 |  |
+| co_museum_snp | ATTRACTION | 0 | 8 | 0 | 5 | 25.20 | 0.0500 | 0.160 | 0.160 |  |
+| co_palace_of_communism | ATTRACTION | 0 | 20 | 0 | 4 | 53.20 | 0.0500 | 0.400 | 0.400 |  |
+| co_sight_tower | ATTRACTION | 0 | 8 | 0 | 8 | 36.96 | 0.0500 | 0.160 | 0.160 |  |
+| co_sight_tower_2 | ATTRACTION | 0 | 10 | 0 | 9 | 51.10 | 0.0500 | 0.200 | 0.200 |  |
+| co_surprise | ATTRACTION | 0 | 2 | 0 | 23 | 0.00 | 0.0500 | 0.040 | 0.040 |  |
+| co_swimmingpool | ATTRACTION | 0 | 10 | 0 | 9 | 51.10 | 0.0500 | 0.200 | 0.200 |  |
+| co_swing_cage | ATTRACTION | 0 | 2 | 0 | 17 | 0.00 | 0.0500 | 0.040 | 0.040 |  |
+| co_zoo | ATTRACTION | 0 | 15 | 0 | 4 | 39.90 | 0.0500 | 0.300 | 0.300 |  |
+| rozhlas | BROADCAST | 0 | 100 | 50 | 0 | 105.00 | 0.0750 | 3.000 | 3.000 |  |
+| rozhlas_v2 | BROADCAST | 0 | 100 | 50 | 0 | 105.00 | 0.0750 | 3.000 | 3.000 |  |
+| televizia | BROADCAST | 0 | 120 | 70 | 0 | 133.00 | 0.0950 | 3.800 | 3.800 |  |
+| televizia_v2 | BROADCAST | 0 | 120 | 70 | 0 | 133.00 | 0.0950 | 3.800 | 3.800 |  |
+| airport_terminal_cargo | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| airport_terminal_cargo2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| bulk_rail_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bulk_road_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_gravel_loading_big | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| cableway_gravel_loading_small | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| cableway_gravel_unloading_big | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| cableway_gravel_unloading_small | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| harbor_cargo_medium | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| harbor_cargo_small | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| harbor_container | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| harbor_gravel_loading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| harbor_gravel_unloading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| harbor_pumping | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| heliport_cargo | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| heliport_cargo_3x | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| rail_pumping_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_sewage_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| rail_station_cargo | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_station_cargo1 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_station_cargo2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_station_cargo3 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_station_rumble_loading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_station_rumble_loading_v2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_station_rumble_unloading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_station_rumble_unloading_v2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_water_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| road_cargo_rumble_loading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_cargo_rumble_unloading | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_cargo_station_big | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_cargo_station_small | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_cargostation | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_cargostation_deadend_1 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_cargostation_deadend_2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_cargostation_oneway | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_cargostation_v2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_pumping_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_pumping_station_v2 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_pumping_station_v3 | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_sewage_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| road_water_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| sewage_filling_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| water_filling_station | CARGO_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| cardealer | CAR_DEALER | 0 | 15 | 0 | 0 | 10.50 | 0.0500 | 0.300 | 0.300 |  |
+| civ_dedina7a | CHURCH | 0 | 1 | 1 | 40 | 0.00 | 0.0500 | 0.040 | 0.040 |  |
+| civ_kirche1 | CHURCH | 0 | 2 | 2 | 80 | 0.00 | 0.0500 | 0.080 | 0.080 |  |
+| civ_kirche2 | CHURCH | 0 | 4 | 4 | 80 | 0.00 | 0.0680 | 0.160 | 0.160 |  |
+| civ_kirche3 | CHURCH | 0 | 7 | 7 | 80 | 0.00 | 0.1190 | 0.280 | 0.280 |  |
+| civ_kostolik | CHURCH | 0 | 2 | 2 | 40 | 42.00 | 0.0500 | 0.080 | 0.080 |  |
+| cityhall | CITYHALL | 0 | 25 | 0 | 0 | 17.50 | 0.0500 | 0.500 | 0.500 |  |
+| construction_office | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| construction_office2 | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| construction_office3 | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| construction_office4 | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| construction_office5 | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| construction_office_helicopter | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| muddy_construction | CONSTRUCTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_construction_office | CONSTRUCTION_OFFICE_RAIL | 0 | 60 | 0 | 0 | 0.00 | 0.0500 | 1.200 | 1.200 |  |
+| rail_construction_office_big | CONSTRUCTION_OFFICE_RAIL | 0 | 170 | 0 | 0 | 0.00 | 0.0500 | 3.400 | 3.400 |  |
+| container_packing | CONTAINER_FACILITY | 0 | 60 | 0 | 0 | 0.00 | 0.0500 | 1.200 | 1.200 |  |
+| container_unpacking | CONTAINER_FACILITY | 0 | 60 | 0 | 0 | 0.00 | 0.0500 | 1.200 | 1.200 |  |
+| cooling_tower | COOLING_TOWER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| court | COURT_HOUSE | 0 | 50 | 30 | 0 | 56.00 | 0.0500 | 1.600 | 1.600 |  |
+| court_small | COURT_HOUSE | 0 | 15 | 10 | 0 | 17.50 | 0.0500 | 0.500 | 0.500 |  |
+| zoll_air_soviet | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| zoll_air_west | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| zoll_milhost | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| zoll_sahy | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| zoll_siatre | CUSTOMHOUSE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| demolition_office | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| demolition_office_big | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| demolition_office_helicopter | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| demolition_office_small | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| muddy_demolition | DEMOLITION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| distribution_office_medium | DISTRIBUTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| distribution_office_small | DISTRIBUTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| muddy_distribution | DISTRIBUTION_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| distribution_office_rail | DISTRIBUTION_OFFICE_RAIL | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| eletric_transformator_customin | ELETRIC_EXPORT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| foreign_eletric_player | ELETRIC_EXPORT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| eletric_transformator_customout | ELETRIC_IMPORT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bulk_engine | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| bulk_engine_3in_e | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bulk_engine_3in_f | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bulk_engine_3in_g | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bulk_engine_3in_h | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bulk_engine_overpasse | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| bulk_engine_overpassf | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| bulk_engine_overpassg | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bulk_enginf | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| bulk_enging | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| bulk_enginh | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| cableway_pole_heavy_1 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_pole_heavy_2 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_pole_heavy_3 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_pole_heavy_4 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_pole_light_1 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_pole_light_2 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_pole_light_3 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_pole_light_4 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| conveyor_engine | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| conveyor_engine_3in_e | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| conveyor_engine_3in_f | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| conveyor_engine_3in_g | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| conveyor_engine_3in_h | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| conveyor_engine_overpasse | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| conveyor_engine_overpassf | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| conveyor_engine_overpassg | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| conveyor_enginf | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| conveyor_enging | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| conveyor_enginh | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| pipe_pumping_station | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| pipe_pumping_station2 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| pipe_pumping_station_underground | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| pipe_pumping_station_underground2 | ENGINE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| alumina_plant | FACTORY | 0 | 370 | 0 | 0 | 259.00 | 0.1850 | 7.400 | 7.400 |  |
+| aluminium_plant | FACTORY | 0 | 350 | 0 | 0 | 245.00 | 0.1750 | 7.000 | 7.000 |  |
+| animal_farm | FACTORY | 0 | 50 | 0 | 0 | 0.00 | 0.0500 | 1.000 | 1.000 |  |
+| asphalt_plant | FACTORY | 0 | 5 | 0 | 0 | 0.00 | 0.0500 | 0.100 | 0.100 |  |
+| bauxite_processing | FACTORY | 0 | 25 | 0 | 0 | 17.50 | 0.0500 | 0.500 | 0.500 |  |
+| brick_factory | FACTORY | 0 | 75 | 0 | 0 | 0.00 | 0.0500 | 1.500 | 1.500 |  |
+| brick_factory_v2 | FACTORY | 0 | 75 | 0 | 0 | 0.00 | 0.0500 | 1.500 | 1.500 |  |
+| cement_plant | FACTORY | 0 | 30 | 0 | 0 | 0.00 | 0.0500 | 0.600 | 0.600 |  |
+| cement_plant_v2 | FACTORY | 0 | 30 | 0 | 0 | 0.00 | 0.0500 | 0.600 | 0.600 |  |
+| cement_plant_v3 | FACTORY | 0 | 30 | 0 | 0 | 0.00 | 0.0500 | 0.600 | 0.600 |  |
+| chemical_plant | FACTORY | 0 | 60 | 0 | 0 | 0.00 | 0.0500 | 1.200 | 1.200 |  |
+| clothing_factory | FACTORY | 0 | 80 | 0 | 0 | 0.00 | 0.0600 | 1.600 | 1.600 |  |
+| coal_processing | FACTORY | 0 | 30 | 0 | 0 | 0.00 | 0.0500 | 0.600 | 0.600 |  |
+| concrete_plant | FACTORY | 0 | 5 | 0 | 0 | 0.00 | 0.0500 | 0.100 | 0.100 |  |
+| concrete_plant_v2 | FACTORY | 0 | 5 | 0 | 0 | 0.00 | 0.0500 | 0.100 | 0.100 |  |
+| distillery | FACTORY | 0 | 100 | 0 | 0 | 70.00 | 0.0500 | 2.000 | 2.000 |  |
+| eletronic_components_factory | FACTORY | 0 | 150 | 0 | 0 | 0.00 | 0.1050 | 3.000 | 3.000 |  |
+| eletronic_factory | FACTORY | 0 | 150 | 0 | 0 | 0.00 | 0.0900 | 3.000 | 3.000 |  |
+| explosive_factory | FACTORY | 0 | 75 | 0 | 0 | 52.50 | 0.0500 | 1.500 | 1.500 |  |
+| fabric_factory | FACTORY | 0 | 100 | 0 | 0 | 0.00 | 0.0500 | 2.000 | 2.000 |  |
+| fertilizer | FACTORY | 0 | 25 | 0 | 0 | 0.00 | 0.0500 | 0.500 | 0.500 |  |
+| fertilizer_liquid | FACTORY | 0 | 25 | 0 | 0 | 0.00 | 0.0500 | 0.500 | 0.500 |  |
+| fertilizer_liquid_v2 | FACTORY | 0 | 25 | 0 | 0 | 0.00 | 0.0500 | 0.500 | 0.500 |  |
+| food_factory | FACTORY | 0 | 170 | 0 | 0 | 0.00 | 0.1275 | 3.400 | 3.400 |  |
+| gravel_processing | FACTORY | 0 | 15 | 0 | 0 | 0.00 | 0.0500 | 0.300 | 0.300 |  |
+| gravel_processing_small | FACTORY | 0 | 5 | 0 | 0 | 0.00 | 0.0500 | 0.100 | 0.100 |  |
+| incinerator_big | FACTORY | 0 | 25 | 0 | 0 | 0.00 | 0.0500 | 0.500 | 0.500 |  |
+| incinerator_small | FACTORY | 0 | 15 | 0 | 0 | 0.00 | 0.0500 | 0.300 | 0.300 |  |
+| iron_processing | FACTORY | 0 | 15 | 0 | 0 | 0.00 | 0.0500 | 0.300 | 0.300 |  |
+| mechanical_components_factory | FACTORY | 0 | 150 | 0 | 0 | 0.00 | 0.1350 | 3.000 | 3.000 |  |
+| nuclear_fuel_plant | FACTORY | 0 | 50 | 70 | 0 | 0.00 | 0.0600 | 2.400 | 2.400 |  |
+| oil_rafinery | FACTORY | 0 | 500 | 0 | 0 | 0.00 | 0.2500 | 10.000 | 10.000 |  |
+| oil_rafinery_v2 | FACTORY | 0 | 500 | 0 | 0 | 0.00 | 0.2500 | 10.000 | 10.000 |  |
+| panels_factory | FACTORY | 0 | 65 | 0 | 0 | 0.00 | 0.0500 | 1.300 | 1.300 |  |
+| panels_factory_v2 | FACTORY | 0 | 65 | 0 | 0 | 0.00 | 0.0500 | 1.300 | 1.300 |  |
+| panels_factory_v3 | FACTORY | 0 | 65 | 0 | 0 | 0.00 | 0.0500 | 1.300 | 1.300 |  |
+| plastics_factory | FACTORY | 0 | 60 | 0 | 0 | 0.00 | 0.0500 | 1.200 | 1.200 |  |
+| sawmill | FACTORY | 0 | 20 | 0 | 0 | 0.00 | 0.0500 | 0.400 | 0.400 |  |
+| slaughterhouse | FACTORY | 0 | 50 | 0 | 0 | 0.00 | 0.0500 | 1.000 | 1.000 |  |
+| steel_mill | FACTORY | 0 | 500 | 0 | 0 | 0.00 | 0.2500 | 10.000 | 10.000 |  |
+| steel_mill_v2 | FACTORY | 0 | 500 | 0 | 0 | 0.00 | 0.2500 | 10.000 | 10.000 |  |
+| uranium_conversion | FACTORY | 0 | 80 | 40 | 0 | 0.00 | 0.0600 | 2.400 | 2.400 |  |
+| uranium_processing | FACTORY | 0 | 60 | 15 | 0 | 0.00 | 0.0500 | 1.500 | 1.500 |  |
+| waste_aluminiumrecycling | FACTORY | 0 | 25 | 0 | 0 | 0.00 | 0.0500 | 0.500 | 0.500 |  |
+| waste_aluminiumseparation | FACTORY | 0 | 20 | 0 | 0 | 0.00 | 0.0500 | 0.400 | 0.400 |  |
+| waste_generalseparation | FACTORY | 0 | 50 | 0 | 0 | 0.00 | 0.0500 | 1.000 | 1.000 |  |
+| waste_gravelrecycling | FACTORY | 0 | 15 | 0 | 0 | 0.00 | 0.0500 | 0.300 | 0.300 |  |
+| waste_plasticrecycling | FACTORY | 0 | 20 | 0 | 0 | 0.00 | 0.0500 | 0.400 | 0.400 |  |
+| waste_steelrecycling | FACTORY | 0 | 30 | 0 | 0 | 0.00 | 0.0500 | 0.600 | 0.600 |  |
+| waste_steelseparation | FACTORY | 0 | 15 | 0 | 0 | 0.00 | 0.0500 | 0.300 | 0.300 |  |
+| waste_treatment_plant | FACTORY | 0 | 30 | 0 | 0 | 0.00 | 0.0500 | 0.600 | 0.600 |  |
+| waste_treatment_plant_v2 | FACTORY | 0 | 50 | 0 | 0 | 0.00 | 0.0500 | 1.000 | 1.000 |  |
+| farm | FARM | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| farm_large | FARM | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| farm_medium | FARM | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| farm_small | FARM | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| field_big | FIELD | 0 | 250 | 0 | 0 | 0.00 | 0.1250 | 5.000 | 5.000 |  |
+| field_medium | FIELD | 0 | 150 | 0 | 0 | 0.00 | 0.0750 | 3.000 | 3.000 |  |
+| field_small | FIELD | 0 | 75 | 0 | 0 | 0.00 | 0.0500 | 1.500 | 1.500 |  |
+| firestation | FIRESTATION | 0 | 40 | 0 | 0 | 28.00 | 0.0700 | 0.800 | 0.800 |  |
+| foreign_pipe_player | FOREIGN_PIPELINE_EXPORT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| forklift_crossing | FORKLIFT_GARAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| forklift_station | FORKLIFT_GARAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| muddy_technical | GARBAGE_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| technical_services | GARBAGE_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| technical_services_big | GARBAGE_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| technical_services_small | GARBAGE_OFFICE | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| gas_station | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| gas_station_v2 | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| gas_station_v3 | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| muddy_gasstation | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_gas_station | GAS_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| heating_endstation_big | HEATING_ENDSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.3000 | 0.000 | 0.000 | тепло 3000 |
+| heating_endstation_small | HEATING_ENDSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 | тепло 1000 |
+| heating_plant_big | HEATING_PLANT | 0 | 30 | 0 | 0 | 21.00 | 0.0500 | 0.600 | 0.600 |  |
+| heating_plant_small | HEATING_PLANT | 0 | 7 | 0 | 0 | 4.90 | 0.0500 | 0.140 | 0.140 |  |
+| incinerator_heat | HEATING_PLANT | 0 | 15 | 0 | 0 | 10.50 | 0.0500 | 0.300 | 0.300 |  |
+| heating_pumpingstation | HEATING_SWITCH | 0 | 0 | 0 | 0 | 0.00 | 0.4000 | 0.000 | 0.000 | тепло 3000 |
+| heating_pumpingstation_small | HEATING_SWITCH | 0 | 0 | 0 | 0 | 0.00 | 0.2000 | 0.000 | 0.000 | тепло 1000 |
+| hospital | HOSPITAL | 0 | 50 | 50 | 3 | 143.50 | 0.1300 | 2.000 | 2.000 |  |
+| hospital_v2 | HOSPITAL | 0 | 30 | 30 | 3 | 86.10 | 0.0980 | 1.200 | 1.200 |  |
+| hotel | HOTEL | 0 | 20 | 0 | 5 | 63.00 | 0.0500 | 4.900 | 4.900 |  |
+| hotel_horsky | HOTEL | 0 | 15 | 0 | 5 | 47.25 | 0.0500 | 3.675 | 3.675 |  |
+| hotel_hutnik_big | HOTEL | 0 | 50 | 0 | 3 | 108.50 | 0.0500 | 7.750 | 7.750 |  |
+| hotel_hutnik_small | HOTEL | 0 | 14 | 0 | 6 | 50.96 | 0.0500 | 4.060 | 4.060 |  |
+| kindergarten | KINDERGARTEN | 0 | 10 | 0 | 10 | 56.00 | 0.0500 | 0.200 | 0.200 |  |
+| co_theatre | KINO | 0 | 20 | 0 | 5 | 63.00 | 0.0500 | 0.400 | 0.400 |  |
+| kino | KINO | 0 | 5 | 0 | 30 | 77.00 | 0.0500 | 0.100 | 0.100 |  |
+| kino_druzba | KINO | 0 | 6 | 0 | 25 | 77.70 | 0.0500 | 0.120 | 0.120 |  |
+| civ_dedina1a | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 | 0.135 | 0.135 |  |
+| civ_dedina1b | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 | 0.135 | 0.135 |  |
+| civ_dedina2a | LIVING | 6 | 0 | 0 | 0 | 4.20 | 0.0500 | 0.270 | 0.270 |  |
+| civ_dedina3a | LIVING | 4 | 0 | 0 | 0 | 2.80 | 0.0500 | 0.180 | 0.180 |  |
+| civ_dedina3b | LIVING | 4 | 0 | 0 | 0 | 2.80 | 0.0500 | 0.180 | 0.180 |  |
+| civ_dedina4a | LIVING | 10 | 0 | 0 | 0 | 7.00 | 0.0500 | 0.450 | 0.450 |  |
+| civ_dedina5a | LIVING | 13 | 0 | 0 | 0 | 9.10 | 0.0500 | 0.585 | 0.585 |  |
+| civ_dedina6a | LIVING | 4 | 0 | 0 | 0 | 2.80 | 0.0500 | 0.180 | 0.180 |  |
+| civ_dedina_drevenica1 | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 | 0.135 | 0.135 |  |
+| civ_dedina_drevenica2 | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 | 0.135 | 0.135 |  |
+| civ_dedina_drevenica5 | LIVING | 3 | 0 | 0 | 0 | 2.10 | 0.0500 | 0.135 | 0.135 |  |
+| civ_dedinaru1 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 | 0.225 | 0.225 |  |
+| civ_dedinaru2 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 | 0.225 | 0.225 |  |
+| civ_dedinaru3 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 | 0.225 | 0.225 |  |
+| civ_dedinaru4 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 | 0.225 | 0.225 |  |
+| civ_dedinaru5 | LIVING | 5 | 0 | 0 | 0 | 3.50 | 0.0500 | 0.225 | 0.225 |  |
+| civ_mesto1 | LIVING | 95 | 0 | 0 | 0 | 66.50 | 0.1900 | 4.275 | 4.275 |  |
+| civ_mesto2 | LIVING | 120 | 0 | 0 | 0 | 84.00 | 0.2400 | 5.400 | 5.400 |  |
+| civ_mesto3 | LIVING | 75 | 0 | 0 | 0 | 52.50 | 0.1500 | 3.375 | 3.375 |  |
+| civ_mesto4 | LIVING | 135 | 0 | 0 | 0 | 94.50 | 0.2700 | 6.075 | 6.075 |  |
+| civ_mesto5 | LIVING | 85 | 0 | 0 | 0 | 59.50 | 0.1700 | 3.825 | 3.825 |  |
+| civ_newoldcity1 | LIVING | 20 | 0 | 0 | 0 | 14.00 | 0.0500 | 0.900 | 0.900 |  |
+| civ_newoldcity10 | LIVING | 25 | 0 | 0 | 0 | 17.50 | 0.0500 | 1.125 | 1.125 |  |
+| civ_newoldcity2 | LIVING | 20 | 0 | 0 | 0 | 14.00 | 0.0500 | 0.900 | 0.900 |  |
+| civ_newoldcity3 | LIVING | 25 | 0 | 0 | 0 | 17.50 | 0.0500 | 1.125 | 1.125 |  |
+| civ_newoldcity4 | LIVING | 25 | 0 | 0 | 0 | 17.50 | 0.0500 | 1.125 | 1.125 |  |
+| civ_newoldcity5 | LIVING | 20 | 0 | 0 | 0 | 14.00 | 0.0500 | 0.900 | 0.900 |  |
+| civ_newoldcity6 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 | 1.350 | 1.350 |  |
+| civ_newoldcity7 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 | 1.350 | 1.350 |  |
+| civ_newoldcity8 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 | 1.350 | 1.350 |  |
+| civ_newoldcity9 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 | 1.350 | 1.350 |  |
+| hrusevka | LIVING | 115 | 0 | 0 | 0 | 80.50 | 0.2300 | 5.175 | 5.175 |  |
+| internat1 | LIVING | 85 | 0 | 0 | 0 | 59.50 | 0.1700 | 3.825 | 3.825 |  |
+| internat2 | LIVING | 85 | 0 | 0 | 0 | 59.50 | 0.1700 | 3.825 | 3.825 |  |
+| panelak_juh1 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| panelak_juh2 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| panelak_juh3 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| panelak_kvp1 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| panelak_kvp2 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| panelak_kvp3 | LIVING | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| panelak_moderny | LIVING | 180 | 0 | 0 | 0 | 126.00 | 0.3600 | 8.100 | 8.100 |  |
+| panelak_moderny_uzky | LIVING | 220 | 0 | 0 | 0 | 154.00 | 0.4400 | 9.900 | 9.900 |  |
+| panelakl4_dlhyA | LIVING | 105 | 0 | 0 | 0 | 73.50 | 0.2100 | 4.725 | 4.725 |  |
+| panelakl4_dlhyB | LIVING | 145 | 0 | 0 | 0 | 101.50 | 0.2900 | 6.525 | 6.525 |  |
+| panelakl4_dlhyC | LIVING | 157 | 0 | 0 | 0 | 109.90 | 0.3140 | 7.065 | 7.065 |  |
+| panelakl4_kocka | LIVING | 27 | 0 | 0 | 0 | 18.90 | 0.0540 | 1.215 | 1.215 |  |
+| panelakl4_veziak | LIVING | 87 | 0 | 0 | 0 | 60.90 | 0.1740 | 3.915 | 3.915 |  |
+| residental_brick_1 | LIVING | 20 | 0 | 0 | 0 | 14.00 | 0.0500 | 0.900 | 0.900 |  |
+| residental_brick_2 | LIVING | 50 | 0 | 0 | 0 | 35.00 | 0.1000 | 2.250 | 2.250 |  |
+| residental_brick_3 | LIVING | 157 | 0 | 0 | 0 | 109.90 | 0.3140 | 7.065 | 7.065 |  |
+| residental_brick_4 | LIVING | 40 | 0 | 0 | 0 | 28.00 | 0.0800 | 1.800 | 1.800 |  |
+| residental_brick_5 | LIVING | 110 | 0 | 0 | 0 | 77.00 | 0.2200 | 4.950 | 4.950 |  |
+| residental_brick_6 | LIVING | 30 | 0 | 0 | 0 | 21.00 | 0.0600 | 1.350 | 1.350 |  |
+| residental_brick_7 | LIVING | 10 | 0 | 0 | 0 | 7.00 | 0.0500 | 0.450 | 0.450 |  |
+| bauxite_mine | MINE_BAUXITE | 0 | 45 | 0 | 0 | 31.50 | 0.0725 | 0.900 | 0.900 |  |
+| coal_mine | MINE_COAL | 0 | 220 | 0 | 0 | 0.00 | 0.1540 | 4.400 | 4.400 |  |
+| gravel_mine_big | MINE_GRAVEL | 0 | 100 | 0 | 0 | 0.00 | 0.0600 | 0.000 | 0.000 |  |
+| gravelmine | MINE_GRAVEL | 0 | 40 | 0 | 0 | 0.00 | 0.0540 | 0.000 | 0.000 |  |
+| iron_mine | MINE_IRON | 0 | 250 | 0 | 0 | 0.00 | 0.1875 | 5.000 | 5.000 |  |
+| oil_mine | MINE_OIL | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| uranium_mine | MINE_URANIUM | 0 | 100 | 0 | 0 | 0.00 | 0.0750 | 2.000 | 2.000 |  |
+| water_well_big | MINE_WATER | 0 | 7 | 0 | 0 | 0.00 | 0.0500 | 0.140 | 0.140 |  |
+| water_well_small | MINE_WATER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| water_to_water | MINE_WATER_SURFACE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| woodcutting_post | MINE_WOOD | 0 | 10 | 0 | 0 | 0.00 | 0.0510 | 0.200 | 0.200 |  |
+| co_museum_pyramid | MONUMENT | 0 | 20 | 0 | 5 | 63.00 | 0.0500 | 0.400 | 0.400 |  |
+| fountain1 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| fountain2 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| fountain3 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| monument_emblem | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| monument_molotok1 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| monument_molotok2 | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| monument_star | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| monument_statue_big | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| monument_statue_small | MONUMENT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| orphanage | ORPHANAGE | 0 | 40 | 0 | 4 | 106.40 | 0.0500 | 8.000 | 8.000 |  |
+| muddy_parking | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| parking_big | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| parking_medium | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| parking_small | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| parkingoptimized_big | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| parkingoptimized_medium | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| parkingoptimized_medium_v2 | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| parkingoptimized_small | PARKING | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| airport_terminal | PASSANGER_STATION | 1200 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| airport_terminal_small | PASSANGER_STATION | 400 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| busstop | PASSANGER_STATION | 200 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| busstop_t | PASSANGER_STATION | 200 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| cableway_station_big | PASSANGER_STATION | 500 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| cableway_station_small | PASSANGER_STATION | 250 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| harbor_passanger_medium | PASSANGER_STATION | 1000 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| harbor_passanger_small | PASSANGER_STATION | 1000 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| metro_strasicka | PASSANGER_STATION | 600 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_zelivskeho | PASSANGER_STATION | 800 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_zelivskehp | PASSANGER_STATION | 800 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_zelivskehq | PASSANGER_STATION | 800 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| muddy_busstop | PASSANGER_STATION | 100 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| passengerheliport | PASSANGER_STATION | 250 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| rail_station_passanger | PASSANGER_STATION | 1200 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_station_passanger_small | PASSANGER_STATION | 500 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| railstation_aboveground | PASSANGER_STATION | 400 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| railstation_aboveground_big | PASSANGER_STATION | 900 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| railstation_groundlevel | PASSANGER_STATION | 400 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| railstation_groundlevel_big | PASSANGER_STATION | 900 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_busstation | PASSANGER_STATION | 500 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_busstation_small | PASSANGER_STATION | 230 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_busstation_v2 | PASSANGER_STATION | 500 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| tram_stop_big | PASSANGER_STATION | 400 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| tram_stop_small | PASSANGER_STATION | 250 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| fence_gate | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| fence_gate_park_vases | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| fence_gate_rail | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| gate_brick | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| gate_iron | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| gate_mesh | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| gate_plank | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_vchod_eskalator | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_vchod_eskalator_new | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_vchod_eskalator_nex | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_vchod_eskalator_ney | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_vchod_schody | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_vchod_schody_new | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_vchod_schody_nex | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_vchod_schody_ney | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| pedestrian_bridge_concrete | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| pedestrian_bridge_steel | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| pedestrian_tunel_entry | PEDESTRIAN_BRIDGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| police | POLICE_STATION | 0 | 40 | 40 | 0 | 56.00 | 0.0900 | 1.600 | 1.600 |  |
+| police_small | POLICE_STATION | 0 | 12 | 12 | 0 | 16.80 | 0.0620 | 0.480 | 0.480 |  |
+| pollution_meter | POLLUTION_METER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| incinerator_powerplant | POWERPLANT | 0 | 20 | 0 | 0 | 0.00 | 0.0500 | 0.400 | 0.400 |  |
+| powerplant_coal | POWERPLANT | 0 | 20 | 0 | 0 | 0.00 | 0.0500 | 0.400 | 0.400 |  |
+| powerplant_coal_v2 | POWERPLANT | 0 | 20 | 0 | 0 | 0.00 | 0.0500 | 0.400 | 0.400 |  |
+| powerplant_gas | POWERPLANT | 0 | 15 | 0 | 0 | 0.00 | 0.0500 | 0.300 | 0.300 |  |
+| powerplant_nuclear_double | POWERPLANT | 0 | 80 | 40 | 0 | 0.00 | 0.0600 | 2.400 | 2.400 |  |
+| powerplant_nuclear_single | POWERPLANT | 0 | 40 | 20 | 0 | 0.00 | 0.0500 | 1.200 | 1.200 |  |
+| powerplant_solar | POWERPLANT | 0 | 8 | 0 | 0 | 0.00 | 0.0500 | 0.160 | 0.160 |  |
+| powerplant_wind1 | POWERPLANT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| powerplant_wind2 | POWERPLANT | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| prison | PRISON | 0 | 70 | 0 | 3 | 151.90 | 0.0560 | 10.850 | 10.850 |  |
+| drydock | PRODUCTION_LINE | 0 | 400 | 100 | 0 | 350.00 | 1.5000 | 10.000 | 10.000 |  |
+| production_airplane | PRODUCTION_LINE | 0 | 500 | 300 | 0 | 0.00 | 2.8000 | 16.000 | 16.000 |  |
+| production_train | PRODUCTION_LINE | 0 | 400 | 100 | 0 | 0.00 | 1.5000 | 10.000 | 10.000 |  |
+| production_train2 | PRODUCTION_LINE | 0 | 400 | 100 | 0 | 0.00 | 1.5000 | 10.000 | 10.000 |  |
+| production_vehicle | PRODUCTION_LINE | 0 | 400 | 100 | 0 | 0.00 | 1.5000 | 10.000 | 10.000 |  |
+| co_beach_restaurant | PUB | 0 | 7 | 0 | 10 | 39.20 | 0.0500 | 0.140 | 0.140 |  |
+| co_cafe_pearl | PUB | 0 | 8 | 0 | 7 | 33.04 | 0.0500 | 0.160 | 0.160 |  |
+| kiosk_alcohol | PUB | 0 | 1 | 0 | 12 | 6.58 | 0.0500 | 0.020 | 0.020 |  |
+| pub | PUB | 0 | 5 | 0 | 12 | 32.90 | 0.0500 | 0.100 | 0.100 |  |
+| rail_depo | RAILDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| raildepobig | RAILDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_trafo_1 | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 14.0 МВт |
+| metro_trafo_2 | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 14.0 МВт |
+| metro_trafo_3 | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 14.0 МВт |
+| rail_trafo | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 14.0 МВт |
+| road_trafo | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 14.0 МВт |
+| tram_trafo | RAIL_TRAFO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 14.0 МВт |
+| garage_big | REPAIR_OFFICE | 0 | 80 | 0 | 0 | 0.00 | 0.0900 | 1.600 | 1.600 |  |
+| garage_small | REPAIR_OFFICE | 0 | 30 | 0 | 0 | 0.00 | 0.0650 | 0.600 | 0.600 |  |
+| garage_tiny | REPAIR_OFFICE | 0 | 15 | 0 | 0 | 0.00 | 0.0575 | 0.300 | 0.300 |  |
+| repair_service_office | REPAIR_OFFICE | 0 | 50 | 0 | 0 | 35.00 | 0.0750 | 1.000 | 1.000 |  |
+| muddy_depot | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_depo | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| road_depo_big | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| tram_depo_big | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| tram_depo_small | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| trolleybus_depo | ROADDEPO | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| school | SCHOOL | 0 | 10 | 15 | 12 | 76.30 | 0.0500 | 0.500 | 0.500 |  |
+| scrapyard | SCRAPYARD | 0 | 80 | 0 | 0 | 56.00 | 0.0500 | 1.600 | 1.600 |  |
+| scrapyard_ship | SCRAPYARD | 0 | 150 | 0 | 0 | 105.00 | 0.0750 | 3.000 | 3.000 |  |
+| secretpolice | SECRET_POLICE | 0 | 0 | 30 | 0 | 21.00 | 0.0650 | 0.600 | 0.600 |  |
+| sewage_discharge | SEWAGE_DISCHARGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| sewage_substation | SEWAGE_ENDSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| sewage_pump | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| sewage_pump_1 | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| sewage_pump_2 | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.1000 | 0.000 | 0.000 |  |
+| sewage_pump_3 | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.1500 | 0.000 | 0.000 |  |
+| sewage_switch | SEWAGE_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| sewage_treatment_big | SEWAGE_TREATMENT | 0 | 20 | 0 | 0 | 0.00 | 0.0500 | 0.400 | 0.400 |  |
+| sewage_treatment_small | SEWAGE_TREATMENT | 0 | 10 | 0 | 0 | 0.00 | 0.0500 | 0.200 | 0.200 |  |
+| ship_dock | SHIP_DOCK | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| ship_dock_small | SHIP_DOCK | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| co_look_out_cafe | SHOP | 0 | 25 | 0 | 2 | 42.00 | 0.0500 | 0.500 | 0.500 |  |
+| kiosk_food | SHOP | 0 | 1 | 0 | 10 | 5.60 | 0.0500 | 0.020 | 0.020 |  |
+| shop_beta | SHOP | 0 | 30 | 0 | 6 | 109.20 | 0.0500 | 0.600 | 0.600 |  |
+| shop_clothes | SHOP | 0 | 15 | 0 | 7 | 61.95 | 0.0500 | 0.300 | 0.300 |  |
+| shop_grocerystore | SHOP | 0 | 15 | 0 | 7 | 61.95 | 0.0500 | 0.300 | 0.300 |  |
+| shop_lipa | SHOP | 0 | 25 | 0 | 6 | 91.00 | 0.0500 | 0.500 | 0.500 |  |
+| shop_mier | SHOP | 0 | 25 | 0 | 6 | 91.00 | 0.0500 | 0.500 | 0.500 |  |
+| shop_prior | SHOP | 0 | 45 | 0 | 9 | 229.95 | 0.0630 | 0.900 | 0.900 |  |
+| playground_football | SPORT | 0 | 1 | 0 | 22 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| playground_tenis | SPORT | 0 | 1 | 0 | 5 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| playground_tenis2 | SPORT | 0 | 1 | 0 | 5 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| alumina_storage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| containerstorage_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| containerstorage_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| livestock_storage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| muddy_gravelstorage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| muddy_landfill | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| muddy_openstorage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| oil_storage | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| oil_storage2 | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| oil_storage3 | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| spaceforvehicles_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| spaceforvehicles_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| storage_cement | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| storage_cement_v2 | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| storage_grain | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| storage_meat | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| storage_rumble_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| storage_rumble_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| warehouse_covered_combined | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| warehouse_open | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| warehouse_open_combined | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| warehouse_open_combined_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| waste_storage_basic_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| waste_storage_basic_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| waste_storage_crane_big | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| waste_storage_crane_big_rail | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| waste_storage_crane_small | STORAGE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| eletric_substation | SUBSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 2.5 МВт |
+| tram_gate | TRAM_GATE | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| eletric_switch_high | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 19.0 МВт |
+| eletric_switch_high_big | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 19.0 МВт |
+| eletric_switch_high_priority | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 19.0 МВт |
+| eletric_switch_low | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 19.0 МВт |
+| eletric_switch_low_big | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 19.0 МВт |
+| eletric_switch_low_priority | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 19.0 МВт |
+| eletric_transformator | TRANSFORMATOR | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 | 19.0 МВт |
+| bigcontainerstand | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bigcontainerstand_big | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| containerstand_big | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| containerstand_big_pede | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| containerstand_small | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| containerstand_small_pede | TRASH_CONTAINER | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| university_medical | UNIVERSITY | 0 | 75 | 75 | 3 | 215.25 | 0.1200 | 3.000 | 3.000 |  |
+| university_medical_v2 | UNIVERSITY | 0 | 50 | 50 | 6 | 217.00 | 0.1100 | 2.000 | 2.000 |  |
+| university_soviet | UNIVERSITY | 0 | 100 | 100 | 3 | 287.00 | 0.1600 | 4.000 | 4.000 |  |
+| university_soviet_v2 | UNIVERSITY | 0 | 70 | 70 | 6 | 303.80 | 0.1540 | 2.800 | 2.800 |  |
+| university_technical | UNIVERSITY | 0 | 75 | 75 | 3 | 215.25 | 0.1200 | 3.000 | 3.000 |  |
+| university_technical_v2 | UNIVERSITY | 0 | 75 | 75 | 3 | 215.25 | 0.1200 | 3.000 | 3.000 |  |
+| bus_endstation_big | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| bus_endstation_big_t | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| bus_endstation_small | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| metro_endstation | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| metro_endstation_ground | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| rail_endstation | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0500 | 0.000 | 0.000 |  |
+| tram_endstation | WAITING_STATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| water_substation | WATER_ENDSTATION | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| water_pumping_station_big | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 1.2000 | 0.000 | 0.000 |  |
+| water_pumping_station_small | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.6000 | 0.000 | 0.000 |  |
+| water_reservoir_big | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| water_reservoir_ground | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| water_reservoir_small | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| water_switch | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| water_switch_test | WATER_PUMP | 0 | 0 | 0 | 0 | 0.00 | 0.0000 | 0.000 | 0.000 |  |
+| water_treatment_big | WATER_TREATMENT | 0 | 10 | 0 | 0 | 0.00 | 0.0500 | 0.200 | 0.200 |  |
+| water_treatment_small | WATER_TREATMENT | 0 | 5 | 0 | 0 | 0.00 | 0.0500 | 0.100 | 0.100 |  |

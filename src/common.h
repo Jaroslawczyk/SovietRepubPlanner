@@ -81,6 +81,12 @@ struct BuildingType {
     int   serve = 0;        // $CITIZEN_ABLE_SERVE
     float fLive = 1.0f, fLiveServe = 0.2f, fLight = 1.0f, fLightServe = 0.2f;   // $ELETRIC_CONSUMPTION_*_FACTOR*
     bool  heatBig = false;  // has $CONNECTION_HEATING_BIG
+    float engineSpeed = 0;  // $ENGINE_SPEED (pumps): adds engineSpeed x 0.01 MW
+    float fWater = 1.0f;    // $WATER_CONSUMPTION_LIVING_WORKER_FACTOR
+    int   fuelStorages = 0; // $STORAGE_FUEL lines
+    bool  noHeat = false, noPower = false, noWater = false, noSewage = false;   // $HEATING_DISABLE, $ELECTRIC_DISABLE, $WATERSEWAGE_DISABLE, $SEWAGE_DISABLE
+    float waterLoad = 0;    // water tank the building fills from the network (50 residents = 2.25)
+    float sewageLoad = 0;   // the same for sewage
     float heatLoad = 0;     // hot-water tank units the building asks for (game value; 50 residents = 35)
     float powerLoad = 0;    // MW the building asks for
     float heatCap = 0;      // heat exchanger / heat pumping station: what it can serve (1000, big 3000)

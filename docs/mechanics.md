@@ -146,8 +146,63 @@
   (`TYPE_RAIL_TRAFO`) **14** МВт.
 - Собственное потребление узлов (малый тепловой пункт 0,1, малая насосная 0,2 МВт) задаётся в другом месте — не разобрано.
 
-Проверка в игре (выгрузка `DistrictPlanner.dumpload`) **[игра]**: дом на 50 жителей — 35 и 0,1 МВт; малый тепловой
-пункт 1000; подстанция 2,5; трансформатор 19 — всё совпадает с формулами. Службы в игре не сверены.
+Собственное потребление узлов (`0x119c2e`, `0x11a1db`):
+- всё, у чего есть тепловой бак-узел (тепловой пункт, насосная): **бак / 60 × 0,003 × 2** МВт — 1000 → 0,1 МВт;
+- насосы: **`$ENGINE_SPEED` × 0,01** МВт (малая тепловая насосная, `ENGINE_SPEED 10` → +0,1; итого 0,2);
+- узлы воды и канализации электричества не потребляют вовсе — склада электричества у них нет. **[игра]**
+
+Вода и канализация (`0x11a46b`…`0x11a790`; склады кодов 15 и 16):
+- жилой дом: **жители × 0,045**;
+- службы: **(рабочие + специалисты) × 0,02 × `$WATER_CONSUMPTION_LIVING_WORKER_FACTOR`** (по умолчанию 1,0); у гостиниц,
+  детдомов и тюрем ещё **рабочие × `$CITIZEN_ABLE_SERVE` × 0,045**; склады (`TYPE_STORAGE`, `TYPE_FACTORY`) — по объёму
+  складов кода 6 × 0,037; часть типов — ещё по подключениям × 0,15 (`0x11a5d1`, не разобрано);
+- канализация равна воде.
+
+Флаги отключения в файле здания: `$HEATING_DISABLE` (нет тепла; 101 файл), `$ELECTRIC_DISABLE` (21),
+`$WATERSEWAGE_DISABLE` (нет воды и канализации; 15), `$SEWAGE_DISABLE` (3). Ключи `$ELETRIC_WITHOUT_WORKING_FACTOR`,
+`$ELETRIC_WITHOUT_LIGHTING_FACTOR`, `$WATER_WITHOUT_WORKING_FACTOR` в расчёт ёмкости не входят — это потребление в
+нерабочее время.
+
+**Освещение.** В проверенной игре часть «освещение» в ёмкость не входила (глобальное значение `exe+0x9d5d84` = 0): школа
+0,05, больница 0,13 МВт. Мод считает без неё. Чем это значение задаётся (настройка игры?) — не выяснено.
+
+**Склад топлива.** Код прибавляет к электричеству значение из таблицы ресурса за каждый склад здания (цикл `0x119fc1`).
+У больницы (`$STORAGE_FUEL RESOURCE_TRANSPORT_OIL 40`, склад кода 3) это 0,05 МВт; мод прибавляет 0,05 за каждую строку
+`$STORAGE_FUEL` — подобрано по одному зданию, саму таблицу ещё не читал.
+
+**Проверка в игре [игра]** — самотест со службами (флаг `DistrictPlanner.selftest` с числом 2), мгновенная постройка,
+выгрузка складов (`DistrictPlanner.dumpload`, строки `STOR`: код ресурса и объём). Сверка с формулами мода —
+**52 из 52 значений совпали** (13 типов × тепло, электричество, вода, канализация):
+
+```
+STOR zoll_milhost: [code 2 cap 1] [code 1 cap 1] [code 0 cap 1] [code 3 cap 1] [code 4 cap 1] [code 5 cap 1] [code 6 cap 1] [code 15 cap 1] [code 16 cap 1] [code 10 cap 0] [code 17 cap 0.12] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1]
+STOR zoll_sahy: [code 2 cap 1] [code 1 cap 1] [code 0 cap 1] [code 3 cap 1] [code 4 cap 1] [code 5 cap 1] [code 6 cap 1] [code 15 cap 1] [code 16 cap 1] [code 10 cap 0] [code 17 cap 0.12] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1]
+STOR zoll_siatre: [code 2 cap 1] [code 1 cap 1] [code 0 cap 1] [code 3 cap 1] [code 4 cap 1] [code 5 cap 1] [code 6 cap 1] [code 15 cap 1] [code 16 cap 1] [code 10 cap 0] [code 17 cap 0.12] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1]
+STOR eletric_transformator_customin: [code 9 cap 18]
+STOR zoll_air_soviet: [code 2 cap 1] [code 1 cap 1] [code 0 cap 1] [code 3 cap 1] [code 4 cap 1] [code 5 cap 1] [code 6 cap 1] [code 15 cap 1] [code 10 cap 0] [code 17 cap 0.12] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1]
+STOR zoll_air_west: [code 2 cap 1] [code 1 cap 1] [code 0 cap 1] [code 3 cap 1] [code 4 cap 1] [code 5 cap 1] [code 6 cap 1] [code 15 cap 1] [code 10 cap 0] [code 17 cap 0.12] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1] [code 17 cap 1]
+STOR residental_brick_2: [code 7 cap 50] [code 14 cap 35] [code 9 cap 0.1] [code 15 cap 2.25] [code 16 cap 2.25] [code 17 cap 0.12]
+STOR water_substation: [code 15 cap 20]
+STOR sewage_substation: [code 16 cap 12]
+STOR heating_endstation_small: [code 14 cap 1000] [code 9 cap 0.1]
+STOR eletric_substation: [code 9 cap 2.5]
+STOR water_switch: [code 15 cap 1]
+STOR sewage_switch: [code 16 cap 1]
+STOR heating_pumpingstation_small: [code 14 cap 1000] [code 9 cap 0.2]
+STOR eletric_transformator: [code 9 cap 19]
+STOR kiosk_food: [code 0 cap 4] [code 5 cap 0.5] [code 14 cap 5.6] [code 9 cap 0.05] [code 15 cap 0.02] [code 16 cap 0.02] [code 17 cap 0.12]
+STOR kiosk_alcohol: [code 0 cap 4] [code 14 cap 6.58] [code 9 cap 0.05] [code 15 cap 0.02] [code 16 cap 0.02] [code 17 cap 0.12]
+STOR kindergarten: [code 14 cap 56] [code 9 cap 0.05] [code 15 cap 0.2] [code 16 cap 0.2] [code 17 cap 0.12]
+STOR school: [code 14 cap 76.3] [code 9 cap 0.05] [code 15 cap 0.5] [code 16 cap 0.5] [code 17 cap 0.12]
+STOR kino: [code 14 cap 77] [code 9 cap 0.05] [code 15 cap 0.1] [code 16 cap 0.1] [code 17 cap 0.12]
+STOR playground_tenis2: [code 9 cap 0.05]
+STOR monument_statue_small: none
+STOR co_surprise: [code 9 cap 0.05] [code 15 cap 0.04] [code 16 cap 0.04] [code 17 cap 0.12]
+STOR hospital: [code 3 cap 40] [code 14 cap 143.5] [code 9 cap 0.13] [code 15 cap 2] [code 16 cap 2] [code 17 cap 0.12] [code 17 cap 0.12]
+STOR civ_dedina7a: [code 9 cap 0.05] [code 15 cap 0.04] [code 16 cap 0.04] [code 17 cap 0.12]
+```
+Коды складов: 0 — товары, 3 — топливо, 5 — продукты, 7 — жители, 9 — электричество, 14 — тепло, 15 — вода,
+16 — канализация, 17 — мусор (0,12 у всех проверенных).
 
 Таблица по всем 488 зданиям — [loads.md](loads.md) (генерирует мод по этим формулам).
 
@@ -187,9 +242,9 @@
 ## 7. Открытые вопросы
 
 1. Почему дорожки района не образуют единую сеть и не везде доходят до входов зданий.
-2. ~~Радиусы, ёмкость узлов и нагрузка зданий~~ — найдены в exe (разделы 4.2, 4.4). Осталось: собственное потребление узлов, сверка служб в игре.
+2. ~~Радиусы, ёмкость узлов и нагрузка зданий~~ — найдены в exe (разделы 4.2, 4.4). Осталось: таблица ресурсов для складов (цикл `0x119fc1`), что включает «освещение».
 3. Уклоны канализации и насосы; допустимые уклоны и длины остальных линий.
-4. Нормы потребления воды на жителя (тепло и электричество — формулы в 4.4).
+4. ~~Нормы потребления~~ — формулы воды, канализации, тепла и электричества в 4.4.
 5. Точный контур, по которому игра отказывает в постройке рядом с другим зданием.
 6. Года открытия зданий и требования исследований.
 7. Как строить ломаную линию без дуг (флаги функции обновления линии не разобраны).

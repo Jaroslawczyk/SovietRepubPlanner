@@ -50,7 +50,7 @@ float g_walk = 400.0f, g_maxDiff = 5.0f;
 // utilities: water, sewage, heating, power
 const char* const kUtilName[4] = { "Вода", "Канализация", "Отопление", "Электричество" };
 const char* const kUtilNode[4] = { "водораспределитель", "канализационная станция", "тепловой пункт", "трансформатор" };
-const char* const kUtilUnit[4] = { "м³/сут", "м³/сут", "ед. бака", "МВт" };
+const char* const kUtilUnit[4] = { "ед. бака", "ед. бака", "ед. бака", "МВт" };
 const ImU32 kUtilCol[4] = { IM_COL32(70, 150, 255, 255), IM_COL32(165, 110, 55, 255), IM_COL32(245, 85, 60, 255), IM_COL32(250, 220, 60, 255) };
 bool  g_utilShow[4] = { false, false, false, false };
 bool  g_utilBuild[4] = { false, false, false, false };   // the network goes into the plan and gets built
@@ -866,17 +866,14 @@ void TabUtils() {
         ImGui::SetNextItemWidth(200);
         if (ImGui::SliderFloat("радиус узла, м", &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
         ImGui::SetNextItemWidth(120);
-        if (k < 2) {
-            ImGui::InputFloat("на жителя", &g_utilNorm[k], 0, 0, "%.2f");
-            if (ImGui::IsItemDeactivatedAfterEdit()) g_dirty = true;
-            ImGui::SameLine(); ImGui::TextDisabled("%s (прикидка)", kUtilUnit[k]);
-        } else ImGui::TextDisabled(k == 2 ? "Нагрузка по формуле игры: жилой дом — жители × 0,7; службы — по рабочим и посетителям."
+        if (k < 2) ImGui::TextDisabled("Нагрузка по формуле игры: жилой дом — жители × 0,045; службы — (рабочие + специалисты) × 0,02.");
+        else ImGui::TextDisabled(k == 2 ? "Нагрузка по формуле игры: жилой дом — жители × 0,7; службы — по рабочим и посетителям."
                                           : "Нагрузка по формуле игры: жилой дом — жители × 0,002 МВт; службы — по рабочим и посетителям, не меньше 0,05 МВт.");
         if (g_utilBuild[k] && g_area.ok && !g_plan.buildings.empty()) {
             int nodes = (int)g_plan.utilNodes[k].size(), helpers = 0;
             for (auto& b : g_plan.buildings) if (b.net == k && b.role == 1) ++helpers;
             ImGui::Text("Узлов (%s): %d  ·  %s: %d  ·  линий %.0f м  ·  нагрузка %.0f %s", kUtilNode[k], nodes,
-                        k == 3 ? "трансформаторов" : "распределителей", helpers, g_plan.utilLen[k], k >= 2 ? g_plan.utilDemand[k] : people * g_utilNorm[k], kUtilUnit[k]);
+                        k == 3 ? "трансформаторов" : "распределителей", helpers, g_plan.utilLen[k], g_plan.utilDemand[k], kUtilUnit[k]);
             if (g_plan.utilUncovered[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Вне радиуса зданий: %d.", g_plan.utilUncovered[k]);
             if (k >= 2 && nodes > 0) {
                 float cap = 0; for (auto& t : catalog::All()) { if (k == 2 && t.id == "heating_endstation_small") cap = t.heatCap; if (k == 3 && t.id == "eletric_substation") cap = t.powerCap; }
@@ -1145,6 +1142,7 @@ void SelfTest() {
     }
     std::wstring flag = GameDir() + L"DistrictPlanner.selftest";
     if (GetFileAttributesW(flag.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    int stMode = 1; { FILE* f = _wfopen(flag.c_str(), L"r"); if (f) { fscanf(f, "%d", &stMode); fclose(f); } }   // 2 = keep the services
     DeleteFileW(flag.c_str());
     g_selfTest = 2;
     ImVec2 ds = ImGui::GetIO().DisplaySize;
@@ -1175,7 +1173,7 @@ void SelfTest() {
     {   // test district: only a building that is unlocked from the start, no services
         const auto& all = catalog::All();
         for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = all[i].id == "residental_brick_2";
-        for (auto& sv : g_services) sv.enabled = false;
+        for (auto& sv : g_services) sv.enabled = stMode == 2 && sv.typeIndex >= 0;
         for (int k = 0; k < 4; ++k) { g_utilBuild[k] = g_utilShow[k] = true; }
     }
     SetArea(pts);
