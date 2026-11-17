@@ -30,6 +30,7 @@ int main(int argc, char** argv) {
     if (getenv("LAYOUT")) in.layout = atoi(getenv("LAYOUT"));
     if (getenv("POP")) in.fillAll = false;
     if (getenv("RING")) in.ringRoad = true;
+    if (getenv("AUTOSTOPS")) { in.autoStops = true; in.stopsU.clear(); in.stopType = Find("busstop"); }
     in.gap = 1.45f; in.band = 4.85f;
     in.houseTypes = { Find("residental_brick_2") };
     if (argc > 4) { in.houseTypes.clear(); for (int k = 4; k < argc; ++k) in.houseTypes.push_back(Find(argv[k])); }
@@ -41,6 +42,7 @@ int main(int argc, char** argv) {
     if (in.stopType < 0) in.stopType = Find("bus_stop");
     in.streetSpacing = 220;
     for (int k = 0; k < 4; ++k) in.utilBuild[k] = true;
+    if (getenv("AUTOSTOPS")) { in.autoStops = true; in.stopsU.clear(); in.stopType = Find("busstop"); }
     PlanResult r = MakePlan(in);
     FILE* f = fopen("plan.txt", "w");
     fprintf(f, "A %g %g\n", W, H);
@@ -54,7 +56,8 @@ int main(int argc, char** argv) {
     fclose(f);
     printf("houses %d capacity %d services %d unplaced %d noPath %d noRoad %d cutOff %d uncovered %d %d %d %d\n", r.houses, r.capacity, r.services, r.unplaced,
            r.noPath, r.noRoad, r.cutOff, r.utilUncovered[0], r.utilUncovered[1], r.utilUncovered[2], r.utilUncovered[3]);
-    printf("straight links %d, missed %d\n", r.straightLinks, r.straightMiss);
+    printf("straight links %d, missed %d, stops %d, far houses %d\n", r.straightLinks, r.straightMiss, (int)r.stops.size(), r.farHouses);
+    for (auto& s : r.stops) printf("stop %.0f %.0f\n", s.u, s.v);
     printf("norm walk shop %.0f (%d far) kg %.0f (%d far) school %.0f (%d far)\n", r.normWalk[0], r.normFar[0], r.normWalk[1], r.normFar[1], r.normWalk[2], r.normFar[2]);
     return 0;
 }

@@ -252,6 +252,46 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             }
         }
         std::sort(lanes.begin(), lanes.end(), [&](const Lane& a, const Lane& b) { return fabsf(a.v - roadV) < fabsf(b.v - roadV); });
+        // Stops spread over the whole area, not in a row on the main street: greedy cover of the area (points every
+        // 25 m) within the walking radius; each stop goes on the street and spot that covers most still-uncovered
+        // ground, away from crossroads. The stop stands on the street axis and the street is cut where it stands.
+        if (in.autoStops && in.stopType >= 0 && roadHalf > 0) {
+            const BuildingType& st = all[in.stopType];
+            float hl = 0;
+            for (auto& c : st.conns) if (c.kind == 1) hl = std::max(hl, fabsf(c.x));
+            if (hl < 5) hl = st.sx / 2;
+            std::vector<V2> pts;
+            for (float v = minV + 12; v < maxV; v += 25) for (float u = minU + 12; u < maxU; u += 25) if (PolyContains(in.poly, u, v)) pts.push_back({ u, v });
+            std::vector<char> cov(pts.size(), 0);
+            const float R = in.walkRadius * 0.8f;   // spare for the walk along streets, not straight
+            for (int it = 0; it < 16; ++it) {
+                int best = 0; const Lane* bl = nullptr; float bu = 0;
+                for (auto& ln : lanes) for (float u = ln.L + hl + 20; u < ln.R - hl - 20; u += 20) {
+                    bool nearCross = false;
+                    for (float x : vus) if (fabsf(u - x) < hl + 16) nearCross = true;
+                    for (auto& sp : r.stops) if (hypotf(sp.u - u, sp.v - ln.v) < 2 * hl + 20) nearCross = true;
+                    if (nearCross) continue;
+                    int n = 0;
+                    for (size_t k = 0; k < pts.size(); ++k) if (!cov[k] && hypotf(pts[k].u - u, pts[k].v - ln.v) <= R) ++n;
+                    if (n > best) { best = n; bl = &ln; bu = u; }
+                }
+                if (!bl || best < 1) break;
+                Placed pb{ in.stopType, bu + st.cx, bl->v + st.cz, st.sx, st.sz, false };
+                pb.rot = 0; pb.ou = bu; pb.ov = bl->v; pb.stop = true;
+                r.buildings.push_back(pb);
+                r.stops.push_back({ bu, bl->v });
+                for (size_t k = 0; k < pts.size(); ++k) if (hypotf(pts[k].u - bu, pts[k].v - bl->v) <= R) cov[k] = 1;
+                std::vector<RoadSeg> cut;           // the street is cut where the stop stands
+                for (auto& rd : r.roads) {
+                    bool here = fabsf(rd.v1 - bl->v) < 0.5f && fabsf(rd.v2 - bl->v) < 0.5f && bu > std::min(rd.u1, rd.u2) && bu < std::max(rd.u1, rd.u2);
+                    if (!here) { cut.push_back(rd); continue; }
+                    float a = std::min(rd.u1, rd.u2), b = std::max(rd.u1, rd.u2);
+                    if (bu - hl - a > 10) cut.push_back({ a, rd.v1, bu - hl, rd.v1, rd.width });
+                    if (b - bu - hl > 10) cut.push_back({ bu + hl, rd.v1, b, rd.v1, rd.width });
+                }
+                r.roads.swap(cut);
+            }
+        }
         if (in.fillAll && in.houseTypes.size() > 1) {
             // "build up everything": the queue of houses is sized to the street frontage, in the requested shares,
             // biggest first - so the big ones line the central streets and the small ones the outer ones
@@ -1040,7 +1080,18 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                             // ...and on across the street to the pavement on the far side: a footpath that only reaches a
                             // road is not joined to it, one that crosses it gets a crossing and joins the road network
                             // (DistrictPlanner.jointest, v0.43.0: road lists grew only for the crossing footpath)
-                            if (in.crossLinks) extra.push_back({ o.u + n.u * bestT, o.v + n.v * bestT, o.u + n.u * crossT, o.v + n.v * crossT });
+                            bool nearJunction = false;          // a crossing within 14 m of another street's axis runs into the crossroads
+                            {   float cu = o.u + n.u * (bestT + crossT) / 2, cv = o.v + n.v * (bestT + crossT) / 2;
+                                for (auto& rd : r.roads) {
+                                    float du = rd.u2 - rd.u1, dv = rd.v2 - rd.v1, l2 = du * du + dv * dv;
+                                    if (l2 < 1) continue;
+                                    float along = fabsf(du * n.u + dv * n.v) / sqrtf(l2);   // ~1 = this street runs along the link: the cross street
+                                    if (along < 0.7f) continue;
+                                    float t = std::clamp(((cu - rd.u1) * du + (cv - rd.v1) * dv) / l2, 0.0f, 1.0f);
+                                    if (hypotf(rd.u1 + du * t - cu, rd.v1 + dv * t - cv) < 14 + rd.width / 2) nearJunction = true;
+                                }
+                            }
+                            if (in.crossLinks && !nearJunction) extra.push_back({ o.u + n.u * bestT, o.v + n.v * bestT, o.u + n.u * crossT, o.v + n.v * crossT });
                             r.pedPts.push_back(o); done = true; ++r.straightLinks; break;
                         }
                     }
@@ -1542,6 +1593,11 @@ PlanResult MakePlan(const PlanInput& inRaw) {
         probe.boiler = false;
         int cap = std::max(1, MakePlanImpl(probe, nullptr).capacity);
         in.servicePop = in.fillAll ? cap : std::min(in.population, cap);
+        // the services for that many take room from the houses: measure again with them in place, so raising the
+        // number of residents never makes the plan hold fewer (7 200 typed gave 1 800 places, 6 500 gave 4 000)
+        probe.servicePop = in.servicePop;
+        int cap2 = std::max(1, MakePlanImpl(probe, nullptr).capacity);
+        in.servicePop = std::min(in.servicePop, cap2);
     }
     bool any = false;
     for (int k = 0; k < 4; ++k) any = any || in.utilBuild[k];

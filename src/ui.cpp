@@ -365,6 +365,8 @@ void Regenerate() {
         in.blocks = lay != 3;
         in.ringRoad = g_ringRoad;
         in.boiler = g_boiler;
+        in.autoStops = g_autoStops && in.layout == 2;
+        if (in.autoStops) in.stopsU.clear();
         { FILE* f = _wfopen((GameDir() + L"DistrictPlanner.linkoff").c_str(), L"r"); if (f) { fscanf(f, "%f", &in.linkEndOff); fclose(f); } }
         in.straightLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.nostraight").c_str()) == INVALID_FILE_ATTRIBUTES;
         in.crossLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.nocross").c_str()) == INVALID_FILE_ATTRIBUTES;
@@ -2171,7 +2173,7 @@ void Draw() {
         Regenerate();
         // automatic stops: one more while houses are out of walking reach, all of them spread evenly along the main
         // street (each serves an equal stretch, not 2 houses on one and 20 on the other)
-        if (g_autoStops && g_area.ok && g_roadType > 0 && g_plan.farHouses > 0 && g_stops.size() < 8) {
+        if (g_autoStops && g_layout != 1 && g_area.ok && g_roadType > 0 && g_plan.farHouses > 0 && g_stops.size() < 8) {   // the village layout spreads its own stops
             float L, R;
             if (PolyScan(g_area.local, g_roadV, L, R) && (R - L) / (g_stops.size() + 1) > 60) {
                 size_t n = g_stops.size() + 1;

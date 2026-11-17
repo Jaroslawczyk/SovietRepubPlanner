@@ -144,7 +144,8 @@ struct PlanInput {
     bool  straightLinks = true;
     bool  crossLinks = true;                        // village: each entrance link also crosses its street - the only way the game joins a footpath to a road (finished roads only; the build retries these later)                     // village: entrance footpaths as one straight piece to the street
     bool  ringRoad = false;
-    bool  boiler = false;                           // put a small boiler house (heating plant) far from the houses and feed the heat nodes from it                         // a street round the whole outline (village layout)
+    bool  boiler = false;
+    bool  autoStops = false;                        // village: the planner spreads the stops over all streets itself (stopsU ignored)                           // put a small boiler house (heating plant) far from the houses and feed the heat nodes from it                         // a street round the whole outline (village layout)
     int   layout = 1;                               // 0 parallel strips, 1 microdistricts (blocks), 2 village / suburb: houses on both sides of every street
     bool  blocks = true;                            // microdistricts: street grid, houses round each block, courtyards (false = old parallel strips)                          // build up the whole area: houses until nothing fits
     std::vector<int> houseTypes;                    // catalog indices
