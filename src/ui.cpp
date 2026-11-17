@@ -81,7 +81,8 @@ struct Raster {
     }
 } g_rast;   // footpaths / roads already in the game (local frame)   // footpaths already in the game (local frame)
 bool  g_cutAtTrails = false;       // cut streets at game trails they cross (tested v0.38.0: does not help, the game still refuses)
-bool  g_ringRoad = false;           // street round the outline
+bool  g_ringRoad = false;
+bool  g_boiler = false;             // heating: own boiler house instead of relying on an outside source           // street round the outline
 int   g_layout = 0;                 // 0 auto, 1 village / suburb, 2 microdistricts, 3 parallel strips
 bool  g_autoHouse = true;          // the house ticked by default; the first manual tick replaces it
 bool  g_fillAll = false;   // no empty corners: houses until nothing fits
@@ -363,6 +364,7 @@ void Regenerate() {
         in.layout = lay == 1 ? 2 : lay == 2 ? 1 : 0;
         in.blocks = lay != 3;
         in.ringRoad = g_ringRoad;
+        in.boiler = g_boiler;
         { FILE* f = _wfopen((GameDir() + L"DistrictPlanner.linkoff").c_str(), L"r"); if (f) { fscanf(f, "%f", &in.linkEndOff); fclose(f); } }
         in.straightLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.nostraight").c_str()) == INVALID_FILE_ATTRIBUTES;
         in.crossLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.nocross").c_str()) == INVALID_FILE_ATTRIBUTES;
@@ -971,6 +973,8 @@ void TabArea() {
         if (ImGui::Combo(T("тип застройки"), &g_layout, lays, IM_ARRAYSIZE(lays))) g_dirty = true;
         ImGui::SetItemTooltip(T("Деревня — улицы через две глубины участка, дома с обеих сторон фасадом к улице, службы раскиданы равномерно.\nМикрорайоны — для многоэтажек: кварталы, дома по краю, во дворах школы и сады."));
     }
+    if (ImGui::Checkbox(T("своя котельная (а не только тепловые пункты)"), &g_boiler)) g_dirty = true;
+    ImGui::SetItemTooltip(T("Малая котельная встаёт на участке дальше всего от центра (дым подальше от жилья), от неё тянется труба к тепловым пунктам."));
     if (ImGui::Checkbox(T("дорога по периметру зоны"), &g_ringRoad)) g_dirty = true;
     ImGui::SetItemTooltip(T("Улица вдоль всей границы участка (режим «деревня»); улицы внутри примыкают к ней."));
     if (ImGui::Checkbox(T("застроить весь участок"), &g_fillAll)) g_dirty = true;

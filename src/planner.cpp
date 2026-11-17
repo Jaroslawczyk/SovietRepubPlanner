@@ -273,7 +273,10 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             for (auto& b : r.buildings)
                 if (fabsf(cu - b.u) < (w + b.w) / 2 + kSide && fabsf(cv - b.v) < (d + b.d) / 2 + kSide) return true;
             for (auto& rd : r.roads) {      // distance from the footprint to the road's axis (roads may run slanted)
-                float len = hypotf(rd.u2 - rd.u1, rd.v2 - rd.v1), m = rd.width / 2 + 1;
+                float m = rd.width / 2 + 1;
+                if (cu + w / 2 + m < std::min(rd.u1, rd.u2) || cu - w / 2 - m > std::max(rd.u1, rd.u2) ||
+                    cv + d / 2 + m < std::min(rd.v1, rd.v2) || cv - d / 2 - m > std::max(rd.v1, rd.v2)) continue;   // quick reject (this test ran thousands of times per plan)
+                float len = hypotf(rd.u2 - rd.u1, rd.v2 - rd.v1);
                 int n = std::max(1, (int)(len / 2));
                 for (int k = 0; k <= n; ++k) {
                     float pu = rd.u1 + (rd.u2 - rd.u1) * k / n, pv = rd.v1 + (rd.v2 - rd.v1) * k / n;
@@ -285,12 +288,22 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         // one building on lane ln, side +1 (north of the street, entrance facing -v) or -1, its middle at u
         auto tryAt = [&](const Item& it, const Lane& ln, int side, float u, int net, int role, int grp, bool commit) {
             float w0 = it.w - kSide, d0 = it.d - kApron;
+            int roadRot = -1;
+            if (all[it.type].needsRoad) {          // the road connection looks at the street (driveway = short stub)
+                for (auto& c : all[it.type].conns) if (c.kind == 1) {
+                    float l = hypotf(c.dx, c.dz);
+                    for (int rr = 0; rr < 4 && l > 0.01f; ++rr) if (Turn(rr, c.dx, c.dz).v * -side > 0.7f * l) { roadRot = rr; break; }
+                    break;
+                }
+                if (roadRot >= 0) { const BuildingType& bt = all[it.type]; w0 = (roadRot & 1) ? bt.sz : bt.sx; d0 = (roadRot & 1) ? bt.sx : bt.sz; }
+            }
             float cv = ln.v + side * (hw + front + d0 / 2);
             if (u - w0 / 2 < ln.L + margin || u + w0 / 2 > ln.R - margin) return false;
             if (!inside(u, cv, w0, d0) || overlaps(u, cv, w0, d0) || busy(u, cv, w0, d0) || heightRange(u, cv, w0, d0) > in.maxDiff) return false;
             if (!commit) return true;
             Placed pb{ it.type, u, cv, w0, d0, it.rotated };
             pb.rot = side > 0 ? (it.rot + 2) & 3 : it.rot;
+            if (roadRot >= 0) { pb.rot = roadRot; pb.rotated = (roadRot & 1) != 0; }
             V2 off = Turn(pb.rot, all[it.type].cx, all[it.type].cz);
             pb.ou = u - off.u; pb.ov = cv - off.v;
             pb.net = (signed char)net; pb.role = (signed char)role; pb.grp = (short)grp;
@@ -322,6 +335,13 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         }
         // services: farthest from the same kind; the first of a kind as close to the stop / centre as possible
         V2 centre = r.stops.empty() ? V2{ crossU, roadV } : r.stops[0];
+        if (in.boiler && in.utilBuild[2]) {
+            int bt = -1; for (size_t t = 0; t < all.size(); ++t) if (all[t].id == "heating_plant_small") bt = (int)t;
+            if (bt >= 0) {
+                auto farScore = [&](float u, float v) { return hypotf(u - centre.u, v - centre.v); };
+                if (!placeBest(MakeItem(bt), farScore, -1, 0, 0)) ++unplacedSvc;
+            }
+        }
         for (auto& it : svcs) {
             const std::string& cat = all[it.type].category;
             auto score = [&](float u, float v) {
@@ -1234,7 +1254,12 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         V2 hp = Turn(head->rot, hc->x, hc->z); hp.u += head->ou; hp.v += head->ov;
                         const int want = k == 0 ? 3 : k == 1 ? 4 : 6;
                         const PlanInput::ExtPort* best = nullptr; float bd = 1500;
-                        for (auto& e : in.extPorts) if ((e.kind == want || (k == 2 && e.kind == 7)) && hypotf(e.u - hp.u, e.v - hp.v) < bd) { bd = hypotf(e.u - hp.u, e.v - hp.v); best = &e; }
+                        PlanInput::ExtPort own{};
+                        if (k == 2) for (auto& b : r.buildings) if (all[b.type].id == "heating_plant_small")      // the plan's own boiler house
+                            for (auto& c : all[b.type].conns) if (c.kind == 6 || c.kind == 7) {
+                                V2 o = Turn(b.rot, c.x, c.z); own = { c.kind, b.ou + o.u, b.ov + o.v, c.y }; best = &own; bd = hypotf(own.u - hp.u, own.v - hp.v); break;
+                            }
+                        if (!best) for (auto& e : in.extPorts) if ((e.kind == want || (k == 2 && e.kind == 7)) && hypotf(e.u - hp.u, e.v - hp.v) < bd) { bd = hypotf(e.u - hp.u, e.v - hp.v); best = &e; }
                         if (best) { float l; feed(k, { best->u, best->v }, best->h, hp, hc->y, l); r.utilLen[k] += l; r.utilFeed[k] = l; }
                     }
                 }
@@ -1393,6 +1418,27 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             }
             if (clear) joins.push_back({ u, v, at.u, at.v, s.width });
         }
+        if (joins.empty()) {
+            // no loose end got a link (a ring road has no ends): one link from the plan's street point nearest to a
+            // game road, if that road passes within 120 m and the link crosses no building of the plan
+            float bd = 1e9f; V2 pa{}, pb{}; float bw = 8;
+            for (auto& s : r.roads) {
+                float len = hypotf(s.u2 - s.u1, s.v2 - s.v1); int n = std::max(1, (int)(len / 5));
+                for (int k = 0; k <= n; ++k) {
+                    float u = s.u1 + (s.u2 - s.u1) * k / n, v = s.v1 + (s.v2 - s.v1) * k / n; V2 at;
+                    float d = nearestExt(u, v, at);
+                    if (d > 9 && d < bd) { bd = d; pa = { u, v }; pb = at; bw = s.width; }
+                }
+            }
+            if (bd < 120) {
+                bool clear = true;
+                for (auto& b : r.buildings) for (int k = 0; k <= 40 && clear; ++k) {
+                    float t = k / 40.0f, u = pa.u + (pb.u - pa.u) * t, v = pa.v + (pb.v - pa.v) * t;
+                    if (fabsf(u - b.u) < b.w / 2 + bw / 2 + 2 && fabsf(v - b.v) < b.d / 2 + bw / 2 + 2) clear = false;
+                }
+                if (clear) joins.push_back({ pa.u, pa.v, pb.u, pb.v, bw });
+            }
+        }
         r.joinedRoads = (int)joins.size();
         r.roads.insert(r.roads.end(), joins.begin(), joins.end());
     }
@@ -1487,11 +1533,15 @@ PlanResult MakePlan(const PlanInput& inRaw) {
         if (t.id == "heating_endstation_small" && t.heatCap > 0) in.utilNodeCap[2] = t.heatCap;
         if (t.id == "eletric_substation" && t.powerCap > 0) in.utilNodeCap[3] = t.powerCap;
     }
-    if (in.fillAll && in.servicePop <= 0 && in.services) {
+    if (in.servicePop <= 0 && in.services) {
+        // services for the residents that really fit: typing 34 700 people into a plot for 1 000 gave 14 kindergartens
+        // and pushed the houses out (v0.44.0 report)
         PlanInput probe = in;
         for (int k = 0; k < 4; ++k) probe.utilBuild[k] = false;
         probe.servicePop = 1;                           // one of each service while measuring
-        in.servicePop = std::max(1, MakePlanImpl(probe, nullptr).capacity);
+        probe.boiler = false;
+        int cap = std::max(1, MakePlanImpl(probe, nullptr).capacity);
+        in.servicePop = in.fillAll ? cap : std::min(in.population, cap);
     }
     bool any = false;
     for (int k = 0; k < 4; ++k) any = any || in.utilBuild[k];
@@ -1558,7 +1608,7 @@ PlanResult MakePlan(const PlanInput& inRaw) {
             if (in.utilNodeCap[k] > 0 && !sites[k].empty()) {
                 float dem = 0;
                 for (size_t b = 0; b < n; ++b) dem += Demand(all[bs[b]->type], in.utilPerPerson[k], k);
-                size_t need = (size_t)ceilf(dem / (0.85f * in.utilNodeCap[k])) + extra[k];
+                size_t need = (size_t)ceilf(dem / (0.6f * in.utilNodeCap[k])) + extra[k];   // 60 %: one node read 109 % in the game at 85 % planning
                 while (sites[k].size() < need && sites[k].size() < 60) {
                     int farIdx = -1; float farD = -1;
                     for (size_t b = 0; b < n; ++b) {

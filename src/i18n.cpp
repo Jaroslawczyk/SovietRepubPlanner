@@ -248,6 +248,8 @@ static const char* const kPairs[][2] = {
     { "Мод читает рельеф, здания и дороги участка один раз; после своих построек нажмите это.", "The mod reads the terrain, buildings and roads of the area once; press this after building something yourself." },
     { "Парки", "Parks" }, { "Промышленность", "Industry" }, { "Настройки", "Settings" },
     { "Переходы дорожек через улицы: готово %d, ждут достройки улиц %d (мод пробует каждые 30 с)", "Footpath crossings over the streets: done %d, waiting for the streets to be finished %d (the mod retries every 30 s)" },
+    { "своя котельная (а не только тепловые пункты)", "own boiler house (not only heat exchangers)" },
+    { "Малая котельная встаёт на участке дальше всего от центра (дым подальше от жилья), от неё тянется труба к тепловым пунктам.", "A small boiler house goes to the lot farthest from the centre (smoke away from the homes); a pipe runs from it to the heat exchangers." },
     { "не изучено", "not researched" },
 };
 const char* T(const char* ru) {
