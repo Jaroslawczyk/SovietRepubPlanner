@@ -37,8 +37,16 @@ static InV3_t       o_MouseSolid, o_MouseSolidInv;
 static InAxis_t     o_AxisValue;
 static CamMat_t     f_ViewGetMatrix, f_ProjGetMatrix;
 
+static float g_lookDx = 0, g_lookDy = 0, g_lookDz = 0; static bool g_lookOn = false;     // debug: shift the view (screenshots of a spot)
+typedef void (*CamVec_t)(void*, V3*);
+static CamVec_t o_ViewSetLookAt = nullptr;
+static void h_ViewSetLookAt(void* self, V3* p) {
+    if (g_lookOn && p) { p->x += g_lookDx; p->y += g_lookDy; p->z += g_lookDz; }
+    o_ViewSetLookAt(self, p);
+}
 static void h_ViewSetPosition(void* self, V3* p) {
     if (g_camera != self) { Log("camera = %p", self); g_camera = self; }
+    if (g_lookOn && p) { p->x += g_lookDx; p->y += g_lookDy; p->z += g_lookDz; }
     o_ViewSetPosition(self, p);
 }
 static float h_TerrHeight(void* self, V3* p) {
@@ -572,6 +580,7 @@ typedef void (*Snap_t)(void*, void*, int, int);
 // r8b = 1 when it links an entrance to a nearby footpath, which also catches the middle of a footpath piece
 typedef void (*PathSnap_t)(void*, int, unsigned char, UINT64, unsigned char, unsigned char);
 int g_pathSnapMode = 1;
+bool g_curveNow = false;       // the current line job is an arc: keep the start direction the game copies from the piece it attaches to
 bool g_straightLines = true;   // set the start direction of every line piece (debug flag DistrictPlanner.straight 0/1)     // 0 = like the area paste (ends only), 1 = like the building tool (middle of pieces too)
 // road snap itself (the dispatcher calls it with r8b = 0 and 1.0 at [rsp+0x38]); the building tool calls it with
 // r8b = 1 (0x2bd2ce), which also catches the middle of a road piece - a driveway then makes a T-junction
@@ -649,7 +658,7 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
         // start tangent: start (0x4fbfd0, 0x4fc350) copies the direction of the existing piece it attaches to into
         // mgr+0x328, and the update bends the new piece to continue it - that is what made arcs and loops. A zero
         // vector there (what start writes when nothing is attached) gives a straight piece.
-        if (g_straightLines) *(V3*)((BYTE*)m + 0x328) = V3{ 0, 0, 0 };
+        if (g_straightLines && !g_curveNow) *(V3*)((BYTE*)m + 0x328) = V3{ 0, 0, 0 };
         stage = 2; *(V3*)(G + 0xf6c) = b; SnapNear(G, m, mgrOffset, type, sub); b = *(V3*)(G + 0xf6c);
         // a short piece out of an entrance: the end snaps back onto the same connection and the piece has no length
         // (the game refuses it). Then the end stays where the plan put it, on the footpath / street.
@@ -847,8 +856,11 @@ static void GameThreadTick() {
             const char* tn = j.kind == 1 ? (j.lineType < 0 ? "road_mud" : j.lineType == 0 ? "road_gravel" : j.lineType == 2 ? "road_asphaltside" : "road_asphalt")
                            : j.kind == 2 ? (j.lineType < 0 ? "pedestrianway_mud" : j.lineType == 0 ? "pedestrianway" : "pedestrianway_asplhalt")
                            : j.mgr == 0xfaf0 ? (j.sub >= 5 ? "sewagepipe_0" : "waterpipe_0") : j.mgr == 0xfa98 ? "heating_pipe_small" : j.lineType == 20 ? "eletric_ulow0" : "eletric_low0";
+            gx::g_curveNow = j.curve;
             if (j.kind == 3) code = gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, a, b);
             else code = gx::LineRaw(j.kind == 1 ? 0xf7a0 : 0xf968, j.lineType, 0, -20, tn, a, b);
+            if (j.curve) Log("arc piece %.0f %.0f -> %.0f %.0f: %s", a.x, a.z, b.x, b.z, code == 1 ? "built" : "refused");
+            gx::g_curveNow = false;
             if (code != 1) Log("instant build: %s %.0f %.0f -> %.0f %.0f: %s (code %d)", j.kind == 1 ? "road" : j.kind == 3 ? (j.mgr == 0xfaf0 ? (j.sub >= 5 ? "sewage" : "water") : j.mgr == 0xfa98 ? "heating" : "power") : "footpath", a.x, a.z, b.x, b.z,
                                code == -300 ? "CRASH caught" : "refused by the game", code);
         }
@@ -1062,6 +1074,7 @@ static void DumpLoadNow() {
             a.p / a.n, a.pmin, a.pmax, a.pr, a.h / a.n, a.hmin, a.hmax, a.hr, a.lp, a.lh);
     }
 }
+void SetLookOffset(bool on, float dx, float dy, float dz) { g_lookOn = on; g_lookDx = dx; g_lookDy = dy; g_lookDz = dz; }
 void SetStraightLines(bool on) { gx::g_straightLines = on; Log("straight lines %d", (int)on); }
 void SetPathSnapMode(int m) { gx::g_pathSnapMode = m; Log("footpath snap mode %d", m); }
 void DebugSetTool(const char* name) { strncpy(g_dbgTool, name, sizeof(g_dbgTool) - 1); g_dbgToolSet = true; }
@@ -1069,6 +1082,7 @@ void InstallPathLogging() { gx::InstallPathLogging(); }
 
 static IatHook g_hooks[] = {
     { "?ViewSetPosition@C3D_CAMERA@@QEAAXVC3DVECTOR3@@@Z", h_ViewSetPosition, (void**)&o_ViewSetPosition },
+    { "?ViewSetLookAt@C3D_CAMERA@@QEAAXVC3DVECTOR3@@@Z", h_ViewSetLookAt, (void**)&o_ViewSetLookAt },
     { "?CollisionTerrainHeightOverPoint@C3D_TERRAIN@@QEAAMVC3DVECTOR3@@@Z", h_TerrHeight, (void**)&o_TerrHeight },
     { "?CollisionRay@C3D_TERRAIN@@QEAA_NVC3DVECTOR3@@0PEAV2@_N2M@Z", h_TerrRay, (void**)&o_TerrRay },
     { "?GetMouseLeftPress@C3D_INPUT@@QEAA_NXZ", h_LPress, (void**)&o_LPress },

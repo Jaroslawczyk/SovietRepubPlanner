@@ -212,7 +212,26 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 float dot = n1.u * n2.u + n1.v * n2.v, k = inset / std::max(0.3f, 1 + dot);
                 ring[i] = { p1.u + (n1.u + n2.u) * k, p1.v + (n1.v + n2.v) * k };
             }
-            for (size_t i = 0; i < n; ++i) r.roads.push_back({ ring[i].u, ring[i].v, ring[(i + 1) % n].u, ring[(i + 1) % n].v, hw * 2 });
+            // rounded corners: both legs stop r metres short of the corner, an arc piece joins them (the game bends a
+            // piece that starts on the end of another to continue its direction - that is the arc). Corners flatter
+            // than 25 degrees stay sharp.
+            std::vector<V2> a(n), b(n);          // a[i]: where the leg into corner i stops, b[i]: where the leg out of it starts
+            std::vector<char> round(n, 0);
+            for (size_t i = 0; i < n; ++i) {
+                const V2& p0 = ring[(i + n - 1) % n]; const V2& p1 = ring[i]; const V2& p2 = ring[(i + 1) % n];
+                float l1 = hypotf(p1.u - p0.u, p1.v - p0.v), l2 = hypotf(p2.u - p1.u, p2.v - p1.v);
+                V2 d1{ (p1.u - p0.u) / std::max(0.01f, l1), (p1.v - p0.v) / std::max(0.01f, l1) }, d2{ (p2.u - p1.u) / std::max(0.01f, l2), (p2.v - p1.v) / std::max(0.01f, l2) };
+                float turn = acosf(std::clamp(d1.u * d2.u + d1.v * d2.v, -1.0f, 1.0f));
+                float rr = std::min({ 18.0f, l1 * 0.3f, l2 * 0.3f });
+                round[i] = turn > 0.44f && rr > 8;
+                a[i] = round[i] ? V2{ p1.u - d1.u * rr, p1.v - d1.v * rr } : p1;
+                b[i] = round[i] ? V2{ p1.u + d2.u * rr, p1.v + d2.v * rr } : p1;
+            }
+            for (size_t i = 0; i < n; ++i) {
+                size_t j = (i + 1) % n;
+                r.roads.push_back({ b[i].u, b[i].v, a[j].u, a[j].v, hw * 2 });                  // the straight leg
+                if (round[j]) { RoadSeg arc{ a[j].u, a[j].v, b[j].u, b[j].v, hw * 2 }; arc.curve = true; r.roads.push_back(arc); }
+            }
             lanePoly = ring;
         }
         std::vector<float> hvs{ roadV };
@@ -1405,6 +1424,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     if (in.height && !r.roads.empty()) {
         std::vector<RoadSeg> keep;
         for (auto& s : r.roads) {
+            if (s.curve) { keep.push_back(s); continue; }   // a corner arc stays whole
             float du = s.u2 - s.u1, dv = s.v2 - s.v1, len = sqrtf(du * du + dv * dv);
             int n = std::max(1, (int)(len / 5));
             std::vector<char> bad(n, 0);

@@ -1162,7 +1162,7 @@ struct InstantRun {
     int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0, nOk = 0, nAll = 0;
     std::string note;
 } g_inst;
-void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2, float h1 = 0, float h2 = 0) {
+void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2, float h1 = 0, float h2 = 0, bool curve = false) {
     float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
     if (len < 0.5f) return;
     int n = std::max(1, (int)ceilf(len / 60.0f));     // pieces of at most 60 m: the game refuses a long wire / pipe in one piece (straight start tangents keep the joints from bending)
@@ -1173,6 +1173,7 @@ void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2,
         j.b = LocalToWorld(g_area, u1 + (u2 - u1) * t1, v1 + (v2 - v1) * t1, 0);
         if (i == 0) j.ha = h1;
         if (i == n - 1) j.hb = h2;
+        j.curve = curve;
         g_inst.jobs.push_back(j); g_inst.plan.push_back(-1);
     }
 }
@@ -1264,8 +1265,9 @@ void InstantStart() {
     // Streets go in pieces cut at every point where another street or a driveway joins or crosses them: a street or
     // driveway ending in the middle of a built street (no node there) was refused on flat, clear ground (v0.46.0 log:
     // whole cross streets and most 13 m driveways). Pieces shorter than 10 m are merged into the next (the game refuses them).
-    std::vector<PathSeg> streetPieces;
+    std::vector<PathSeg> streetPieces; std::vector<char> pieceCurve;
     for (int k = 0; k < nStreets; ++k) {
+        if (k < (int)g_plan.roads.size() && g_plan.roads[k].curve) { streetPieces.push_back(rd[k]); pieceCurve.push_back(1); continue; }   // an arc: whole
         std::vector<PathSeg> mine;
         for (auto& pc : roadPieces) if (pc.second == k) mine.push_back(pc.first);
         if (mine.empty()) continue;
@@ -1275,12 +1277,12 @@ void InstantStart() {
             if (lc < 10) { cur.u2 = mine[q].u2; cur.v2 = mine[q].v2; continue; }
             float ln = hypotf(mine[q].u2 - mine[q].u1, mine[q].v2 - mine[q].v1);
             if (ln < 10 && q + 1 == mine.size()) { cur.u2 = mine[q].u2; cur.v2 = mine[q].v2; continue; }
-            streetPieces.push_back(cur); cur = mine[q];
+            streetPieces.push_back(cur); pieceCurve.push_back(0); cur = mine[q];
         }
-        streetPieces.push_back(cur);
+        streetPieces.push_back(cur); pieceCurve.push_back(0);
     }
     if (GetFileAttributesW((GameDir() + L"DistrictPlanner.wholestreets").c_str()) != INVALID_FILE_ATTRIBUTES) {   // A/B switch: old behaviour
-        streetPieces.clear(); for (int k = 0; k < nStreets; ++k) streetPieces.push_back(rd[k]);
+        streetPieces.clear(); pieceCurve.clear(); for (int k = 0; k < nStreets; ++k) { streetPieces.push_back(rd[k]); pieceCurve.push_back(0); }
     }
     for (size_t k = 0; k < streetPieces.size(); ++k) {
         const PathSeg& sg = streetPieces[k];
@@ -1297,6 +1299,7 @@ void InstantStart() {
         std::vector<float> cut{ 0.0f };          // drop cuts closer than 12 m to the previous one (the game refuses short roads)
         for (size_t q = 1; q + 1 < ts.size(); ++q) if ((ts[q] - cut.back()) * len >= 12 && (1 - ts[q]) * len >= 12) cut.push_back(ts[q]);
         cut.push_back(1.0f);
+        if (pieceCurve[k]) { InstantLine(1, g_roadKind, sg.u1, sg.v1, sg.u2, sg.v2, 0, 0, true); continue; }
         for (size_t q = 0; q + 1 < cut.size(); ++q)
             InstantLine(1, g_roadKind, sg.u1 + du * cut[q], sg.v1 + dv * cut[q], sg.u1 + du * cut[q + 1], sg.v1 + dv * cut[q + 1]);
     }
@@ -2067,6 +2070,31 @@ void SelfTest() {
         int m = 1; FILE* f = _wfopen(smFlag.c_str(), L"r"); if (f) { fscanf(f, "%d", &m); fclose(f); }
         DeleteFileW(smFlag.c_str()); eng::SetPathSnapMode(m);
     }
+    {   // debug: file DistrictPlanner.lookat "x z" moves the view so that the world point is in the middle of the screen
+        static bool on = false;
+        FILE* f = _wfopen((GameDir() + L"DistrictPlanner.lookat").c_str(), L"r");
+        if (f) {
+            float x = 0, z = 0; fscanf(f, "%f %f", &x, &z); fclose(f);
+            if (!on) {
+                ImVec2 ds = ImGui::GetIO().DisplaySize; V3 c;
+                if (eng::ScreenToTerrain(ds.x / 2, ds.y / 2, ds.x, ds.y, c)) { eng::SetLookOffset(true, x - c.x, eng::TerrainHeight(x, z) - c.y, z - c.z); on = true; Log("lookat %.0f %.0f (view centre was %.0f %.0f)", x, z, c.x, c.z); }
+            }
+        } else if (on) { eng::SetLookOffset(false, 0, 0, 0); on = false; }
+    }
+    if (DeleteFileW((GameDir() + L"DistrictPlanner.arccheck").c_str())) {     // debug: how bent are the game's road pieces in the area
+        std::vector<std::vector<V3>> L; eng::ListNetLines(0xf7a0, L);
+        int n = 0;
+        for (auto& l : L) {
+            if (l.size() < 2) continue;
+            V2 p = WorldToLocal(g_area, l[0]);
+            if (p.u < g_area.minU - 20 || p.u > g_area.maxU + 20 || p.v < g_area.minV - 20 || p.v > g_area.maxV + 20) continue;
+            const V3 &s0 = l.front(), &s1 = l.back();
+            float cx = s1.x - s0.x, cz = s1.z - s0.z, cl = std::max(0.01f, sqrtf(cx * cx + cz * cz)), dev = 0;
+            for (auto& q : l) dev = std::max(dev, fabsf((q.x - s0.x) * cz - (q.z - s0.z) * cx) / cl);
+            if (dev > 0.5f && n++ < 30) Log("arccheck: piece %.0f %.0f -> %.0f %.0f, %d points, bends %.1f m off its chord", s0.x, s0.z, s1.x, s1.z, (int)l.size(), dev);
+        }
+        Log("arccheck: %d bent pieces in the area", n);
+    }
     if (DeleteFileW((GameDir() + L"DistrictPlanner.jointest").c_str()) && g_area.ok && eng::InstantSupported()) JoinTest(0);
     if (DeleteFileW((GameDir() + L"DistrictPlanner.jointest1").c_str()) && g_area.ok && eng::InstantSupported()) JoinTest(1);
     if (DeleteFileW((GameDir() + L"DistrictPlanner.jointest2").c_str()) && g_area.ok && eng::InstantSupported()) JoinTest(2);
@@ -2136,6 +2164,7 @@ void SelfTest() {
         const auto& all = catalog::All();
         for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = stMode == 4 ? (all[i].id == "civ_dedina1a" || all[i].id == "civ_dedina1b") : all[i].id == "residental_brick_2";
         g_layout = stMode == 4 ? 1 : 0;   // 4 = village test
+        g_ringRoad = stMode == 4;
         for (auto& sv : g_services) sv.enabled = stMode >= 2 && sv.typeIndex >= 0;
         for (int k = 0; k < 4; ++k) { g_utilBuild[k] = g_utilShow[k] = true; }
     }

@@ -48,7 +48,7 @@ namespace eng {
     bool InstantSupported();                        // direct build calls exist for this game build
     // one direct call into the game: kind 0 = building "type" at a turned by rot, 1 = road a->b, 2 = footpath a->b
     // kind 3 = a utility line a->b: mgr = offset of the network manager in the game state, lineType / sub / arg as the game's own tool passes them
-    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; int mgr = 0, sub = 0, arg = -20; float ha = 0, hb = 0; };
+    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; int mgr = 0, sub = 0, arg = -20; float ha = 0, hb = 0; bool curve = false; };
     void QueueInstant(const std::vector<InstantJob>& jobs);
     bool InstantBusy();
     void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed
@@ -57,7 +57,8 @@ namespace eng {
     void DebugDumpRoads();
     void LogDarkness();                             // debug: log exe+0x9d5d84 every 20 s while DistrictPlanner.darkness exists                           // debug: log node capacities and building loads from the running game
     void SetPathSnapMode(int mode);
-    void SetStraightLines(bool on);                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
+    void SetStraightLines(bool on);
+    void SetLookOffset(bool on, float dx, float dy, float dz);   // debug: every view position is shifted by (dx, dz)                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
     void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
     // buildings already standing in the game (engine list exe+0x9e6a18): ini name, position, yaw (radians, same
@@ -186,7 +187,7 @@ struct Placed {
 };
 struct UtilSeg { int net; float u1, v1, u2, v2; float h1 = 0, h2 = 0; };   // h: height of the end above the ground (connection point)
 struct PathSeg { float u1, v1, u2, v2; };
-struct RoadSeg { float u1, v1, u2, v2, width; };
+struct RoadSeg { float u1, v1, u2, v2, width; bool curve = false; };   // curve: built as an arc continuing the previous piece (rounded corner)
 struct PlanResult {
     std::vector<Placed>  buildings;
     std::vector<PathSeg> paths;
