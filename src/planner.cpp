@@ -69,7 +69,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     for (auto& p : in.poly) { minU = std::min(minU, p.u); maxU = std::max(maxU, p.u); minV = std::min(minV, p.v); maxV = std::max(maxV, p.v); }
     if (maxU - minU < 20 || maxV - minV < 20) return r;
 
-    const float margin = 5.0f, band = 7.0f, gap = in.gap;
+    const float margin = 5.0f, band = std::clamp(in.band, 4.0f, 12.0f), gap = in.gap;
     float corridor = 4.5f;
     const float crossU = (minU + maxU) / 2;
 
@@ -87,7 +87,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     float wsum = 0;
     for (size_t k = 0; k < share.size(); ++k) { if (k < in.houseWeights.size()) share[k] = std::max(0.0f, in.houseWeights[k]); wsum += share[k]; }
     for (auto& w : share) w = wsum > 0 ? w / wsum : 1.0f / share.size();
-    for (size_t i = 0; cap < in.population && i < 5000; ++i) {
+    for (size_t i = 0; (in.fillAll || cap < in.population) && i < 5000; ++i) {
         int pick = -1; float bestD = -1e9f;
         for (size_t k = 0; k < share.size(); ++k) {
             if (all[in.houseTypes[k]].capacity <= 0 || share[k] <= 0) continue;

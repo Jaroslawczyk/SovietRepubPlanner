@@ -32,7 +32,7 @@ int   g_stopKind = 0;               // index into kStopIds
 const char* const kStopIds[] = { "busstop", "busstop_t", "muddy_busstop", "road_busstation_small", "road_busstation", "tram_stop_small", "tram_stop_big", "" };
 const int kStopCount = 8;
 bool  g_crossRoad = false;          // a second street across the first one
-int   g_roadKind = 1;               // street surface for instant building: 0 gravel, 1 asphalt
+int   g_roadKind = 2;               // street surface for instant building: 0 gravel, 1 asphalt
 int   g_pathKind = 1;               // footpath: 0 dirt trail, 1 gravel, 2 asphalt
 std::vector<ServiceRule> g_services = {
     { "SHOP",         "Магазин",          true,  2000, -1 },
@@ -48,6 +48,8 @@ std::vector<ServiceRule> g_services = {
 };
 int   g_population = 1000;
 float g_gap = 8.0f;
+int   g_density = 50;               // 0..100: gaps between buildings and rows
+bool  g_fillAll = false;
 int   g_roadType = 1;
 float g_roadV = 0;
 std::vector<float> g_stops;
@@ -199,7 +201,10 @@ void Regenerate() {
     if (!g_area.ok) return;
     const Area& a = g_area;
     PlanInput in;
-    in.poly = a.local; in.population = g_population; in.gap = g_gap;
+    in.poly = a.local; in.population = g_population;
+    in.gap = 14.0f - g_density * 0.11f;              // density 0 -> 14 m, 100 -> 3 m between buildings
+    in.band = 9.0f - g_density * 0.04f;              // and 9 -> 5 m for the footpath strip between rows
+    in.fillAll = g_fillAll;
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.crossRoad = g_crossRoad;
@@ -553,7 +558,10 @@ void TabArea() {
     ImGui::SetNextItemWidth(220);
     if (ImGui::InputInt("жителей", &g_population, 100, 1000)) { g_population = std::clamp(g_population, 10, 200000); g_dirty = true; }
     ImGui::SetNextItemWidth(220);
-    if (ImGui::SliderFloat("отступ между зданиями, м", &g_gap, 3.0f, 30.0f, "%.0f")) g_dirty = true;
+    if (ImGui::SliderInt("плотность застройки, %", &g_density, 0, 100)) g_dirty = true;
+    ImGui::SetItemTooltip("Сжимает промежутки между зданиями (14 → 3 м) и полосы дорожек между рядами (9 → 5 м).\nНа большой плотности игре может не хватить места под площадки у входов.");
+    if (ImGui::Checkbox("застроить весь участок", &g_fillAll)) g_dirty = true;
+    ImGui::SetItemTooltip("Дома ставятся, пока помещаются, без оглядки на число жителей выше.");
 
     ImGui::SeparatorText("Выбранные дома");
     const auto& all = catalog::All();
@@ -787,7 +795,19 @@ void InstantStart() {
     }
     for (int k = 0; k < nStreets; ++k) InstantLine(1, g_roadKind, rd[k].u1, rd[k].v1, rd[k].u2, rd[k].v2);
     for (auto& pc : roadPieces) if (pc.second >= nStreets) InstantLine(1, g_roadKind, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
-    for (auto& pc : Noded(g_plan.paths)) InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
+    // footpaths: the lines that run along a street at the pavement distance are the street's own pavements when the
+    // street has them; the rest is built
+    auto alongStreet = [&](const PathSeg& p) {
+        if (g_roadKind != 2) return false;
+        for (auto& rd : g_plan.roads) {
+            bool horiz = rd.v1 == rd.v2, phoriz = p.v1 == p.v2;
+            if (horiz != phoriz) continue;
+            float off = horiz ? fabsf(p.v1 - rd.v1) : fabsf(p.u1 - rd.u1);
+            if (off > rd.width / 2 + 0.5f && off < rd.width / 2 + 3.5f) return true;
+        }
+        return false;
+    };
+    for (auto& pc : Noded(g_plan.paths)) if (!alongStreet(pc.first)) InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
     for (auto& s : g_plan.utilLines) {      // after the buildings, so the ends snap to their connections
         // manager offset, type, sub-type, start argument - as logged from the game's own tools
         const int pw = g_powerUnder ? 20 : 10;
@@ -871,9 +891,9 @@ void InstantUi() {
 void TabRoads() {
     if (eng::InstantSupported()) {
         ImGui::SeparatorText("Покрытие");
-        const char* rk[] = { "гравийная дорога", "асфальтовая дорога" };
+        const char* rk[] = { "гравийная дорога", "асфальтовая дорога", "асфальтовая с тротуарами" };
         const char* pk[] = { "тропинка", "гравийная дорожка", "асфальтовая дорожка" };
-        ImGui::SetNextItemWidth(280); ImGui::Combo("улицы и подъезды", &g_roadKind, rk, 2);
+        ImGui::SetNextItemWidth(280); ImGui::Combo("улицы и подъезды", &g_roadKind, rk, 3);
         ImGui::SetNextItemWidth(280); ImGui::Combo("дорожки", &g_pathKind, pk, 3);
         ImGui::TextDisabled("Используется кнопкой «Построить всё сразу» внизу панели.");
         ImGui::TextDisabled("Зелёные точки — пешеходные входы зданий, оранжевые квадраты — подъезды для машин.");

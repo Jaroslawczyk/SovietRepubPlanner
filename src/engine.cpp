@@ -600,7 +600,21 @@ static void SnapAt(BYTE* G, void* m, int mgrOffset, int type, int sub) {
     else if (mgrOffset == 0xf7a0 && g_pathSnapMode == 1) ((RoadSnap_t)(Base() + 0x3c4790))(G, 0, 1, 0, 0, 0, 0, 1.0f, 0, 0);
     else ((Snap_t)(Base() + 0x21ba40))(G, m, type, sub);
 }
+static void SnapNearRaw(BYTE* G, void* m, int mgrOffset, int type, int sub);
+// A snap may pull an end several metres onto something else (a pavement end onto the street axis, a driveway corner
+// back onto the building). An end is accepted only where the plan put it: moved by at most 1.5 m; otherwise the point
+// stays and what the snap attached is cleared.
 static void SnapNear(BYTE* G, void* m, int mgrOffset, int type, int sub) {
+    V3 want = *(V3*)(G + 0xf6c);
+    SnapNearRaw(G, m, mgrOffset, type, sub);
+    V3 got = *(V3*)(G + 0xf6c);
+    if (mgrOffset == 0xf7a0 && fabsf(got.x - want.x) + fabsf(got.z - want.z) > 1.5f) {
+        *(V3*)(G + 0xf6c) = want;
+        *(void**)(G + 0xf648) = nullptr; *(void**)(G + 0xf650) = nullptr; *(void**)(G + 0xf680) = nullptr;
+        *(void**)(G + 0xf690) = nullptr; *(void**)(G + 0xf6a0) = nullptr;
+    }
+}
+static void SnapNearRaw(BYTE* G, void* m, int mgrOffset, int type, int sub) {
     int n = NearBuildings(*(V3*)(G + 0xf6c), 80.0f);
     BYTE** lst = (BYTE**)(G + 0x11dc0);
     BYTE* save0 = lst[0]; BYTE* save1 = lst[1]; BYTE* save2 = lst[2];
@@ -623,6 +637,7 @@ static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolNa
     __try {
         a0 = a; b0 = b;
         *(V3*)(G + 0xf6c) = a; SnapNear(G, m, mgrOffset, type, sub); a = *(V3*)(G + 0xf6c);
+        void* sa[4] = { *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690) };
         V3 out{}; stage = 1;
         ((PStart_t)(Base() + 0x4fbfd0))(m, &a, (UINT64)(unsigned)sub, 0, arg, 0, &out);
         // start tangent: start (0x4fbfd0, 0x4fc350) copies the direction of the existing piece it attaches to into
@@ -632,6 +647,10 @@ static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolNa
         stage = 2; *(V3*)(G + 0xf6c) = b; SnapNear(G, m, mgrOffset, type, sub); b = *(V3*)(G + 0xf6c);
         stage = 3; ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
         void* p428 = *(void**)((BYTE*)m + 0x428); void* p430 = *(void**)((BYTE*)m + 0x430);
+        {   static int nl2 = 0;
+            if ((mgrOffset == 0xf7a0 || mgrOffset == 0xf968) && nl2++ < 60)
+                Log("SNAP mgr+0x%x a(%.1f %.1f)->(%.1f %.1f) objs %p %p %p %p | b(%.1f %.1f)->(%.1f %.1f) objs %p %p %p %p", mgrOffset, a0.x, a0.z, a.x, a.z, sa[0], sa[1], sa[2], sa[3],
+                    b0.x, b0.z, b.x, b.z, *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690)); }
         if (mgrOffset != 0xf7a0 && mgrOffset != 0xf968) {
             static int nlog = 0;
             if (nlog++ < 40) Log("LINE mgr+0x%x type %d sub %d arg %d: a %.1f %.1f %.1f -> %.1f %.1f %.1f, b %.1f %.1f %.1f -> %.1f %.1f %.1f, preview %p %p, snap objs %p %p %p %p",
@@ -639,7 +658,15 @@ static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolNa
                 *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690));
         }
         stage = 4;
-        if (p430 && p428 != p430) { ((PCommit_t)(Base() + 0x518a10))(m, 0, 0, 0, 0, 0, 0); r = 1; }
+        if (p430 && p428 != p430) {
+            // the real test: the manager's node list (mgr+0x298..0x2a0) grows when the game accepts the piece
+            size_t n0 = (size_t)(*(BYTE**)((BYTE*)m + 0x2a0) - *(BYTE**)((BYTE*)m + 0x298)) / 8;
+            ((PCommit_t)(Base() + 0x518a10))(m, 0, 0, 0, 0, 0, 0);
+            size_t n1 = (size_t)(*(BYTE**)((BYTE*)m + 0x2a0) - *(BYTE**)((BYTE*)m + 0x298)) / 8;
+            r = 1;   // the node count is logged only: a piece that continues an existing end may not add nodes, so it is no proof
+            static int nl3 = 0;
+            if (nl3++ < 80) Log("COMMIT mgr+0x%x nodes %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, n0, n1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);
+        }
         else { ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
     } __except (CrashInfo(GetExceptionInformation(), "line", stage)) { r = -300; }
     *(V3*)(G + 0xf6c) = sp; *(void**)(G + 0xd428) = st;

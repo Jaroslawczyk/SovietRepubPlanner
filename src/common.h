@@ -117,6 +117,8 @@ struct PlanInput {
     std::vector<V2> poly;                           // district outline
     int   population = 1000;
     float gap = 8.0f;
+    float band = 7.0f;                              // strip of a footpath between two rows of buildings, m
+    bool  fillAll = false;                          // build up the whole area: houses until nothing fits
     std::vector<int> houseTypes;                    // catalog indices
     std::vector<float> houseWeights;                // share of each type among the houses (any scale); empty = equal
     std::vector<ServiceRule>* services = nullptr;
@@ -157,6 +159,7 @@ struct RoadSeg { float u1, v1, u2, v2, width; };
 struct PlanResult {
     std::vector<Placed>  buildings;
     std::vector<PathSeg> paths;
+    std::vector<char>    pathBuild;                 // per path: 0 = only the walking line along a street (the street has pavements)
     std::vector<RoadSeg> roads;
     std::vector<V2>      stops, crossings;
     std::vector<PathSeg> drives;                    // driveways from the street to road connections
