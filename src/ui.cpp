@@ -1113,6 +1113,7 @@ void SelfTest() {
         eng::InstallPathLogging();
         if (nm[0]) eng::DebugSetTool(nm);
     }
+    if (GetFileAttributesW((GameDir() + L"DistrictPlanner.darkness").c_str()) != INVALID_FILE_ATTRIBUTES) eng::LogDarkness();
     std::wstring dlFlag = GameDir() + L"DistrictPlanner.dumpload";
     if (GetFileAttributesW(dlFlag.c_str()) != INVALID_FILE_ATTRIBUTES) { DeleteFileW(dlFlag.c_str()); eng::DebugDumpLoad(); }
     std::wstring smFlag = GameDir() + L"DistrictPlanner.snapmode";     // debug: footpath snap mode for A/B tests

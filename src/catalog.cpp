@@ -71,12 +71,14 @@ static void ComputeLoads(BuildingType& b) {
     else if (c == "RAIL_TRAFO") b.powerCap = 14.0f;
     else if (wp > 0) {
         b.heatLoad = 0.7f * wp + 0.49f * b.workers * b.serve;
-        // the "lighting" half needs the global at exe+0x9d5d84 > 0; it was 0 in the game it was checked in (school 0.05,
-        // hospital 0.13 MW), so only the "living" half is counted
+        // the "lighting" half needs exe+0x9d5d84 > 0: that is the darkness of the day/night cycle (1 at night, 0 by day,
+        // read by the window and shadow shaders); building types are loaded at start-up while it is still 0, so the
+        // lighting half never enters a building's capacity - it is night-time consumption only
         b.powerLoad = wp * 0.0005f * b.fLive + (b.serve > 0 ? wp * b.serve * 0.0005f * b.fLiveServe : 0.0f);
     }
-    // a fuel storage adds 0.05 MW (fitted: hospital 0.08 by the formula, 0.13 in the game; the code adds a per-resource
-    // value for every storage, loop at 0x119fc1, table not read yet)
+    // every storage from the ini adds the largest per-resource value of its resources (loop 0x119fc1; the values are set
+    // in the resource definitions 0x2a1d50, resource + transport code x 32 + 0xd8 / 0xdc): 0.05 MW for liquids (oil,
+    // fuel, bitumen, liquid fertiliser - transport code 3) and for water / used water (codes 15, 16), 0 for the rest
     b.powerLoad += 0.05f * b.fuelStorages;
     // water (0x11a46b): living = residents x 0.045; with workers = (workers + professors) x 0.02 x water factor, plus
     // workers x able-to-serve x 0.045 for hotels, orphanages and prisons; sewage the same amount (0x11a725)
@@ -145,6 +147,7 @@ void Load() {
             else if (key == "STORAGE") {
                 std::string res; int n = 0; ls >> res >> n;
                 if (res == "RESOURCE_TRANSPORT_PASSANGER" && n > b.capacity) b.capacity = n;
+                if (res == "RESOURCE_TRANSPORT_OIL" || res == "RESOURCE_TRANSPORT_WATER" || res == "RESOURCE_TRANSPORT_SEWAGE") ++b.fuelStorages;
             }
             else if (key == "STYLE_FLAG") { if (b.style.empty()) ls >> b.style; }
             else if (key == "COST_RESOURCE_AUTO") {
@@ -162,7 +165,10 @@ void Load() {
             else if (key == "CONNECTION_HEATING_BIG") b.heatBig = true;
             else if (key == "ENGINE_SPEED") ls >> b.engineSpeed;
             else if (key == "WATER_CONSUMPTION_LIVING_WORKER_FACTOR") ls >> b.fWater;
-            else if (key == "STORAGE_FUEL") ++b.fuelStorages;
+            else if (key == "STORAGE_FUEL") {
+                std::string res; ls >> res;
+                if (res == "RESOURCE_TRANSPORT_OIL" || res == "RESOURCE_TRANSPORT_WATER" || res == "RESOURCE_TRANSPORT_SEWAGE") ++b.fuelStorages;
+            }
             else if (key == "HEATING_DISABLE") b.noHeat = true;
             else if (key == "ELECTRIC_DISABLE") b.noPower = true;
             else if (key == "WATERSEWAGE_DISABLE") b.noWater = b.noSewage = true;

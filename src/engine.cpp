@@ -719,6 +719,12 @@ static void GameThreadTick() {
 void DebugDumpTools() { g_dumpTools = true; }
 // Debug: per building type, the values the game uses for node load (power +0x10f8, heat +0x1060 are pointers to floats).
 void DebugDumpLoad() { g_dumpLoad = true; }
+void LogDarkness() {
+    static DWORD last = 0; DWORD now = GetTickCount();
+    if (now - last < 20000) return;
+    last = now;
+    Log("DARK %g", *(float*)(gx::Base() + 0x9d5d84));
+}
 struct BldRaw { char name[64]; int id; float p, h; long long pr, hr; int lp, lh; };
 static bool ReadBld(BYTE* b, BldRaw& o) {
     __try {
@@ -751,11 +757,34 @@ static void HexAround(const char* tag, BYTE* b, int off) {
     } __except (EXCEPTION_EXECUTE_HANDLER) { Log("RAW %s fault", tag); }
 }
 // the building's storage vector +0x970: records of 0xE0 bytes, capacity at +0x8c, resource code at +0x90
+// resources a storage may hold: vector of 16-byte items at record+0 (item[0] = resource object); the power the code
+// adds for a storage is max over its resources of res[code*32 + 0xd8], res[code*32 + 0xdc] (loop 0x119fc1)
+static void SafeName(BYTE* r, char* out, int n) {
+    __try {
+        int k = 0;
+        for (; k < n - 1; ++k) { char ch = (char)r[k]; if (ch < 32 || ch > 126) break; out[k] = ch; }
+        out[k] = 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { out[0] = 0; }
+}
+static void StorageRes(const char* tag, BYTE* rec) {
+    __try {
+        int code = *(int*)(rec + 0x90);
+        BYTE* v = *(BYTE**)(rec); BYTE* e = *(BYTE**)(rec + 8);
+        for (BYTE* it = v; it && it < e && it < v + 16 * 12; it += 16) {
+            BYTE* res = *(BYTE**)it; if (!res) continue;
+            char nm[40]; SafeName(res, nm, sizeof(nm));
+            char nm8[40]; SafeName(res + 8, nm8, sizeof(nm8));
+            Log("RES %s storage code %d: res %p '%s'/'%s' d8 %g dc %g item+8 %g", tag, code, res, nm, nm8,
+                *(float*)(res + code * 32 + 0xd8), *(float*)(res + code * 32 + 0xdc), *(float*)(it + 8));
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { Log("RES %s fault", tag); }
+}
 static void StorageList(const char* tag, BYTE* b) {
     __try {
         BYTE* v = *(BYTE**)(b + 0x970); BYTE* e = *(BYTE**)(b + 0x978);
         char line[600]; int n = 0;
         for (BYTE* r = v; r && r < e && n < 560; r += 0xE0) n += snprintf(line + n, sizeof(line) - n, " [code %d cap %g]", *(int*)(r + 0x90), *(float*)(r + 0x8c));
+        for (BYTE* r = v; r && r < e; r += 0xE0) StorageRes(tag, r);
         Log("STOR %s:%s", tag, n ? line : " none");
     } __except (EXCEPTION_EXECUTE_HANDLER) { Log("STOR %s fault", tag); }
 }
@@ -771,6 +800,7 @@ static void DumpLoadNow() {
         if (a.n == 1 && (r.id == 2 || r.id == 0x12 || r.id == 0x47)) { HexAround(r.name, *it, 0x10f8); HexAround(r.name, *it, 0x1060); }
         if (a.n == 1) StorageList(r.name, *it);
     }
+    Log("LOAD globals: darkness exe+0x9d5d84 = %g, living x2 flag exe+0x9d54d4 = %d", *(float*)(gx::Base() + 0x9d5d84), *(int*)(gx::Base() + 0x9d54d4));
     Log("LOAD dump: %d buildings, %d types (name id count | power +0x10f8 avg min max ptr-type | heat +0x1060 avg min max ptr-type | list sizes)", (int)(e - v), (int)m.size());
     for (auto& kv : m) {
         const Agg& a = kv.second;

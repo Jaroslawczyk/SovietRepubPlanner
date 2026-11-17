@@ -42,7 +42,8 @@ namespace eng {
     bool InstantBusy();
     void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed
     void DebugDumpTools();
-    void DebugDumpLoad();                           // debug: log node capacities and building loads from the running game
+    void DebugDumpLoad();
+    void LogDarkness();                             // debug: log exe+0x9d5d84 every 20 s while DistrictPlanner.darkness exists                           // debug: log node capacities and building loads from the running game
     void SetPathSnapMode(int mode);                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
     void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
@@ -83,7 +84,7 @@ struct BuildingType {
     bool  heatBig = false;  // has $CONNECTION_HEATING_BIG
     float engineSpeed = 0;  // $ENGINE_SPEED (pumps): adds engineSpeed x 0.01 MW
     float fWater = 1.0f;    // $WATER_CONSUMPTION_LIVING_WORKER_FACTOR
-    int   fuelStorages = 0; // $STORAGE_FUEL lines
+    int   fuelStorages = 0; // ini storages of liquids / water / sewage: each adds 0.05 MW
     bool  noHeat = false, noPower = false, noWater = false, noSewage = false;   // $HEATING_DISABLE, $ELECTRIC_DISABLE, $WATERSEWAGE_DISABLE, $SEWAGE_DISABLE
     float waterLoad = 0;    // water tank the building fills from the network (50 residents = 2.25)
     float sewageLoad = 0;   // the same for sewage
