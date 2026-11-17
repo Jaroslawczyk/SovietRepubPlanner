@@ -637,7 +637,7 @@ struct InstantRun {
 } g_inst;
 void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2) {
     float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
-    if (len < 1.5f) return;
+    if (len < 0.5f) return;
     int n = kind == 3 ? 1 : std::max(1, (int)ceilf(len / 60.0f));       // short pieces follow the ground; a pipe / wire stays one piece (joints turn into arcs)
     for (int i = 0; i < n; ++i) {
         float t0 = (float)i / n, t1 = (float)(i + 1) / n;
@@ -647,6 +647,42 @@ void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2)
         g_inst.jobs.push_back(j); g_inst.plan.push_back(-1);
     }
 }
+// The game joins lines end to end only: a piece that stops on the middle of another one just lies on top of it.
+// So every line is cut wherever another line of the set ends on it or crosses it, and all pieces share end points.
+// Returns the pieces with the index of the line each came from.
+std::vector<std::pair<PathSeg, int>> Noded(const std::vector<PathSeg>& in) {
+    std::vector<std::pair<PathSeg, int>> out;
+    for (size_t i = 0; i < in.size(); ++i) {
+        const PathSeg& s = in[i];
+        float du = s.u2 - s.u1, dv = s.v2 - s.v1, len2 = du * du + dv * dv, len = sqrtf(len2);
+        if (len < 0.05f) continue;
+        std::vector<float> cuts;
+        auto onMe = [&](float u, float v) {          // a point of another line lying on this one, away from its ends
+            float t = ((u - s.u1) * du + (v - s.v1) * dv) / len2;
+            if (t * len < 0.5f || (1 - t) * len < 0.5f) return;
+            float pu = s.u1 + du * t - u, pv = s.v1 + dv * t - v;
+            if (pu * pu + pv * pv < 0.5f * 0.5f) cuts.push_back(t);
+        };
+        for (size_t j = 0; j < in.size(); ++j) {
+            if (j == i) continue;
+            const PathSeg& o = in[j];
+            onMe(o.u1, o.v1); onMe(o.u2, o.v2);
+            float eu = o.u2 - o.u1, ev = o.v2 - o.v1, den = du * ev - dv * eu;      // a real crossing
+            if (fabsf(den) < 1e-4f) continue;
+            float t = ((o.u1 - s.u1) * ev - (o.v1 - s.v1) * eu) / den, w = ((o.u1 - s.u1) * dv - (o.v1 - s.v1) * du) / den;
+            if (w > 0 && w < 1 && t * len > 0.5f && (1 - t) * len > 0.5f) cuts.push_back(t);
+        }
+        std::sort(cuts.begin(), cuts.end());
+        float prev = 0;
+        for (size_t k = 0; k <= cuts.size(); ++k) {
+            float t = k < cuts.size() ? cuts[k] : 1.0f;
+            if (k < cuts.size() && (t - prev) * len < 0.5f) continue;          // two neighbours ending on almost the same spot share one cut
+            out.push_back({ PathSeg{ s.u1 + du * prev, s.v1 + dv * prev, s.u1 + du * t, s.v1 + dv * t }, (int)i });
+            prev = t;
+        }
+    }
+    return out;
+}
 eng::InstantJob InstantBuilding(const Placed& b) {
     eng::InstantJob j; j.kind = 0; j.type = catalog::All()[b.type].id;
     j.a = LocalToWorld(g_area, b.ou, b.ov, 0);
@@ -655,15 +691,20 @@ eng::InstantJob InstantBuilding(const Placed& b) {
 }
 void InstantStart() {
     g_inst = InstantRun();
-    for (auto& rd : g_plan.roads) InstantLine(1, g_roadKind, rd.u1, rd.v1, rd.u2, rd.v2);
+    std::vector<PathSeg> rd;        // streets and driveways cut at each other's ends, so they join
+    for (auto& s : g_plan.roads) rd.push_back({ s.u1, s.v1, s.u2, s.v2 });
+    const int nStreets = (int)rd.size();
+    rd.insert(rd.end(), g_plan.drives.begin(), g_plan.drives.end());
+    const auto roadPieces = Noded(rd);
+    for (auto& pc : roadPieces) if (pc.second < nStreets) InstantLine(1, g_roadKind, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
     for (size_t i = 0; i < g_plan.buildings.size(); ++i) {
         const Placed& b = g_plan.buildings[i];
         V3 w = LocalToWorld(g_area, b.u, b.v, 0);
         if (eng::Occupied(w.x, w.z) & 1) continue;      // already there
         g_inst.jobs.push_back(InstantBuilding(b)); g_inst.plan.push_back((int)i);
     }
-    for (auto& rd : g_plan.drives) InstantLine(1, g_roadKind, rd.u1, rd.v1, rd.u2, rd.v2);
-    for (auto& ps : g_plan.paths) InstantLine(2, g_pathKind - 1, ps.u1, ps.v1, ps.u2, ps.v2);
+    for (auto& pc : roadPieces) if (pc.second >= nStreets) InstantLine(1, g_roadKind, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
+    for (auto& pc : Noded(g_plan.paths)) InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
     for (auto& s : g_plan.utilLines) {      // after the buildings, so the ends snap to their connections
         // manager offset, type, sub-type, start argument - as logged from the game's own tools
         const int pw = g_powerUnder ? 20 : 10;
@@ -1093,6 +1134,24 @@ void SelfTest() {
     for (int i = 0; i < 6; ++i) { V3 p; if (eng::ScreenToTerrain(ds.x * sx[i], ds.y * sy[i], ds.x, ds.y, p)) pts.push_back(p); }
     Log("selftest: display %.0fx%.0f, points hit %d of 6", ds.x, ds.y, (int)pts.size());
     if (pts.size() < 6) return;
+    {   // prefer a free, fairly flat 300 m square near the view: earlier test districts may still stand in front of the camera
+        V3 c{ 0, 0, 0 }; for (auto& q : pts) { c.x += q.x / 6; c.z += q.z / 6; }
+        bool found = false;
+        for (int ring = 0; ring < 30 && !found; ++ring)
+            for (int a = -ring; a <= ring && !found; ++a) for (int b = -ring; b <= ring && !found; ++b) {
+                if (std::max(abs(a), abs(b)) != ring) continue;
+                float x0 = c.x + a * 150.0f, z0 = c.z + b * 150.0f, lo = 1e9f, hi = -1e9f; bool ok = true;
+                for (float x = -20; x <= 320 && ok; x += 20) for (float z = -20; z <= 320 && ok; z += 20) {
+                    if (eng::Occupied(x0 + x, z0 + z)) ok = false;
+                    float h = eng::TerrainHeight(x0 + x, z0 + z); lo = std::min(lo, h); hi = std::max(hi, h);
+                }
+                if (!ok || hi - lo > 12 || lo < 1) continue;
+                pts = { { x0, 0, z0 }, { x0 + 300, 0, z0 }, { x0 + 300, 0, z0 + 300 }, { x0, 0, z0 + 300 } };
+                for (auto& q : pts) q.y = eng::TerrainHeight(q.x, q.z);
+                Log("selftest: free square at %.0f %.0f (ring %d, height %.0f..%.0f)", x0, z0, ring, lo, hi);
+                found = true;
+            }
+    }
     g_population = 600; g_open = true; g_showLevel = false;
     {   // test district: only a building that is unlocked from the start, no services
         const auto& all = catalog::All();
