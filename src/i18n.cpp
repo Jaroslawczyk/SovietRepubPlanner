@@ -247,6 +247,7 @@ static const char* const kPairs[][2] = {
     { "на N жит.", "per N res." }, { "Перечитать местность и постройки игры", "Re-read the terrain and game buildings" },
     { "Мод читает рельеф, здания и дороги участка один раз; после своих построек нажмите это.", "The mod reads the terrain, buildings and roads of the area once; press this after building something yourself." },
     { "Парки", "Parks" }, { "Промышленность", "Industry" }, { "Настройки", "Settings" },
+    { "Переходы дорожек через улицы: готово %d, ждут достройки улиц %d (мод пробует каждые 30 с)", "Footpath crossings over the streets: done %d, waiting for the streets to be finished %d (the mod retries every 30 s)" },
     { "не изучено", "not researched" },
 };
 const char* T(const char* ru) {

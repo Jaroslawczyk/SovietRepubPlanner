@@ -932,6 +932,20 @@ static void DumpRoadsNow() {
         if (pieces > 20000 || nodes <= 0 || nodes > 20000) continue;
         Log("NETSCAN G+0x%x: pieces %d, nodes %d", mo, pieces, nodes);
     }
+    {   // first (old) and last (newest) road piece, raw: looking for a "still a construction site" field
+        BYTE* m = *(BYTE**)(G + 0xf7a0); BYTE* v[2];
+        if (m && ReadMem(m + 0x2b0, v, 16) && v[0] && v[1] > v[0]) {
+            BYTE* first; BYTE* last;
+            if (ReadMem(v[0], &first, 8) && ReadMem(v[1] - 8, &last, 8)) for (int w = 0; w < 2; ++w) {
+                BYTE* e = w ? last : first; BYTE buf[0x300];
+                if (!ReadMem(e, buf, sizeof(buf))) continue;
+                for (int o = 0; o < 0x300; o += 32) {
+                    const unsigned* q = (const unsigned*)(buf + o);
+                    Log("PIECE %s +%03x: %08x %08x %08x %08x %08x %08x %08x %08x", w ? "new" : "old", o, q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]);
+                }
+            }
+        }
+    }
     const int mgrs[] = { 0xf7a0, 0xf968 };
     for (int mo : mgrs) {
         BYTE* m = *(BYTE**)(G + mo);

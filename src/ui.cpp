@@ -365,7 +365,7 @@ void Regenerate() {
         in.ringRoad = g_ringRoad;
         { FILE* f = _wfopen((GameDir() + L"DistrictPlanner.linkoff").c_str(), L"r"); if (f) { fscanf(f, "%f", &in.linkEndOff); fclose(f); } }
         in.straightLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.nostraight").c_str()) == INVALID_FILE_ATTRIBUTES;
-        in.crossLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.crosslinks").c_str()) != INVALID_FILE_ATTRIBUTES;   // experiment switch
+        in.crossLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.nocross").c_str()) == INVALID_FILE_ATTRIBUTES;
     }
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.crossRoad = g_crossRoad;
     for (size_t t = 0; t < catalog::All().size(); ++t) if (kStopIds[g_stopKind][0] && catalog::All()[t].id == kStopIds[g_stopKind]) in.stopType = (int)t; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
@@ -1212,6 +1212,8 @@ eng::InstantJob InstantBuilding(const Placed& b) {
     j.rot = g_buildRotSign * (atan2f(g_area.uz, g_area.ux) + b.rot * kPi / 2);
     return j;
 }
+std::vector<eng::InstantJob> g_crossPending;     // footpath crossings waiting for their streets to be finished (CrossTick)
+int   g_crossDone = 0;
 // Experiment (flag file DistrictPlanner.jointest, after a selftest has set the area): one road along u through the
 // middle of the area, then footpaths at right angles from 16 m away ending at different distances from the road axis.
 // The log tells which were built and whether the road network changed (= a joint / crossing was made).
@@ -1303,6 +1305,21 @@ void InstantStart() {
             for (auto& pc : pieces) {
                 if (pc.second < (int)g_plan.pathBuild.size() && !g_plan.pathBuild[pc.second]) continue;
                 if (alongStreet(pc.first) || isLink(pc.second) != (pass == 1)) continue;
+                {   // a piece crossing a street of the plan waits until that street is finished (see CrossTick)
+                    const PathSeg& q = pc.first; bool crosses = false;
+                    for (auto& rd : g_plan.roads) {
+                        float r1u = q.u2 - q.u1, r1v = q.v2 - q.v1, r2u = rd.u2 - rd.u1, r2v = rd.v2 - rd.v1, den = r1u * r2v - r1v * r2u;
+                        if (fabsf(den) < 1e-6f) continue;
+                        float t = ((rd.u1 - q.u1) * r2v - (rd.v1 - q.v1) * r2u) / den, w = ((rd.u1 - q.u1) * r1v - (rd.v1 - q.v1) * r1u) / den;
+                        if (t > 0.02f && t < 0.98f && w >= 0 && w <= 1) { crosses = true; break; }
+                    }
+                    if (crosses) {
+                        eng::InstantJob j; j.kind = 2; j.lineType = g_pathKind - 1;
+                        j.a = LocalToWorld(g_area, q.u1, q.v1, 0); j.b = LocalToWorld(g_area, q.u2, q.v2, 0);
+                        g_crossPending.push_back(j);
+                        continue;
+                    }
+                }
                 InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
             }
     }
@@ -1447,6 +1464,29 @@ void CheckGaps(const InstantRun& r) {
         else Log("gap repair: no free straight way for the piece at %.1f %.1f", w.x, w.z);
     }
 }
+// Crossings of entrance footpaths over the plan's streets. The game joins a footpath to a road only where it crosses a
+// finished road (a crossing over an old road joined it; over a road still under construction - road piece list +0x260
+// not empty - every attempt was refused, v0.43.0). So these pieces wait and are tried again every 30 s until the
+// roads are built; each success is a crossing that links the houses to the street.
+bool  g_crossRunning = false;
+DWORD g_crossLast = 0;
+void CrossTick() {
+    if (g_crossRunning) {
+        if (eng::InstantBusy()) return;
+        g_crossRunning = false;
+        std::vector<int> codes; eng::InstantResults(codes);
+        std::vector<eng::InstantJob> left;
+        for (size_t i = 0; i < g_crossPending.size(); ++i) { if (i < codes.size() && codes[i] == 1) ++g_crossDone; else left.push_back(g_crossPending[i]); }
+        if (left.size() != g_crossPending.size()) Log("crossings: %d joined, %d still waiting for their roads", (int)(g_crossPending.size() - left.size()), (int)left.size());
+        g_crossPending.swap(left);
+        return;
+    }
+    if (g_crossPending.empty() || g_inst.phase != 0 || eng::InstantBusy() || GetTickCount() - g_crossLast < 30000) return;
+    g_crossLast = GetTickCount();
+    eng::QueueInstant(g_crossPending);
+    g_crossRunning = true;
+}
+
 void InstantTick() {
     InstantRun& r = g_inst;
     if (r.phase == 0 || eng::InstantBusy()) return;
@@ -1586,6 +1626,7 @@ void InstantTick() {
 }
 void InstantUi() {
     InstantTick();
+    CrossTick();
     InstantRun& r = g_inst;
     if (r.phase) {
         ImGui::BeginDisabled();
@@ -1751,6 +1792,8 @@ void Footer() {
             ImGui::Text(T("Свободных рабочих для промышленности ≈ %d (95 %% заселения, минус службы района)"), std::max(0, freeW));
         }
         if (g_autoHouse && !g_autoNote.empty()) ImGui::TextDisabled(T("Дома подобраны автоматически: %s"), g_autoNote.c_str());
+        if (!g_crossPending.empty() || g_crossDone)
+            ImGui::TextDisabled(T("Переходы дорожек через улицы: готово %d, ждут достройки улиц %d (мод пробует каждые 30 с)"), g_crossDone, (int)g_crossPending.size());
         if (g_plan.maxWalkToStop >= 0) {
             if (g_plan.farHouses) ImGui::TextColored(red, T("До остановки до %.0f м — %d домов дальше %.0f м, добавьте остановку."), g_plan.maxWalkToStop, g_plan.farHouses, g_walk);
             else ImGui::Text(T("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м"), g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));

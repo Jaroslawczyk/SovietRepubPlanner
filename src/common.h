@@ -142,7 +142,7 @@ struct PlanInput {
     int   servicePop = 0;                           // residents the services are counted for (0 = population)
     float linkEndOff = 2.0f;                        // village link end: metres beyond the planned road edge
     bool  straightLinks = true;
-    bool  crossLinks = false;                       // village: each entrance link also crosses its street (worked on an old game road, refused on freshly built ones - v0.43.0)                     // village: entrance footpaths as one straight piece to the street
+    bool  crossLinks = true;                        // village: each entrance link also crosses its street - the only way the game joins a footpath to a road (finished roads only; the build retries these later)                     // village: entrance footpaths as one straight piece to the street
     bool  ringRoad = false;                         // a street round the whole outline (village layout)
     int   layout = 1;                               // 0 parallel strips, 1 microdistricts (blocks), 2 village / suburb: houses on both sides of every street
     bool  blocks = true;                            // microdistricts: street grid, houses round each block, courtyards (false = old parallel strips)                          // build up the whole area: houses until nothing fits
