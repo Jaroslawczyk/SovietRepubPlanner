@@ -1117,7 +1117,10 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         V2 tmp;
         size_t before = r.roads.size();
         r.roads.erase(std::remove_if(r.roads.begin(), r.roads.end(), [&](const RoadSeg& s) {
-            return nearestExt((s.u1 + s.u2) / 2, (s.v1 + s.v2) / 2, tmp) < 6 && nearestExt(s.u1, s.v1, tmp) < 8 && nearestExt(s.u2, s.v2, tmp) < 8;
+            // a game road running alongside within a street width already serves this piece (and the game would
+            // refuse a road laid over it)
+            float lim = s.width / 2 + 8;
+            return nearestExt((s.u1 + s.u2) / 2, (s.v1 + s.v2) / 2, tmp) < lim && nearestExt(s.u1, s.v1, tmp) < lim + 2 && nearestExt(s.u2, s.v2, tmp) < lim + 2;
         }), r.roads.end());
         r.droppedRoads = (int)(before - r.roads.size());
         std::vector<RoadSeg> joins;
@@ -1129,7 +1132,15 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 if (j != i && segDist(u, v, r.roads[j].u1, r.roads[j].v1, r.roads[j].u2, r.roads[j].v2, qu, qv) < 1.5f) loose = false;
             if (!loose) continue;
             V2 at; float d = nearestExt(u, v, at);
-            if (d > 9 && d < 90) joins.push_back({ u, v, at.u, at.v, s.width });
+            bool clear = d > 9 && d < 90;    // the link must not run through a building of the plan
+            for (auto& b : r.buildings) {
+                if (!clear) break;
+                for (int k = 0; k <= 30 && clear; ++k) {
+                    float t = k / 30.0f, pu = u + (at.u - u) * t, pv = v + (at.v - v) * t;
+                    if (fabsf(pu - b.u) < b.w / 2 + s.width / 2 + 2 && fabsf(pv - b.v) < b.d / 2 + s.width / 2 + 2) clear = false;
+                }
+            }
+            if (clear) joins.push_back({ u, v, at.u, at.v, s.width });
         }
         r.joinedRoads = (int)joins.size();
         r.roads.insert(r.roads.end(), joins.begin(), joins.end());

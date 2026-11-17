@@ -921,6 +921,14 @@ static bool OnGround(const float* f) {
 }
 static void DumpRoadsNow() {
     BYTE* G = gx::Game();
+    for (int mo = 0xf700; mo <= 0xfb40; mo += 8) {     // every pointer here that looks like a network manager
+        BYTE* m0; if (!ReadMem(G + mo, &m0, 8) || (UINT64)m0 < 0x10000) continue;
+        BYTE* vv[2]; if (!ReadMem(m0 + 0x2b0, vv, 16) || !vv[0] || vv[1] < vv[0] || (vv[1] - vv[0]) % 8 || (vv[1] - vv[0]) / 8 > 200000) continue;
+        BYTE* nn[2]; if (!ReadMem(m0 + 0x298, nn, 16)) continue;
+        int pieces = (int)((vv[1] - vv[0]) / 8), nodes = nn[0] && nn[1] > nn[0] ? (int)((nn[1] - nn[0]) / 8) : 0;
+        if (pieces > 20000 || nodes <= 0 || nodes > 20000) continue;
+        Log("NETSCAN G+0x%x: pieces %d, nodes %d", mo, pieces, nodes);
+    }
     const int mgrs[] = { 0xf7a0, 0xf968 };
     for (int mo : mgrs) {
         BYTE* m = *(BYTE**)(G + mo);

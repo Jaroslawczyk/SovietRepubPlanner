@@ -63,7 +63,7 @@ std::vector<ServiceRule> g_services = {     // labels are translated with T() wh
 int   g_population = 1000;
 float g_gap = 8.0f;
 int   g_density = 90;               // 0..100: gaps between buildings and rows
-std::vector<std::vector<V2>> g_extPaths;   // footpaths already in the game (local frame)
+std::vector<std::vector<V2>> g_extPaths, g_extRoadsL;   // footpaths / roads already in the game (local frame)   // footpaths already in the game (local frame)
 bool  g_autoHouse = true;          // the house ticked by default; the first manual tick replaces it
 bool  g_fillAll = true;    // no empty corners: houses until nothing fits
 int   g_roadType = 1;
@@ -295,9 +295,14 @@ void Regenerate() {
         std::vector<std::vector<V3>> lines;
         eng::ListNetLines(0xf7a0, lines);
         for (auto& L : lines) { std::vector<V2> l; for (auto& p : L) l.push_back(WorldToLocal(a, p)); in.extRoads.push_back(l); }
+        g_extRoadsL = in.extRoads;
         g_extPaths.clear();
-        eng::ListNetLines(0xf968, lines);
-        for (auto& L : lines) { std::vector<V2> l; for (auto& p : L) l.push_back(WorldToLocal(a, p)); g_extPaths.push_back(l); }
+        // footpaths and trails: besides 0xf968 the game keeps line networks at 0xf7a8, 0xf908 and 0xf8b0 that block
+        // buildings the same way (refusal code 1, "building on a road"; found by v0.37.0 test, see docs/internals.md)
+        for (int mo : { 0xf968, 0xf7a8, 0xf908, 0xf8b0 }) {
+            eng::ListNetLines(mo, lines);
+            for (auto& L : lines) { std::vector<V2> l; for (auto& p : L) l.push_back(WorldToLocal(a, p)); g_extPaths.push_back(l); }
+        }
     }
     in.occupied = [&a, &in](float u, float v) {
         if (eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0) return true;
@@ -310,7 +315,7 @@ void Regenerate() {
             }
             return false;
         };
-        return nearLine(in.extRoads, 7.0f) || nearLine(g_extPaths, 2.5f);   // keep buildings off existing roads and footpaths
+        return nearLine(in.extRoads, 7.0f) || nearLine(g_extPaths, 4.0f);   // keep buildings off existing roads and footpaths
     };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     {   // connections of the buildings that already stand near the district, for feeding its networks
@@ -1213,6 +1218,21 @@ void InstantTick() {
         if (j.kind == 0) {
             if (r.phase == 1) ++r.bAll;
             if (codes[i] == -1) ++r.bOk;
+            else if (codes[i] == 1 && r.plan[i] >= 0) {     // "building on a road": whose road is it?
+                const Placed& b = g_plan.buildings[r.plan[i]];
+                auto dRect = [&](float u, float v) { float du = std::max(0.0f, fabsf(u - b.u) - b.w / 2), dv = std::max(0.0f, fabsf(v - b.v) - b.d / 2); return sqrtf(du * du + dv * dv); };
+                auto dSeg = [&](float u1, float v1, float u2, float v2) {
+                    float best = 1e9f;
+                    for (int k = 0; k <= 20; ++k) { float t = k / 20.0f; best = std::min(best, dRect(u1 + (u2 - u1) * t, v1 + (v2 - v1) * t)); }
+                    return best;
+                };
+                float game = 1e9f, plan = 1e9f, drive = 1e9f;
+                for (auto& L : g_extRoadsL) for (size_t k = 0; k + 1 < L.size(); ++k) game = std::min(game, dSeg(L[k].u, L[k].v, L[k + 1].u, L[k + 1].v));
+                for (auto& s : g_plan.roads) plan = std::min(plan, dSeg(s.u1, s.v1, s.u2, s.v2) - s.width / 2);
+                for (auto& s : g_plan.drives) drive = std::min(drive, dSeg(s.u1, s.v1, s.u2, s.v2));
+                Log("road clash '%s': game road centre %.1f m from the footprint, plan street edge %.1f m, driveway %.1f m",
+                    catalog::All()[b.type].id.c_str(), game, plan, drive);
+            }
             else if (r.phase == 1 && codes[i] == 10) r.retry.push_back(r.plan[i]);
         } else if (j.kind == 1) { ++r.rAll; if (codes[i] == 1) { ++r.rOk; r.built.push_back(j); } }
         else if (j.kind == 3) { if (r.phase == 1) ++r.nAll; if (codes[i] == 1) ++r.nOk; else if (r.phase == 1) failedLines.push_back(j); }
