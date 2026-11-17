@@ -1261,8 +1261,29 @@ void InstantStart() {
     }
     // a street is cut where it crosses a trail / footpath of the game, so each crossing becomes a joint of two pieces
     // (whole pieces across trails were refused, v0.38.0 test)
+    // Streets go in pieces cut at every point where another street or a driveway joins or crosses them: a street or
+    // driveway ending in the middle of a built street (no node there) was refused on flat, clear ground (v0.46.0 log:
+    // whole cross streets and most 13 m driveways). Pieces shorter than 10 m are merged into the next (the game refuses them).
+    std::vector<PathSeg> streetPieces;
     for (int k = 0; k < nStreets; ++k) {
-        const PathSeg& sg = rd[k];
+        std::vector<PathSeg> mine;
+        for (auto& pc : roadPieces) if (pc.second == k) mine.push_back(pc.first);
+        if (mine.empty()) continue;
+        PathSeg cur = mine[0];
+        for (size_t q = 1; q < mine.size(); ++q) {
+            float lc = hypotf(cur.u2 - cur.u1, cur.v2 - cur.v1);
+            if (lc < 10) { cur.u2 = mine[q].u2; cur.v2 = mine[q].v2; continue; }
+            float ln = hypotf(mine[q].u2 - mine[q].u1, mine[q].v2 - mine[q].v1);
+            if (ln < 10 && q + 1 == mine.size()) { cur.u2 = mine[q].u2; cur.v2 = mine[q].v2; continue; }
+            streetPieces.push_back(cur); cur = mine[q];
+        }
+        streetPieces.push_back(cur);
+    }
+    if (GetFileAttributesW((GameDir() + L"DistrictPlanner.wholestreets").c_str()) != INVALID_FILE_ATTRIBUTES) {   // A/B switch: old behaviour
+        streetPieces.clear(); for (int k = 0; k < nStreets; ++k) streetPieces.push_back(rd[k]);
+    }
+    for (size_t k = 0; k < streetPieces.size(); ++k) {
+        const PathSeg& sg = streetPieces[k];
         float du = sg.u2 - sg.u1, dv = sg.v2 - sg.v1, len = sqrtf(du * du + dv * dv);
         std::vector<float> ts{ 0.0f, 1.0f };
         if (g_cutAtTrails) for (auto& L : g_extPaths) for (size_t q = 0; q + 1 < L.size(); ++q) {
