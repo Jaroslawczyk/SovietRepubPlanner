@@ -109,7 +109,7 @@ MB_HOOK(h_MDown, o_MDown)
 typedef bool (*InName_t)(void*, char*);
 static InName_t o_BtnDown, o_BtnPress;
 char g_scriptButton[64] = "MOUSEDRAG";   // the named button the line tools read while the left button is held
-static void GameThreadTick();
+static void GameThreadTick(); static void DumpLoadNow(); static std::atomic<bool> g_dumpLoad{ false };
 static bool NamedButton(InName_t orig, const char* kind, void* s, char* name) {
     bool v = orig(s, name);
     if (name && kind[0] == 'p' && strcmp(name, "TOOL_CANCEL") == 0) GameThreadTick();
@@ -677,6 +677,7 @@ void InstantResults(std::vector<int>& codes) { std::lock_guard<std::mutex> l(g_i
 static void GameThreadTick() {
     if (!gx::Supported()) return;
     if (g_dumpTools.exchange(false)) gx::DumpTools();
+    if (g_dumpLoad.exchange(false)) DumpLoadNow();
     if (g_dbgToolSet.exchange(false)) {
         void* tool = nullptr; const char* nm = gx::FindTool(g_dbgTool, &tool);
         if (nm) *(void**)(gx::Game() + 0xd428) = tool;
@@ -716,6 +717,37 @@ static void GameThreadTick() {
     }
 }
 void DebugDumpTools() { g_dumpTools = true; }
+// Debug: per building type, the values the game uses for node load (power +0x10f8, heat +0x1060 are pointers to floats).
+void DebugDumpLoad() { g_dumpLoad = true; }
+struct BldRaw { char name[64]; int id; float p, h; long long pr, hr; int lp, lh; };
+static bool ReadBld(BYTE* b, BldRaw& o) {
+    __try {
+        BYTE* t = *(BYTE**)(b + 0x318); if (!t) return false;
+        strncpy(o.name, (const char*)t, 63); o.name[63] = 0; o.id = *(int*)(t + 0x360);
+        float* p = *(float**)(b + 0x10f8); float* h = *(float**)(b + 0x1060);
+        o.p = p ? *p : -1; o.h = h ? *h : -1;
+        o.pr = p ? (long long)((BYTE*)p - b) : 0; o.hr = h ? (long long)((BYTE*)h - b) : 0;
+        o.lp = (int)((*(BYTE**)(b + 0x10d0) - *(BYTE**)(b + 0x10c8)) / 8); o.lh = (int)((*(BYTE**)(b + 0x1038) - *(BYTE**)(b + 0x1030)) / 8);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+static void DumpLoadNow() {
+    BYTE** v = *(BYTE***)(gx::Base() + 0x9e6a18); BYTE** e = *(BYTE***)(gx::Base() + 0x9e6a20);
+    struct Agg { int id = 0, n = 0; float p = 0, h = 0, pmin = 1e9f, pmax = -1e9f, hmin = 1e9f, hmax = -1e9f; long long pr = 0, hr = 0; int lp = 0, lh = 0; };
+    std::map<std::string, Agg> m;
+    for (BYTE** it = v; it && it < e; ++it) {
+        BldRaw r; if (!*it || !ReadBld(*it, r)) continue;
+        Agg& a = m[r.name]; a.id = r.id; ++a.n; a.p += r.p; a.h += r.h; a.pr = r.pr; a.hr = r.hr;
+        a.pmin = std::min(a.pmin, r.p); a.pmax = std::max(a.pmax, r.p); a.hmin = std::min(a.hmin, r.h); a.hmax = std::max(a.hmax, r.h);
+        a.lp = r.lp; a.lh = r.lh;
+    }
+    Log("LOAD dump: %d buildings, %d types (name id count | power +0x10f8 avg min max ptr-type | heat +0x1060 avg min max ptr-type | list sizes)", (int)(e - v), (int)m.size());
+    for (auto& kv : m) {
+        const Agg& a = kv.second;
+        Log("LOAD %s id 0x%x n %d | P %.4g %.4g %.4g off %lld | H %.4g %.4g %.4g off %lld | lists %d %d", kv.first.c_str(), a.id, a.n,
+            a.p / a.n, a.pmin, a.pmax, a.pr, a.h / a.n, a.hmin, a.hmax, a.hr, a.lp, a.lh);
+    }
+}
 void SetPathSnapMode(int m) { gx::g_pathSnapMode = m; Log("footpath snap mode %d", m); }
 void DebugSetTool(const char* name) { strncpy(g_dbgTool, name, sizeof(g_dbgTool) - 1); g_dbgToolSet = true; }
 void InstallPathLogging() { gx::InstallPathLogging(); }

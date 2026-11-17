@@ -50,7 +50,7 @@ float g_walk = 400.0f, g_maxDiff = 5.0f;
 // utilities: water, sewage, heating, power
 const char* const kUtilName[4] = { "Вода", "Канализация", "Отопление", "Электричество" };
 const char* const kUtilNode[4] = { "водораспределитель", "канализационная станция", "тепловой пункт", "трансформатор" };
-const char* const kUtilUnit[4] = { "м³/сут", "м³/сут", "кВт", "кВт" };
+const char* const kUtilUnit[4] = { "м³/сут", "м³/сут", "ед. бака", "МВт" };
 const ImU32 kUtilCol[4] = { IM_COL32(70, 150, 255, 255), IM_COL32(165, 110, 55, 255), IM_COL32(245, 85, 60, 255), IM_COL32(250, 220, 60, 255) };
 bool  g_utilShow[4] = { false, false, false, false };
 bool  g_utilBuild[4] = { false, false, false, false };   // the network goes into the plan and gets built
@@ -58,7 +58,7 @@ bool  g_powerUnder = false;                               // medium-voltage line
 float g_utilRadius[4] = { 250, 250, 380, 250 };   // the game links a building to a node closer than this (2D distance; SOVIET64.exe 0x441340, 0x441600, 0x440d90, 0x4406d0)
 bool  g_powerTrafo = true;
 bool  g_utilChain = false;      // switches and pipes between the nodes of one network
-float g_utilNorm[4] = { 0.12f, 0.12f, 0.9f, 0.25f };   // per resident; rough guesses, editable in the panel
+float g_utilNorm[4] = { 0.12f, 0.12f, 0.7f, 0.002f };  // per resident; heat and power read from the game (brick house: 35 tank units, 0.1 MW for 50), water and sewage are guesses
 std::vector<std::vector<V3>> g_utilLines[4];
 std::vector<V3> g_utilPts[4];
 float g_buildRotSign = -1.0f;       // sign between the plan angle and the game cursor rotation
@@ -195,7 +195,7 @@ void Regenerate() {
     for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
-    for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; }
+    for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; if (k >= 2) in.utilPerPerson[k] = g_utilNorm[k]; }
     in.powerTrafo = g_powerTrafo; in.utilChain = g_utilChain;
     in.occupied = [&a](float u, float v) { return eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0; };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
@@ -866,14 +866,21 @@ void TabUtils() {
         ImGui::SetNextItemWidth(200);
         if (ImGui::SliderFloat("радиус узла, м", &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
         ImGui::SetNextItemWidth(120);
-        ImGui::InputFloat("на жителя", &g_utilNorm[k], 0, 0, "%.2f");
-        ImGui::SameLine(); ImGui::TextDisabled("%s (прикидка)", kUtilUnit[k]);
+        ImGui::InputFloat("на жителя", &g_utilNorm[k], 0, 0, k == 3 ? "%.4f" : "%.2f");
+        if (ImGui::IsItemDeactivatedAfterEdit()) g_dirty = true;
+        ImGui::SameLine(); ImGui::TextDisabled(k >= 2 ? "%s (из игры, по кирпичному дому)" : "%s (прикидка)", kUtilUnit[k]);
         if (g_utilBuild[k] && g_area.ok && !g_plan.buildings.empty()) {
             int nodes = (int)g_plan.utilNodes[k].size(), helpers = 0;
             for (auto& b : g_plan.buildings) if (b.net == k && b.role == 1) ++helpers;
             ImGui::Text("Узлов (%s): %d  ·  %s: %d  ·  линий %.0f м  ·  нагрузка %.0f %s", kUtilNode[k], nodes,
                         k == 3 ? "трансформаторов" : "распределителей", helpers, g_plan.utilLen[k], people * g_utilNorm[k], kUtilUnit[k]);
             if (g_plan.utilUncovered[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Вне радиуса зданий: %d.", g_plan.utilUncovered[k]);
+            if (k >= 2 && nodes > 0) {
+                const float cap = k == 2 ? 1000.0f : 2.5f;
+                ImGui::Text("Спрос района %.*f %s · самый загруженный узел %.0f %% (игра предупреждает с 90 %%, ёмкость узла %g)",
+                            k == 3 ? 2 : 0, g_plan.utilDemand[k], kUtilUnit[k], g_plan.utilMaxLoad[k] * 100, cap);
+                if (g_plan.utilOverloaded[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Перегружено узлов: %d.", g_plan.utilOverloaded[k]);
+            }
             if (g_plan.utilNoLine[k]) ImGui::TextColored(ImVec4(0.65f, 0.1f, 0.1f, 1), "Не удалось проложить соединений: %d.", g_plan.utilNoLine[k]);
         }
         ImGui::Separator();
@@ -1106,6 +1113,8 @@ void SelfTest() {
         eng::InstallPathLogging();
         if (nm[0]) eng::DebugSetTool(nm);
     }
+    std::wstring dlFlag = GameDir() + L"DistrictPlanner.dumpload";
+    if (GetFileAttributesW(dlFlag.c_str()) != INVALID_FILE_ATTRIBUTES) { DeleteFileW(dlFlag.c_str()); eng::DebugDumpLoad(); }
     std::wstring smFlag = GameDir() + L"DistrictPlanner.snapmode";     // debug: footpath snap mode for A/B tests
     if (GetFileAttributesW(smFlag.c_str()) != INVALID_FILE_ATTRIBUTES) {
         int m = 1; FILE* f = _wfopen(smFlag.c_str(), L"r"); if (f) { fscanf(f, "%d", &m); fclose(f); }

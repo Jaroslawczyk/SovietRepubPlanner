@@ -59,7 +59,8 @@ Item MakeItem(int type) {
 }
 }
 
-static PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
+static float Demand(const BuildingType& t, float perPerson);
+PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     PlanResult r;
     const auto& all = catalog::All();
     if (in.poly.size() < 3 || in.houseTypes.empty()) return r;
@@ -548,16 +549,34 @@ static PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites
     }
 
     // Coverage: houses take water, heat and power from a node within its service radius, no line to the house itself.
+    // Load, the way the game counts it: each building's demand is shared evenly by the nodes that reach it.
     for (int k = 0; k < 4; ++k) {
         if (!in.utilBuild[k]) continue;
+        std::vector<float> load(r.utilNodes[k].size(), 0.0f);
         for (auto& b : r.buildings) {
             if (b.net >= 0) continue;
-            bool ok = false;
-            for (auto& nd : r.utilNodes[k]) if (hypotf(nd.u - b.u, nd.v - b.v) <= in.utilRadius[k]) { ok = true; break; }
-            if (!ok) ++r.utilUncovered[k];
+            int reach = 0;
+            for (auto& nd : r.utilNodes[k]) if (hypotf(nd.u - b.u, nd.v - b.v) <= in.utilRadius[k]) ++reach;
+            if (!reach) { ++r.utilUncovered[k]; continue; }
+            float dem = Demand(all[b.type], in.utilPerPerson[k]);
+            r.utilDemand[k] += dem;
+            for (size_t i = 0; i < r.utilNodes[k].size(); ++i)
+                if (hypotf(r.utilNodes[k][i].u - b.u, r.utilNodes[k][i].v - b.v) <= in.utilRadius[k]) load[i] += dem / reach;
         }
+        if (in.utilNodeCap[k] > 0)
+            for (float l : load) {
+                float f = l / in.utilNodeCap[k];
+                r.utilMaxLoad[k] = std::max(r.utilMaxLoad[k], f);
+                if (f > 0.9f) ++r.utilOverloaded[k];
+            }
     }
     return r;
+}
+
+// What a building asks of a network: residents, or the workers of a service building, times the per-person norm.
+float Demand(const BuildingType& t, float perPerson) {
+    int people = t.capacity > 0 ? t.capacity : std::max(1, t.workers);
+    return people * perPerson;
 }
 
 // Utility nodes are few and central: a dry layout without them shows where the buildings stand, a greedy cover picks
@@ -567,13 +586,15 @@ PlanResult MakePlan(const PlanInput& in) {
     bool any = false;
     for (int k = 0; k < 4; ++k) any = any || in.utilBuild[k];
     if (!any) return MakePlanImpl(in, nullptr);
+    const auto& all = catalog::All();
     PlanInput dry = in;
     for (int k = 0; k < 4; ++k) dry.utilBuild[k] = false;
     PlanResult cur = MakePlanImpl(dry, nullptr), best;
     int bestScore = 1 << 30;
     // the nodes take room in the rows and push later buildings along, so the spots are picked again on the layout
     // that already holds them, a few times; the layout with the fewest buildings out of reach (then the fewest nodes) wins
-    for (int pass = 0; pass < 4; ++pass) {
+    int extra[4] = {};       // more nodes than the load needs on average, after a pass left one over 90 %
+    for (int pass = 0; pass < 6; ++pass) {
         std::vector<V2> sites[4];
         std::vector<const Placed*> bs;
         for (auto& b : cur.buildings) if (b.net < 0) bs.push_back(&b);
@@ -594,12 +615,30 @@ PlanResult MakePlan(const PlanInput& in) {
                 sites[k].push_back({ bs[pick]->u, bs[pick]->v });
                 for (size_t b = 0; b < n; ++b) if (!covered[b] && hypotf(bs[b]->u - bs[pick]->u, bs[b]->v - bs[pick]->v) <= R) { covered[b] = 1; --left; }
             }
+            // enough nodes for the load: the game warns above 90 % of a node's capacity; extra nodes go to the
+            // buildings farthest from the chosen ones, so that the demand is shared out
+            if (in.utilNodeCap[k] > 0 && !sites[k].empty()) {
+                float dem = 0;
+                for (size_t b = 0; b < n; ++b) dem += Demand(all[bs[b]->type], in.utilPerPerson[k]);
+                size_t need = (size_t)ceilf(dem / (0.85f * in.utilNodeCap[k])) + extra[k];
+                while (sites[k].size() < need && sites[k].size() < 60) {
+                    int farIdx = -1; float farD = -1;
+                    for (size_t b = 0; b < n; ++b) {
+                        float d = 1e9f;
+                        for (auto& st : sites[k]) d = std::min(d, hypotf(bs[b]->u - st.u, bs[b]->v - st.v));
+                        if (d > farD) { farD = d; farIdx = (int)b; }
+                    }
+                    if (farIdx < 0 || farD < 1.0f) break;
+                    sites[k].push_back({ bs[farIdx]->u, bs[farIdx]->v });
+                }
+            }
         }
         cur = MakePlanImpl(in, sites);
         int score = 0;
-        for (int k = 0; k < 4; ++k) score += cur.utilUncovered[k] * 1000;
+        for (int k = 0; k < 4; ++k) score += (cur.utilUncovered[k] + cur.utilOverloaded[k]) * 1000;
         for (auto& b : cur.buildings) if (b.net >= 0) ++score;
         if (score < bestScore) { bestScore = score; best = cur; }
+        for (int k = 0; k < 4; ++k) if (cur.utilOverloaded[k]) ++extra[k];
         if (score < 1000) break;
     }
     return best;

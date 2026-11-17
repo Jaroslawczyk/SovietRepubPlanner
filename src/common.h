@@ -42,6 +42,7 @@ namespace eng {
     bool InstantBusy();
     void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed
     void DebugDumpTools();
+    void DebugDumpLoad();                           // debug: log node capacities and building loads from the running game
     void SetPathSnapMode(int mode);                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
     void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
@@ -105,6 +106,10 @@ struct PlanInput {
     bool  utilChain = false;                        // also put switches and pipes between the nodes (the game bends such pipes into loops)
     bool  powerTrafo = true;                        // put a transformer for the substations too
     float utilRadius[4] = { 250, 250, 380, 250 };   // water, sewage, heating, power: how far a node serves, m (from the exe, see docs)
+    // node load (the game checks only heating and power): a building's demand is split evenly among all nodes of the
+    // network within reach; a node is overloaded above 90 % of its capacity. Values read from a running game.
+    float utilPerPerson[4] = { 0, 0, 0.7f, 0.002f };  // heat-tank units / MW per resident (50-resident brick house: 35 and 0.1)
+    float utilNodeCap[4] = { 0, 0, 1000, 2.5f };      // small heat exchanger 1000, substation 2.5 MW; 0 = the game sets no limit
     float walkRadius = 400;                         // how tooFar residents walk to a stop
     float maxDiff = 3.0f;                           // allowed height difference under one building
     std::function<bool(float, float)> occupied;     // something already stands at (u, v); may be empty
@@ -133,6 +138,9 @@ struct PlanResult {
     int capacity = 0, houses = 0, services = 0, unplaced = 0, farHouses = 0, steepSkipped = 0, jobs = 0, busySkipped = 0;
     std::vector<V2> utilNodes[4];                   // substations next to the streets
     int   utilUncovered[4] = {};                    // buildings out of reach of every node
+    float utilDemand[4] = {};                       // total demand of the district (heat-tank units, MW)
+    float utilMaxLoad[4] = {};                      // most loaded node, share of its capacity (0.9 and more = the game warns)
+    int   utilOverloaded[4] = {};                   // nodes above 90 %
     std::vector<UtilSeg> utilLines;                 // pipes / wires between the utility buildings
     float utilLen[4] = {};                          // their length per network, m
     int   utilNoLine[4] = {};                       // connections that found no way or no free port
