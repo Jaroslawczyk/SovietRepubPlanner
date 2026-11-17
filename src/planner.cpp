@@ -191,10 +191,30 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         const float front = kApron + 1.5f, back = 3.0f;         // front yard (the game keeps ~9 m before an entrance free; links shorter than ~5 m are refused), half the back yard
         std::vector<Item> houses, svcs;
         for (auto& it : items) (all[it.type].category == "LIVING" ? houses : svcs).push_back(it);
+        // bigger houses on the streets nearest the centre, the small ones further out (lanes go from the main street)
+        std::stable_sort(houses.begin(), houses.end(), [&](const Item& x, const Item& y) { return all[x.type].capacity > all[y.type].capacity; });
         float maxD0 = 8;
         for (auto& h : houses) maxD0 = std::max(maxD0, h.d - kApron);
         const float P = 2 * (front + maxD0 + back) + 2 * hw;    // distance between neighbouring parallel streets
         const float crossSp = std::clamp(in.streetSpacing > 0 ? in.streetSpacing : 200.0f, 100.0f, 400.0f);
+        // optional street round the outline: its axis runs hw + 1 m inside the edge; the lanes stop at it
+        std::vector<V2> lanePoly = in.poly;
+        if (in.ringRoad && roadHalf > 0 && in.poly.size() >= 3) {
+            float area2 = 0; size_t n = in.poly.size();
+            for (size_t i = 0; i < n; ++i) { const V2& a = in.poly[i]; const V2& b = in.poly[(i + 1) % n]; area2 += a.u * b.v - b.u * a.v; }
+            float sgn = area2 > 0 ? 1.0f : -1.0f, inset = hw + 1;
+            std::vector<V2> ring(n);
+            for (size_t i = 0; i < n; ++i) {
+                const V2& p0 = in.poly[(i + n - 1) % n]; const V2& p1 = in.poly[i]; const V2& p2 = in.poly[(i + 1) % n];
+                float d1u = p1.u - p0.u, d1v = p1.v - p0.v, l1 = std::max(0.01f, hypotf(d1u, d1v));
+                float d2u = p2.u - p1.u, d2v = p2.v - p1.v, l2 = std::max(0.01f, hypotf(d2u, d2v));
+                V2 n1{ -d1v / l1 * sgn, d1u / l1 * sgn }, n2{ -d2v / l2 * sgn, d2u / l2 * sgn };   // inward normals
+                float dot = n1.u * n2.u + n1.v * n2.v, k = inset / std::max(0.3f, 1 + dot);
+                ring[i] = { p1.u + (n1.u + n2.u) * k, p1.v + (n1.v + n2.v) * k };
+            }
+            for (size_t i = 0; i < n; ++i) r.roads.push_back({ ring[i].u, ring[i].v, ring[(i + 1) % n].u, ring[(i + 1) % n].v, hw * 2 });
+            lanePoly = ring;
+        }
         std::vector<float> hvs{ roadV };
         for (float v = roadV + P; v < maxV - front - 4; v += P) hvs.push_back(v);
         for (float v = roadV - P; v > minV + front + 4; v -= P) hvs.push_back(v);
@@ -206,7 +226,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         std::vector<Lane> lanes;
         for (float v : hvs) {
             float L, R;
-            if (!PolyScan(in.poly, v, L, R) || R - L < 30) continue;
+            if (!PolyScan(lanePoly, v, L, R) || R - L < 30) continue;
             lanes.push_back({ v, L, R });
             if (v == roadV && roadHalf > 0) continue;            // the main street is already there
             if (roadHalf > 0) r.roads.push_back({ L, v, R, v, hw * 2 });
@@ -217,7 +237,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             bool have = false; for (auto& p : r.paths) if (fabsf(p.v1 - roadV) < 0.5f && fabsf(p.v2 - roadV) < 0.5f) have = true;
             float L, R; if (!have && PolyScan(in.poly, roadV, L, R)) r.paths.push_back({ L, roadV, R, roadV });
         }
-        {   std::vector<V2> tp; for (auto& q : in.poly) tp.push_back({ q.v, q.u });
+        {   std::vector<V2> tp; for (auto& q : lanePoly) tp.push_back({ q.v, q.u });
             for (float u : vus) {
                 float B, T;
                 if (!PolyScan(tp, u, B, T) || T - B < 30) continue;
@@ -232,6 +252,19 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             }
         }
         std::sort(lanes.begin(), lanes.end(), [&](const Lane& a, const Lane& b) { return fabsf(a.v - roadV) < fabsf(b.v - roadV); });
+        if (in.fillAll && in.houseTypes.size() > 1) {
+            // "build up everything": the queue of houses is sized to the street frontage, in the requested shares,
+            // biggest first - so the big ones line the central streets and the small ones the outer ones
+            float wsum = 0, front = 0, len = 0;
+            std::vector<float> sh(in.houseTypes.size(), 1.0f);
+            for (size_t k = 0; k < sh.size(); ++k) { if (k < in.houseWeights.size()) sh[k] = std::max(0.0f, in.houseWeights[k]); wsum += sh[k]; }
+            for (size_t k = 0; k < sh.size(); ++k) { sh[k] = wsum > 0 ? sh[k] / wsum : 1.0f / sh.size(); front += sh[k] * (MakeItem(in.houseTypes[k]).w - kSide + std::max(gap, 2.0f)); }
+            for (auto& ln : lanes) len += 2 * (ln.R - ln.L);
+            int n = (int)(len / std::max(4.0f, front) * 0.9f) + 2;   // corners and cross streets eat ~10 %
+            houses.clear();
+            for (size_t k = 0; k < sh.size(); ++k) for (int c = 0; c < (int)ceilf(n * sh[k]); ++c) houses.push_back(MakeItem(in.houseTypes[k]));
+            std::stable_sort(houses.begin(), houses.end(), [&](const Item& x, const Item& y) { return all[x.type].capacity > all[y.type].capacity; });
+        }
         auto inside = [&](float cu, float cv, float w, float d) {
             return PolyContains(in.poly, cu - w / 2, cv - d / 2) && PolyContains(in.poly, cu + w / 2, cv - d / 2) &&
                    PolyContains(in.poly, cu - w / 2, cv + d / 2) && PolyContains(in.poly, cu + w / 2, cv + d / 2);
@@ -239,10 +272,13 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         auto overlaps = [&](float cu, float cv, float w, float d) {
             for (auto& b : r.buildings)
                 if (fabsf(cu - b.u) < (w + b.w) / 2 + kSide && fabsf(cv - b.v) < (d + b.d) / 2 + kSide) return true;
-            for (auto& rd : r.roads) {
-                float lu = std::min(rd.u1, rd.u2) - rd.width / 2 - 1, hu = std::max(rd.u1, rd.u2) + rd.width / 2 + 1;
-                float lv = std::min(rd.v1, rd.v2) - rd.width / 2 - 1, hv = std::max(rd.v1, rd.v2) + rd.width / 2 + 1;
-                if (cu + w / 2 > lu && cu - w / 2 < hu && cv + d / 2 > lv && cv - d / 2 < hv) return true;
+            for (auto& rd : r.roads) {      // distance from the footprint to the road's axis (roads may run slanted)
+                float len = hypotf(rd.u2 - rd.u1, rd.v2 - rd.v1), m = rd.width / 2 + 1;
+                int n = std::max(1, (int)(len / 2));
+                for (int k = 0; k <= n; ++k) {
+                    float pu = rd.u1 + (rd.u2 - rd.u1) * k / n, pv = rd.v1 + (rd.v2 - rd.v1) * k / n;
+                    if (fabsf(pu - cu) < w / 2 + m && fabsf(pv - cv) < d / 2 + m) return true;
+                }
             }
             return false;
         };
@@ -304,7 +340,15 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             while (hi < houses.size() && u < ln.R - margin && (in.fillAll || cap < in.population)) {
                 const Item& it = houses[hi];
                 float cu = u + (it.w - kSide) / 2;
-                if (tryAt(it, ln, side, cu, -1, 0, 0, true)) { cap += all[it.type].capacity; ++hi; u = cu + (it.w - kSide) / 2 + std::max(gap, 2.0f); fails = 0; }
+                bool ok = tryAt(it, ln, side, cu, -1, 0, 0, true);
+                if (!ok) {   // a gap too small for this one: the next smaller type in the queue may still fit
+                    for (size_t j = hi + 1; j < houses.size() && !ok; ++j) {
+                        if (houses[j].type == it.type || houses[j].w >= it.w) continue;
+                        float cj = u + (houses[j].w - kSide) / 2;
+                        if (tryAt(houses[j], ln, side, cj, -1, 0, 0, true)) { std::swap(houses[hi], houses[j]); cu = cj; ok = true; }
+                    }
+                }
+                if (ok) { const Item& pl = houses[hi]; cap += all[pl.type].capacity; ++hi; u = cu + (pl.w - kSide) / 2 + std::max(gap, 2.0f); fails = 0; }
                 else { u += 3; if (++fails > 400) break; }
             }
         }
@@ -951,6 +995,33 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             const BuildingType& t = all[b.type];
             for (int mode = 0; mode < 2; ++mode) {
                 if (mode == 1 && (!t.needsRoad || b.stop)) continue;
+                if (in.layout == 2 && in.straightLinks && mode == 0 && !b.stop) {
+                    // village: the entrance faces its street, so the footpath is one straight piece from the entrance
+                    // to just inside the road's edge (the game joins a footpath that touches the road)
+                    bool done = false;
+                    for (auto& c : t.conns) {
+                        if (c.kind != 0) continue;
+                        V2 o = Turn(b.rot, c.x, c.z); o.u += b.ou; o.v += b.ov;
+                        V2 n = Turn(b.rot, c.dx, c.dz); float nl = hypotf(n.u, n.v);
+                        if (nl < 0.01f) continue;
+                        n.u /= nl; n.v /= nl;
+                        float bestT = 1e9f;
+                        for (auto& rd : r.roads) {
+                            float r2u = rd.u2 - rd.u1, r2v = rd.v2 - rd.v1, den = n.u * r2v - n.v * r2u;
+                            if (fabsf(den) < 1e-6f) continue;
+                            float tt = ((rd.u1 - o.u) * r2v - (rd.v1 - o.v) * r2u) / den, q = ((rd.u1 - o.u) * n.v - (rd.v1 - o.v) * n.u) / den;
+                            if (tt <= 0 || tt > 40 || q < 0 || q > 1) continue;
+                            float sn = std::max(0.3f, fabsf(den) / std::max(0.01f, hypotf(r2u, r2v)));
+                            bestT = std::min(bestT, tt - (rd.width / 2 + in.linkEndOff) / sn);   // ends 2 m off the planned edge: ending on it or inside was refused (the real road with pavements is wider), the game snap joins it
+                        }
+                        if (bestT > 5.5f && bestT < 40) {
+                            extra.push_back({ o.u, o.v, o.u + n.u * bestT, o.v + n.v * bestT });
+                            r.pedPts.push_back(o); done = true; ++r.straightLinks; break;
+                        }
+                    }
+                    if (done) continue;
+                    ++r.straightMiss;
+                }
                 bool has = false; float best = -1; std::vector<V2> line, bestLine;
                 int tried = 0;
                 for (auto& c : t.conns) {
@@ -1049,6 +1120,27 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         // switches form a chain (the last node is fed by the previous switch); a medium-voltage wire runs from a
         // transformer output straight to a substation. The head of each chain is left for the player to feed.
         if (gridOk) {
+            // a line from inside the zone (a) toward a point outside (b) stops where it leaves the outline, 3 m inside
+            auto toEdge = [&](V2 a, V2 b) {
+                if (PolyContains(in.poly, b.u, b.v)) return b;
+                float len = hypotf(b.u - a.u, b.v - a.v), last = 0;
+                for (float s = 0; s <= len; s += 1.0f) {
+                    if (!PolyContains(in.poly, a.u + (b.u - a.u) * s / len, a.v + (b.v - a.v) * s / len)) break;
+                    last = s;
+                }
+                last = std::max(0.0f, last - 3);
+                return V2{ a.u + (b.u - a.u) * last / std::max(1.0f, len), a.v + (b.v - a.v) * last / std::max(1.0f, len) };
+            };
+            auto feed = [&](int net, V2 ext, float extH, V2 at, float atH, float& lenOut) {
+                // a source outside the zone: no line at all (a wire or pipe ending in the air is refused by the game,
+                // v0.42.0 test) - the node's input is left for the player to feed from wherever he likes
+                if (!PolyContains(in.poly, ext.u, ext.v)) { V2 e0 = toEdge(at, ext); lenOut = hypotf(e0.u - at.u, e0.v - at.v); return; }
+                V2 e = toEdge(at, ext);
+                float len = hypotf(e.u - at.u, e.v - at.v);
+                if (len < 6) { lenOut = 0; return; }        // the port is at the edge already
+                r.utilLines.push_back({ net, e.u, e.v, at.u, at.v, PolyContains(in.poly, ext.u, ext.v) ? extH : 0.0f, atH });
+                lenOut = len;
+            };
             auto port = [&](const Placed& b, int kind, int nth) -> const Conn* {
                 for (auto& c : all[b.type].conns) if (c.kind == kind && nth-- == 0) return &c;
                 return nullptr;
@@ -1105,11 +1197,11 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         if (!helps.empty()) {
                             for (auto* h : helps) if (const Conn* hc = port(*h, 10, 0)) {
                                 V2 hp = Turn(h->rot, hc->x, hc->z); hp.u += h->ou; hp.v += h->ov; float d;
-                                if (auto* e = nearest(11, hp, d)) { r.utilLines.push_back({ 4, e->u, e->v, hp.u, hp.v, e->h, hc->y }); r.utilFeed[3] = std::max(r.utilFeed[3], d); }
+                                if (auto* e = nearest(11, hp, d)) { float l; feed(4, { e->u, e->v }, e->h, hp, hc->y, l); r.utilFeed[3] = std::max(r.utilFeed[3], l); }
                             }
                         } else for (auto* n : nodes) if (const Conn* nc = port(*n, 8, 0)) {
                             V2 np = Turn(n->rot, nc->x, nc->z); np.u += n->ou; np.v += n->ov; float d;
-                            if (auto* e = nearest(9, np, d)) { r.utilLines.push_back({ 3, e->u, e->v, np.u, np.v, e->h, nc->y }); r.utilFeed[3] = std::max(r.utilFeed[3], d); }
+                            if (auto* e = nearest(9, np, d)) { float l; feed(3, { e->u, e->v }, e->h, np, nc->y, l); r.utilFeed[3] = std::max(r.utilFeed[3], l); }
                         }
                     }
                     std::vector<int> used(helps.size(), 0);
@@ -1138,7 +1230,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         const int want = k == 0 ? 3 : k == 1 ? 4 : 6;
                         const PlanInput::ExtPort* best = nullptr; float bd = 1500;
                         for (auto& e : in.extPorts) if ((e.kind == want || (k == 2 && e.kind == 7)) && hypotf(e.u - hp.u, e.v - hp.v) < bd) { bd = hypotf(e.u - hp.u, e.v - hp.v); best = &e; }
-                        if (best) { r.utilLines.push_back({ k, best->u, best->v, hp.u, hp.v, best->h, hc->y }); r.utilLen[k] += bd; r.utilFeed[k] = bd; }
+                        if (best) { float l; feed(k, { best->u, best->v }, best->h, hp, hc->y, l); r.utilLen[k] += l; r.utilFeed[k] = l; }
                     }
                 }
                 const Placed* prev = nullptr; int prevPort = 0;
@@ -1202,7 +1294,8 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     // A footpath that reaches a street must be drawn onto the street itself: the pavement line is not built, so a
     // path stopping there hangs in the air next to the road and the game does not join them. Each end lying on a
     // pavement line is carried across the pavement to the street's axis (the game makes the joint / crossing).
-    for (size_t k = 0; k < r.paths.size(); ++k) {
+    // (not in the village layout: there the links end at the pavement edge - a piece carried onto the road axis was refused, v0.42.0 test)
+    for (size_t k = 0; k < r.paths.size() && in.layout != 2; ++k) {
         if (!r.pathBuild[k]) continue;
         PathSeg& p = r.paths[k];
         for (int e = 0; e < 2; ++e) {

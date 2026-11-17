@@ -113,6 +113,9 @@ struct BuildingType {
     float powerNight = 0;   // MW drawn at full darkness with every worker present (adds the lighting half, 0x1bca60)
     float heatCap = 0;      // heat exchanger / heat pumping station: what it can serve (1000, big 3000)
     float powerCap = 0;     // substation 2.5, transformer 19, rail trafo 14 MW
+    // $PRODUCTION / $CONSUMPTION <resource> <t per worker per day at full effect>, $CONSUMPTION_PER_SECOND (power, MW per worker)
+    std::vector<std::pair<std::string, float>> prod, cons;
+    float powerPerWorker = 0;
 };
 namespace catalog {
     void Load();
@@ -137,6 +140,9 @@ struct PlanInput {
     float band = 7.0f;                              // strip of a footpath between two rows of buildings, m
     bool  fillAll = false;
     int   servicePop = 0;                           // residents the services are counted for (0 = population)
+    float linkEndOff = 2.0f;                        // village link end: metres beyond the planned road edge
+    bool  straightLinks = true;                     // village: entrance footpaths as one straight piece to the street
+    bool  ringRoad = false;                         // a street round the whole outline (village layout)
     int   layout = 1;                               // 0 parallel strips, 1 microdistricts (blocks), 2 village / suburb: houses on both sides of every street
     bool  blocks = true;                            // microdistricts: street grid, houses round each block, courtyards (false = old parallel strips)                          // build up the whole area: houses until nothing fits
     std::vector<int> houseTypes;                    // catalog indices
@@ -185,7 +191,8 @@ struct PlanResult {
     std::vector<RoadSeg> roads;
     std::vector<V2>      stops, crossings;
     int joinedRoads = 0, droppedRoads = 0;
-    float steepCut = 0;                             // metres of street left out because the ground is too steep          // plan street ends tied to existing roads / plan pieces already built
+    float steepCut = 0;
+    int straightLinks = 0, straightMiss = 0;            // village: entrance links drawn straight / left to the path search                             // metres of street left out because the ground is too steep          // plan street ends tied to existing roads / plan pieces already built
     std::vector<PathSeg> drives;                    // driveways from the street to road connections
     std::vector<V2>      pedPts, roadPts;           // connection points that got a footpath / a driveway
     int noPath = 0, noRoad = 0;

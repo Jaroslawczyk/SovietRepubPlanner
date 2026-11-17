@@ -1,4 +1,4 @@
-﻿// Access to the game engine (C3DDLL64.dll) through IAT hooks in SOVIET64.exe.
+// Access to the game engine (C3DDLL64.dll) through IAT hooks in SOVIET64.exe.
 #include "common.h"
 #include <cmath>
 #include <cstring>
@@ -660,8 +660,8 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
         }
         stage = 3; ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
         void* p428 = *(void**)((BYTE*)m + 0x428); void* p430 = *(void**)((BYTE*)m + 0x430);
-        {   static int nl2 = 0;
-            if ((mgrOffset == 0xf7a0 || mgrOffset == 0xf968) && nl2++ < 60)
+        {   static int nl2 = 0, nl2p = 0;
+            if ((mgrOffset == 0xf7a0 && nl2++ < 20) || (mgrOffset == 0xf968 && nl2p++ < 30))
                 Log("SNAP mgr+0x%x a(%.1f %.1f)->(%.1f %.1f) objs %p %p %p %p | b(%.1f %.1f)->(%.1f %.1f) objs %p %p %p %p", mgrOffset, a0.x, a0.z, a.x, a.z, sa[0], sa[1], sa[2], sa[3],
                     b0.x, b0.z, b.x, b.z, *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690)); }
         if (mgrOffset != 0xf7a0 && mgrOffset != 0xf968) {
@@ -681,10 +681,10 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
             ((PCommit_t)(Base() + 0x518a10))(m, 0, 0, 0, 0, 0, 0);
             size_t c1 = NetSize(m);
             r = c1 > c0 ? 1 : 0;
-            static int nl3 = 0;
-            if (nl3++ < 80) Log("COMMIT mgr+0x%x lists %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, c0, c1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);
+            static int nl3 = 0, nl3p = 0;
+            if ((mgrOffset == 0xf968 ? nl3p++ : nl3++) < 40) Log("COMMIT mgr+0x%x lists %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, c0, c1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);
         }
-        else { ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
+        else { static int nc = 0, ncp = 0; if ((mgrOffset == 0xf968 ? ncp++ : nc++) < 30) Log("NO PREVIEW mgr+0x%x p428 %p p430 %p a %.1f %.1f b %.1f %.1f", mgrOffset, p428, p430, a.x, a.z, b.x, b.z); ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
     } __except (CrashInfo(GetExceptionInformation(), "line", stage)) { r = -300; }
     *(V3*)(G + 0xf6c) = sp; *(void**)(G + 0xd428) = st;
     return r;

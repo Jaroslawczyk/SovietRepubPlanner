@@ -161,6 +161,11 @@ void Load() {
                 if (res.rfind("wall_", 0) == 0 && b.material.empty()) b.material = res.substr(5);
             }
             else if (key == "QUALITY_OF_LIVING") ls >> b.quality;
+            else if (key == "PRODUCTION" || key == "CONSUMPTION") {
+                std::string res; float v = 0; ls >> res >> v;
+                if (!res.empty() && v > 0) (key == "PRODUCTION" ? b.prod : b.cons).push_back({ res, v });
+            }
+            else if (key == "CONSUMPTION_PER_SECOND") { std::string res; float v = 0; ls >> res >> v; if (res == "eletric") b.powerPerWorker = v; }
             else if (key == "WORKERS_NEEDED") ls >> b.workers;
             else if (key == "PROFESORS_NEEDED") ls >> b.profs;
             else if (key == "CITIZEN_ABLE_SERVE") ls >> b.serve;

@@ -63,11 +63,28 @@ std::vector<ServiceRule> g_services = {     // labels are translated with T() wh
 int   g_population = 1000;
 float g_gap = 8.0f;
 int   g_density = 90;               // 0..100: gaps between buildings and rows
-std::vector<std::vector<V2>> g_extPaths, g_extRoadsL;   // footpaths / roads already in the game (local frame)   // footpaths already in the game (local frame)
+std::vector<std::vector<V2>> g_extPaths, g_extRoadsL;
+// Occupancy and terrain heights of the area on a 3 m grid, read from the game once per outline (or on "rebuild"):
+// a plan then needs no engine calls, which made every rebuild freeze the game for seconds.
+struct Raster {
+    bool valid = false; float u0 = 0, v0 = 0, cell = 3; int W = 0, H = 0;
+    std::vector<unsigned char> occ; std::vector<float> h;
+    int Idx(float u, float v) const { int i = (int)((u - u0) / cell), j = (int)((v - v0) / cell); return i < 0 || j < 0 || i >= W || j >= H ? -1 : j * W + i; }
+    bool Occ(float u, float v) const { int k = Idx(u, v); return k >= 0 && occ[k]; }
+    float Height(float u, float v) const {
+        float fx = (u - u0) / cell - 0.5f, fy = (v - v0) / cell - 0.5f;
+        int i = std::clamp((int)floorf(fx), 0, std::max(0, W - 2)), j = std::clamp((int)floorf(fy), 0, std::max(0, H - 2));
+        if (W < 2 || H < 2) return h.empty() ? 0 : h[0];
+        float tx = std::clamp(fx - i, 0.0f, 1.0f), ty = std::clamp(fy - j, 0.0f, 1.0f);
+        float a = h[j * W + i] + (h[j * W + i + 1] - h[j * W + i]) * tx, b = h[(j + 1) * W + i] + (h[(j + 1) * W + i + 1] - h[(j + 1) * W + i]) * tx;
+        return a + (b - a) * ty;
+    }
+} g_rast;   // footpaths / roads already in the game (local frame)   // footpaths already in the game (local frame)
 bool  g_cutAtTrails = false;       // cut streets at game trails they cross (tested v0.38.0: does not help, the game still refuses)
+bool  g_ringRoad = false;           // street round the outline
 int   g_layout = 0;                 // 0 auto, 1 village / suburb, 2 microdistricts, 3 parallel strips
 bool  g_autoHouse = true;          // the house ticked by default; the first manual tick replaces it
-bool  g_fillAll = true;    // no empty corners: houses until nothing fits
+bool  g_fillAll = false;   // no empty corners: houses until nothing fits
 int   g_roadType = 1;
 float g_roadV = 0;
 std::vector<float> g_stops;
@@ -95,6 +112,7 @@ bool  g_showSlope = true, g_showLevel = false;
 bool  g_dirty = true, g_areaChanged = false, g_inited = false;
 char  g_filter[64] = "";
 int   g_dragStop = -1, g_hoverStop = -1;
+bool  g_autoStops = true;           // add stops and spread them evenly until every house is within walking distance
 
 PlanResult g_plan;
 struct Quad { V3 g[4]; V3 mid; float pad, h; int type; bool tooFar; };
@@ -253,23 +271,79 @@ void RebuildSlope() {
         }
 }
 
-void Regenerate() {
-    static bool scanned = false;
-    if (!scanned && eng::OccupancyReady()) {    // diagnostic: how much of the map the engine reports as built-up
-        scanned = true;
-        int b = 0, p = 0, shown = 0;
-        for (float z = -10000; z < 10000; z += 50) for (float x = -10000; x < 10000; x += 50) {
-            int o = eng::Occupied(x, z);
-            if (o & 1) { ++b; if (shown < 6) { ++shown; Log("occupied by a building: %.0f %.0f", x, z); } }
-            if (o & 2) ++p;
-        }
-        Log("occupancy scan (50 m grid): %d building hits, %d path hits of 160000", b, p);
+// Automatic house choice for the population typed in: the smallest kind of house whose estimated count on this area
+// still houses everybody (so a village gets cottages, a small plot for many people gets towers), plus the next smaller
+// kind for a third of the houses where both fit, so the streets are not all alike. Student dormitories are left out.
+std::string g_autoNote;
+void AutoHouses(const Area& a, PlanInput& in) {
+    const auto& all = catalog::All();
+    std::vector<int> c;
+    for (size_t i = 0; i < all.size(); ++i) {
+        const BuildingType& b = all[i];
+        if (b.category != "LIVING" || b.capacity <= 0) continue;
+        if (b.id.find("universit") != std::string::npos || b.id.find("dorm") != std::string::npos || b.id.find("student") != std::string::npos) continue;
+        bool ped = false; for (auto& k : b.conns) if (k.kind == 0) ped = true;
+        if (ped) c.push_back((int)i);
     }
+    std::sort(c.begin(), c.end(), [&](int x, int y) { return all[x].capacity < all[y].capacity; });
+    float usable = a.sqm * 0.30f;          // streets, yards and services take the rest (measured on test plans)
+    int pick = -1;
+    for (int t : c) {
+        const BuildingType& b = all[t];
+        float per = (b.sx + 4) * (b.sz + 12);
+        if (usable / per * b.capacity >= g_population * 1.05f) { pick = t; break; }
+    }
+    if (pick < 0 && !c.empty()) pick = c.back();
+    g_autoNote.clear();
+    if (pick < 0) return;
+    in.houseTypes.push_back(pick); in.houseWeights.push_back(2);
+    g_autoNote = all[pick].name;
+    auto at = std::find(c.begin(), c.end(), pick);
+    if (at != c.begin()) {
+        int smaller = *(at - 1);
+        if (all[smaller].capacity * 2 >= all[pick].capacity) { in.houseTypes.push_back(smaller); in.houseWeights.push_back(1); g_autoNote += " + " + all[smaller].name; }
+    }
+}
+
+void BuildRaster(const Area& a, const std::vector<std::vector<V2>>& roads) {
+    DWORD t0 = GetTickCount();
+    Raster& r = g_rast;
+    r.u0 = a.minU - 60; r.v0 = a.minV - 60;
+    r.W = (int)((a.maxU - a.minU + 120) / r.cell) + 1; r.H = (int)((a.maxV - a.minV + 120) / r.cell) + 1;
+    r.occ.assign((size_t)r.W * r.H, 0); r.h.assign((size_t)r.W * r.H, 0);
+    for (int j = 0; j < r.H; ++j) for (int i = 0; i < r.W; ++i) {
+        float u = r.u0 + (i + 0.5f) * r.cell, v = r.v0 + (j + 0.5f) * r.cell;
+        float x = a.o.x + a.ux * u + a.vx * v, z = a.o.z + a.uz * u + a.vz * v;
+        r.h[(size_t)j * r.W + i] = eng::TerrainHeight(x, z);
+        if (eng::Occupied(x, z)) r.occ[(size_t)j * r.W + i] = 1;
+    }
+    auto stamp = [&](const std::vector<std::vector<V2>>& set, float rad) {
+        for (auto& L : set) for (size_t k = 0; k + 1 < L.size(); ++k) {
+            const V2 &p = L[k], &q = L[k + 1];
+            float lo_u = std::min(p.u, q.u) - rad, hi_u = std::max(p.u, q.u) + rad, lo_v = std::min(p.v, q.v) - rad, hi_v = std::max(p.v, q.v) + rad;
+            if (hi_u < r.u0 || lo_v > r.v0 + r.H * r.cell || hi_v < r.v0 || lo_u > r.u0 + r.W * r.cell) continue;
+            int i0 = std::max(0, (int)((lo_u - r.u0) / r.cell)), i1 = std::min(r.W - 1, (int)((hi_u - r.u0) / r.cell));
+            int j0 = std::max(0, (int)((lo_v - r.v0) / r.cell)), j1 = std::min(r.H - 1, (int)((hi_v - r.v0) / r.cell));
+            float du = q.u - p.u, dv = q.v - p.v, l2 = du * du + dv * dv;
+            for (int j = j0; j <= j1; ++j) for (int i = i0; i <= i1; ++i) {
+                float u = r.u0 + (i + 0.5f) * r.cell, v = r.v0 + (j + 0.5f) * r.cell;
+                float t = l2 > 0 ? std::clamp(((u - p.u) * du + (v - p.v) * dv) / l2, 0.0f, 1.0f) : 0.0f;
+                float eu = p.u + du * t - u, ev = p.v + dv * t - v;
+                if (eu * eu + ev * ev < rad * rad) r.occ[(size_t)j * r.W + i] = 1;
+            }
+        }
+    };
+    stamp(roads, 7.0f); stamp(g_extPaths, 4.0f);
+    r.valid = true;
+    Log("raster: %d x %d cells in %u ms", r.W, r.H, (unsigned)(GetTickCount() - t0));
+}
+
+void Regenerate() {
     g_dirty = false;
     g_quads.clear(); g_lines.clear(); g_outline.clear(); g_roadQuads.clear(); g_stopPts.clear(); g_crossPts.clear();
     g_pedPts.clear(); g_roadPts.clear(); g_driveLines.clear();
     g_plan = PlanResult();
-    if (g_areaChanged) { g_areaChanged = false; RebuildSlope(); }
+    if (g_areaChanged) { g_areaChanged = false; RebuildSlope(); g_rast.valid = false; }
     if (!g_area.ok) return;
     const Area& a = g_area;
     PlanInput in;
@@ -277,7 +351,8 @@ void Regenerate() {
     in.gap = 10.0f - g_density * 0.095f;             // density 0 -> 10 m, 100 -> 0.5 m between building zones
     in.band = 8.0f - g_density * 0.035f;             // and 8 -> 4.5 m for the footpath strip between rows
     in.fillAll = g_fillAll;
-    for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
+    if (g_autoHouse) AutoHouses(a, in);      // nothing picked by the player: the mod picks what fits the area and the population
+    else for (size_t i = 0; i < g_houseSel.size(); ++i) if (g_houseSel[i]) { in.houseTypes.push_back((int)i); in.houseWeights.push_back((float)g_houseShare[i]); }
     in.services = &g_services;
     {   int lay = g_layout;
         if (lay == 0) {     // auto: small houses -> village streets, blocks of flats -> microdistricts
@@ -287,6 +362,9 @@ void Regenerate() {
         }
         in.layout = lay == 1 ? 2 : lay == 2 ? 1 : 0;
         in.blocks = lay != 3;
+        in.ringRoad = g_ringRoad;
+        { FILE* f = _wfopen((GameDir() + L"DistrictPlanner.linkoff").c_str(), L"r"); if (f) { fscanf(f, "%f", &in.linkEndOff); fclose(f); } }
+        in.straightLinks = GetFileAttributesW((GameDir() + L"DistrictPlanner.nostraight").c_str()) == INVALID_FILE_ATTRIBUTES;
     }
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.crossRoad = g_crossRoad;
     for (size_t t = 0; t < catalog::All().size(); ++t) if (kStopIds[g_stopKind][0] && catalog::All()[t].id == kStopIds[g_stopKind]) in.stopType = (int)t; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
@@ -302,11 +380,10 @@ void Regenerate() {
                 for (auto* id : nodeIds[k]) if (*id && w.id == id) { in.extNodes[k].push_back(WorldToLocal(a, w.pos)); break; }
             }
     }
-    {   // roads and footpaths already in the game, in the local frame
+    if (!g_rast.valid) {   // roads and footpaths already in the game, in the local frame (read with the raster)
         std::vector<std::vector<V3>> lines;
         eng::ListNetLines(0xf7a0, lines);
         for (auto& L : lines) { std::vector<V2> l; for (auto& p : L) l.push_back(WorldToLocal(a, p)); in.extRoads.push_back(l); }
-        g_extRoadsL = in.extRoads;
         g_extPaths.clear();
         // footpaths and trails: besides 0xf968 the game keeps line networks at 0xf7a8, 0xf908 and 0xf8b0 that block
         // buildings the same way (refusal code 1, "building on a road"; found by v0.37.0 test, see docs/internals.md)
@@ -315,20 +392,10 @@ void Regenerate() {
             for (auto& L : lines) { std::vector<V2> l; for (auto& p : L) l.push_back(WorldToLocal(a, p)); g_extPaths.push_back(l); }
         }
     }
-    in.occupied = [&a, &in](float u, float v) {
-        if (eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0) return true;
-        auto nearLine = [&](const std::vector<std::vector<V2>>& set, float r) {
-            for (auto& L : set) for (size_t k = 0; k + 1 < L.size(); ++k) {
-                float du = L[k + 1].u - L[k].u, dv = L[k + 1].v - L[k].v, l2 = du * du + dv * dv;
-                float t = l2 > 0 ? std::clamp(((u - L[k].u) * du + (v - L[k].v) * dv) / l2, 0.0f, 1.0f) : 0.0f;
-                float eu = L[k].u + du * t - u, ev = L[k].v + dv * t - v;
-                if (eu * eu + ev * ev < r * r) return true;
-            }
-            return false;
-        };
-        return nearLine(in.extRoads, 7.0f) || nearLine(g_extPaths, 4.0f);   // keep buildings off existing roads and footpaths
-    };
-    in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
+    if (!g_rast.valid) { g_extRoadsL = in.extRoads; BuildRaster(a, in.extRoads); }
+    in.extRoads = g_extRoadsL;
+    in.occupied = [](float u, float v) { return g_rast.Occ(u, v); };     // existing buildings, roads (7 m), footpaths (4 m)
+    in.height = [](float u, float v) { return g_rast.Height(u, v); };
     {   // connections of the buildings that already stand near the district, for feeding its networks
         std::vector<eng::WorldBld> world; eng::ListBuildings(world);
         std::map<std::string, int> byId;
@@ -353,7 +420,7 @@ void Regenerate() {
         if (lastN != in.extPorts.size()) { lastN = in.extPorts.size(); Log("plan: %d standing buildings, %d of their ports can feed the district", (int)world.size(), (int)lastN); }
     }
     g_plan = MakePlan(in);
-    Log("plan: %d game roads, %d game footpaths seen; %d street ends joined, %d plan pieces dropped, %.0f m of street left out on steep ground", (int)in.extRoads.size(), (int)g_extPaths.size(), g_plan.joinedRoads, g_plan.droppedRoads, g_plan.steepCut);
+    Log("plan: %d game roads, %d game footpaths seen; %d street ends joined, %d plan pieces dropped, %.0f m of street left out on steep ground; layout %d, straight links %d, missed %d, link end +%.1f m", (int)in.extRoads.size(), (int)g_extPaths.size(), g_plan.joinedRoads, g_plan.droppedRoads, g_plan.steepCut, in.layout, g_plan.straightLinks, g_plan.straightMiss, in.linkEndOff);
     {   // air pollution over the district: the worst cell of the game's 200 m grid under the outline
         g_polA = g_polB = 0; g_polOk = false;
         static bool gridLogged = false; if (!gridLogged) { gridLogged = true; eng::LogPollutionGrid(); }
@@ -585,7 +652,7 @@ void StopsInteraction() {
         if (Proj(g_stopPts[i], s) && fabsf(s.x - io.MousePos.x) < 16 && fabsf(s.y - io.MousePos.y) < 16) g_hoverStop = (int)i;
     if (g_hoverStop >= 0) {
         ImGui::SetTooltip(T("Перетащите остановку — район перестроится"));
-        if (ImGui::IsMouseClicked(0)) g_dragStop = g_hoverStop;
+        if (ImGui::IsMouseClicked(0)) { g_dragStop = g_hoverStop; if (g_dragStop >= 0) g_autoStops = false; }
     }
 }
 
@@ -747,6 +814,122 @@ void HouseIconGrid(const std::function<bool(const BuildingType&)>& passes) {
     ImGui::EndChild();
 }
 
+
+// ===== Industry: production chain calculator =====
+// Every factory / mine ini gives $PRODUCTION and $CONSUMPTION in tonnes per worker per day at full effect (see
+// docs/industry.md). For a wanted amount per year the calculator picks a producer of the product, counts how many are
+// needed, then does the same for each input until it reaches raw materials (mines) or products the player said he
+// brings in from outside (import / own supply).
+int  g_indProduct = -1;
+float g_indPerYear = 10000;
+std::vector<char> g_indImport;         // per product: delivered from outside, not produced in the chain
+struct ChainRow { int type; float count; int depth; float perDay; std::string res; };
+std::vector<std::string> IndProducts() {
+    std::vector<std::string> v;
+    for (auto& b : catalog::All()) for (auto& p : b.prod) if (std::find(v.begin(), v.end(), p.first) == v.end()) v.push_back(p.first);
+    std::sort(v.begin(), v.end());
+    return v;
+}
+int IndProducer(const std::string& res) {    // the producer with the most output per worker, among buildings with workers
+    const auto& all = catalog::All(); int best = -1; float bv = 0;
+    for (size_t i = 0; i < all.size(); ++i) {
+        if (all[i].workers <= 0) continue;
+        for (auto& p : all[i].prod) if (p.first == res && p.second > bv) { bv = p.second; best = (int)i; }
+    }
+    return best;
+}
+void IndChain(const std::string& res, float perDay, int depth, const std::vector<std::string>& prods, std::vector<ChainRow>& out) {
+    if (depth > 8 || perDay <= 0) return;
+    size_t pi = std::find(prods.begin(), prods.end(), res) - prods.begin();
+    if (depth > 0 && pi < g_indImport.size() && g_indImport[pi]) { out.push_back({ -1, 0, depth, perDay, res }); return; }
+    int t = IndProducer(res);
+    if (t < 0) { out.push_back({ -1, 0, depth, perDay, res }); return; }
+    const BuildingType& b = catalog::All()[t];
+    float per = 0; for (auto& p : b.prod) if (p.first == res) per = p.second * b.workers;
+    float n = per > 0 ? perDay / per : 0;
+    out.push_back({ t, n, depth, perDay, res });
+    for (auto& c : b.cons) IndChain(c.first, c.second * b.workers * n, depth + 1, prods, out);
+}
+void TabIndustry() {
+    const auto& all = catalog::All();
+    static std::vector<std::string> prods = IndProducts();
+    if (g_indImport.size() != prods.size()) g_indImport.assign(prods.size(), 0);
+    ImGui::TextWrapped("%s", T("Цепочка производства по данным игры: сколько заводов, рабочих и сырья нужно на заданный выпуск в год. Отмеченное «привозим» в цепочку не входит (своя шахта, ж/д станция, импорт)."));
+    if (g_indProduct < 0) for (size_t i = 0; i < prods.size(); ++i) if (prods[i] == "steel") g_indProduct = (int)i;
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::BeginCombo(T("продукт"), g_indProduct >= 0 ? prods[g_indProduct].c_str() : "-")) {
+        for (size_t i = 0; i < prods.size(); ++i) if (ImGui::Selectable(prods[i].c_str(), (int)i == g_indProduct)) g_indProduct = (int)i;
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine(); ImGui::SetNextItemWidth(140);
+    ImGui::InputFloat(T("т в год"), &g_indPerYear, 1000, 10000, "%.0f");
+    g_indPerYear = std::max(0.0f, g_indPerYear);
+    if (g_indProduct < 0) return;
+    std::vector<ChainRow> rows;
+    IndChain(prods[g_indProduct], g_indPerYear / 365.0f, 0, prods, rows);
+    int workers = 0; float mw = 0;
+    if (ImGui::BeginTable("chain", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY, ImVec2(0, ImGui::GetContentRegionAvail().y - 60))) {
+        ImGui::TableSetupColumn(T("что"), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(T("т в сутки"), ImGuiTableColumnFlags_WidthFixed, 90);
+        ImGui::TableSetupColumn(T("зданий"), ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn(T("рабочих"), ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn(T("привозим"), ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableHeadersRow();
+        for (size_t k = 0; k < rows.size(); ++k) {
+            const ChainRow& c = rows[k];
+            ImGui::TableNextRow(); ImGui::TableNextColumn();
+            ImGui::Indent(c.depth * 14.0f);
+            if (c.type >= 0) {
+                if (void* tex = Icon(all[c.type].id)) { ImGui::Image((ImTextureID)(intptr_t)tex, ImVec2(22, 22)); ImGui::SameLine(); }
+                ImGui::Text("%s → %s", all[c.type].name.c_str(), c.res.c_str());
+            } else ImGui::TextColored(ImVec4(0.55f, 0.3f, 0.1f, 1), "%s (%s)", c.res.c_str(), T("привоз / своя добыча"));
+            ImGui::Unindent(c.depth * 14.0f);
+            ImGui::TableNextColumn(); ImGui::Text("%.1f", c.perDay);
+            ImGui::TableNextColumn(); if (c.type >= 0) ImGui::Text("%.2f → %d", c.count, (int)ceilf(c.count - 0.01f));
+            ImGui::TableNextColumn();
+            if (c.type >= 0) {
+                int w = (int)ceilf(c.count - 0.01f) * all[c.type].workers; workers += w;
+                mw += ceilf(c.count - 0.01f) * all[c.type].workers * all[c.type].powerPerWorker;
+                ImGui::Text("%d", w);
+            }
+            ImGui::TableNextColumn();
+            if (c.depth > 0) {
+                size_t pi = std::find(prods.begin(), prods.end(), c.res) - prods.begin();
+                if (pi < prods.size()) { bool imp = g_indImport[pi] != 0; ImGui::PushID((int)k); if (ImGui::Checkbox("##imp", &imp)) g_indImport[pi] = imp; ImGui::PopID(); }
+            }
+        }
+        ImGui::EndTable();
+    }
+    ImGui::Text(T("Всего рабочих %d  ·  электричество ≈ %.1f МВт (по $CONSUMPTION_PER_SECOND)"), workers, mw);
+    if (g_plan.capacity > 0) ImGui::Text(T("Свободных рабочих в спланированном районе ≈ %d"), std::max(0, (int)(g_plan.capacity * 0.95f * 0.6f) - g_plan.jobs));
+}
+
+// ===== Parks: decoration for the district =====
+bool g_parks = true;
+void TabParks() {
+    ImGui::TextWrapped("%s", T("Парки и благоустройство: памятники, фонтаны, аттракционы и площадки берутся из вкладки «Службы» (строки «Памятник», «Фонтан», «Парк», спорт). Здесь — сколько их на жителей."));
+    for (auto& s : g_services) {
+        std::string c = s.category;
+        if (c != "MONUMENT" && c != "ATTRACTION" && c != "SPORT") continue;
+        ImGui::PushID((int)(&s - g_services.data()));
+        if (ImGui::Checkbox(T(s.label), &s.enabled)) g_dirty = true;
+        ImGui::SameLine(260); ImGui::SetNextItemWidth(120);
+        if (ImGui::InputInt(T("на N жит."), &s.perResidents, 500)) { s.perResidents = std::clamp(s.perResidents, 100, 100000); g_dirty = true; }
+        ImGui::PopID();
+    }
+}
+
+// ===== Settings =====
+void TabSettings() {
+    if (ImGui::Checkbox(T("English interface"), &i18n::en)) { catalog::SetEnglish(i18n::en); g_dirty = true; }
+    ImGui::SetItemTooltip(T("Язык интерфейса и названий зданий (названия берутся из файлов игры)."));
+    if (ImGui::Checkbox(T("расставлять остановки автоматически"), &g_autoStops) && g_autoStops) { g_stops.resize(1); g_dirty = true; }
+    if (ImGui::Checkbox(T("выровнять сетку по дорогам игры"), &g_alignRoads) && g_area.ok) { BuildFrame(g_area, true); g_dirty = g_areaChanged = true; }
+    if (ImGui::Checkbox(T("дорога по периметру зоны"), &g_ringRoad)) g_dirty = true;
+    if (ImGui::Button(T("Перечитать местность и постройки игры"))) { g_rast.valid = false; g_dirty = true; }
+    ImGui::SetItemTooltip(T("Мод читает рельеф, здания и дороги участка один раз; после своих построек нажмите это."));
+}
+
 void TabArea() {
     if (ImGui::Checkbox(T("English interface"), &i18n::en)) { catalog::SetEnglish(i18n::en); g_dirty = true; }
     ImGui::SetItemTooltip(T("Язык интерфейса и названий зданий (названия берутся из файлов игры)."));
@@ -786,6 +969,8 @@ void TabArea() {
         if (ImGui::Combo(T("тип застройки"), &g_layout, lays, IM_ARRAYSIZE(lays))) g_dirty = true;
         ImGui::SetItemTooltip(T("Деревня — улицы через две глубины участка, дома с обеих сторон фасадом к улице, службы раскиданы равномерно.\nМикрорайоны — для многоэтажек: кварталы, дома по краю, во дворах школы и сады."));
     }
+    if (ImGui::Checkbox(T("дорога по периметру зоны"), &g_ringRoad)) g_dirty = true;
+    ImGui::SetItemTooltip(T("Улица вдоль всей границы участка (режим «деревня»); улицы внутри примыкают к ней."));
     if (ImGui::Checkbox(T("застроить весь участок"), &g_fillAll)) g_dirty = true;
     ImGui::SetItemTooltip(T("Дома ставятся, пока помещаются, без оглядки на число жителей выше."));
 
@@ -1078,7 +1263,13 @@ void InstantStart() {
     // trunk first (row footpaths and the links between rows and to the street), then the links to the entrances,
     // so every entrance joins a line that already stands
     {
-        const auto pieces = Noded(g_plan.paths);
+        // only lines that are really built cut each other: the walking lines along a street are not built, and cutting
+        // the entrance links where they cross them left 2-3 m pieces the game refuses (v0.42.0 test: 122 of 178 refusals)
+        std::vector<PathSeg> built; std::vector<int> srcOf;
+        for (size_t k = 0; k < g_plan.paths.size(); ++k)
+            if (k >= g_plan.pathBuild.size() || g_plan.pathBuild[k]) { built.push_back(g_plan.paths[k]); srcOf.push_back((int)k); }
+        auto pieces = Noded(built);
+        for (auto& pc : pieces) pc.second = srcOf[pc.second];
         auto isLink = [&](int src) {
             const auto& p = g_plan.paths[src];
             for (auto& q : g_plan.pedPts) if (fabsf(q.u - p.u1) + fabsf(q.v - p.v1) < 0.5f || fabsf(q.u - p.u2) + fabsf(q.v - p.v2) < 0.5f) return true;
@@ -1436,6 +1627,8 @@ void TabRoads() {
     ImGui::TextDisabled(T("Вдоль улицы идут тротуары, дорожки кварталов сходятся к переходу у остановки."));
 
     ImGui::SeparatorText(T("Остановки"));
+    if (ImGui::Checkbox(T("расставлять остановки автоматически"), &g_autoStops) && g_autoStops) { g_stops.resize(1); g_dirty = true; }
+    ImGui::SetItemTooltip(T("Пока есть дома дальше пешей доступности, мод добавляет остановку и заново делит главную улицу поровну между всеми.\nПеретаскивание или ручное добавление выключает это."));
     {
         const auto& all = catalog::All();
         auto nameOf = [&](const char* id) -> std::string { for (auto& t : all) if (t.id == id) return t.name; return id; };
@@ -1460,6 +1653,7 @@ void TabRoads() {
     }
     if (removeAt >= 0) { g_stops.erase(g_stops.begin() + removeAt); g_dirty = true; }
     if (ImGui::Button(T("Добавить остановку")) && g_stops.size() < 8) {
+        g_autoStops = false;
         float L = g_area.minU, R = g_area.maxU;
         PolyScan(g_area.local, g_roadV, L, R);
         g_stops.push_back(L + (R - L) * (0.25f + 0.5f * (float)(g_stops.size() % 2)));
@@ -1528,6 +1722,11 @@ void Footer() {
         ImGui::Text(T("Домов %d  ·  мест %d из %d  ·  служб %d"), g_plan.houses, g_plan.capacity, g_population, g_plan.services);
         ImGui::Text(T("Дорог %.0f м  ·  дорожек %.0f м  ·  срезать %.0f м³  ·  насыпать %.0f м³"), g_plan.roadLength, g_plan.pathLength, g_plan.cut, g_plan.fill);
         ImGui::Text(T("Рабочих мест в службах %d  ·  работников ≈ %d (60 %% жителей)"), g_plan.jobs, g_plan.capacity * 6 / 10);
+        {   // people left for industry: 95 % occupancy, 60 % of residents work, minus the district's own services
+            int freeW = (int)(g_plan.capacity * 0.95f * 0.6f) - g_plan.jobs;
+            ImGui::Text(T("Свободных рабочих для промышленности ≈ %d (95 %% заселения, минус службы района)"), std::max(0, freeW));
+        }
+        if (g_autoHouse && !g_autoNote.empty()) ImGui::TextDisabled(T("Дома подобраны автоматически: %s"), g_autoNote.c_str());
         if (g_plan.maxWalkToStop >= 0) {
             if (g_plan.farHouses) ImGui::TextColored(red, T("До остановки до %.0f м — %d домов дальше %.0f м, добавьте остановку."), g_plan.maxWalkToStop, g_plan.farHouses, g_walk);
             else ImGui::Text(T("До остановки не дальше %.0f м  ·  до магазина не дальше %.0f м"), g_plan.maxWalkToStop, std::max(0.0f, g_plan.maxWalkToShop));
@@ -1674,7 +1873,7 @@ void Panel() {
     // scrolling area, about 40 % of the window
     float footer = std::max(180.0f, ImGui::GetContentRegionAvail().y * 0.42f);
     if (ImGui::BeginTabBar("##tabs")) {
-        struct { const char* name; void (*fn)(); } tabs[] = { { T("Участок"), TabArea }, { T("Дома"), TabHouses }, { T("Службы"), TabServices }, { T("Дороги"), TabRoads }, { T("Сети"), TabUtils } };
+        struct { const char* name; void (*fn)(); } tabs[] = { { T("Участок"), TabArea }, { T("Дома"), TabHouses }, { T("Службы"), TabServices }, { T("Дороги"), TabRoads }, { T("Сети"), TabUtils }, { T("Парки"), TabParks }, { T("Промышленность"), TabIndustry }, { T("Настройки"), TabSettings } };
         for (auto& t : tabs) {
             if (!ImGui::BeginTabItem(t.name)) continue;
             ImGui::BeginChild("##body", ImVec2(0, std::max(120.0f, ImGui::GetContentRegionAvail().y - footer)));
@@ -1894,8 +2093,20 @@ void Draw() {
             if (DeleteFileW((GameDir() + L"DistrictPlanner.hide").c_str())) g_open = !g_open; }
     }
     if (g_open && !eng::ScriptActive()) Panel();        // the line script needs the real mouse over the map
-    if (g_dirty && (eng::Ready() || !g_area.ok)) {
+    if (g_dirty && (eng::Ready() || !g_area.ok) && !ImGui::IsMouseDown(0) && !ImGui::IsAnyItemActive()) {
         Regenerate();
+        // automatic stops: one more while houses are out of walking reach, all of them spread evenly along the main
+        // street (each serves an equal stretch, not 2 houses on one and 20 on the other)
+        if (g_autoStops && g_area.ok && g_roadType > 0 && g_plan.farHouses > 0 && g_stops.size() < 8) {
+            float L, R;
+            if (PolyScan(g_area.local, g_roadV, L, R) && (R - L) / (g_stops.size() + 1) > 60) {
+                size_t n = g_stops.size() + 1;
+                g_stops.clear();
+                for (size_t k = 0; k < n; ++k) g_stops.push_back(L + (R - L) * (k + 0.5f) / n);
+                g_dirty = true;
+                Log("auto stops: %d houses too far, now %d stops", g_plan.farHouses, (int)n);
+            }
+        }
         if (g_selfTest == 2 && g_dragStop < 0)
             Log("plan: %.1f ha, houses %d, capacity %d, services %d, unplaced %d, steep skips %d, roads %.0f m, paths %.0f m, cut %.0f, fill %.0f, tooFar %d, stop walk %.0f m",
                 g_area.sqm / 10000.0f, g_plan.houses, g_plan.capacity, g_plan.services, g_plan.unplaced, g_plan.steepSkipped,
