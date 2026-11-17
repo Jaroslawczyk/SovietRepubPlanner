@@ -59,7 +59,7 @@ Item MakeItem(int type) {
 }
 }
 
-PlanResult MakePlan(const PlanInput& in) {
+static PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
     PlanResult r;
     const auto& all = catalog::All();
     if (in.poly.size() < 3 || in.houseTypes.empty()) return r;
@@ -140,8 +140,8 @@ PlanResult MakePlan(const PlanInput& in) {
     }
     struct Pend { Item it; signed char net, role; short grp; };
     std::deque<Pend> pending, queued;   // utility buildings waiting for the next free spot in a row / for the building that asked for them
-    int utilOrder[4] = { 0, 1, 2, 3 };
-    std::sort(utilOrder, utilOrder + 4, [&](int x, int y) { return in.utilRadius[x] < in.utilRadius[y]; });
+    std::vector<char> siteDone[4];
+    if (sites) for (int k = 0; k < 4; ++k) siteDone[k].assign(sites[k].size(), 0);
     int utilGrp[4] = {};
 
     size_t i = 0;
@@ -153,21 +153,22 @@ PlanResult MakePlan(const PlanInput& in) {
         int placed = 0;
         float u = L + margin;
         while (i < limit || !pending.empty()) {       // nodes asked for by the last building still get their spot
-            if (i < limit && pending.empty() && queued.empty()) {
-                // a building is about to go here: every network needs a node within reach of it. The missing nodes follow
-                // right after this building (smallest radius first), their switches / transformer after the nodes.
+            if (sites && i < limit && pending.empty() && queued.empty()) {
+                // this building stands at a spot chosen for a utility node (or just past it in the row): the node follows
+                // right after it, the switch / transformer after the nodes
                 const Item& h = items[i];
                 float hu = u + h.w / 2, hv = north ? vlo + h.d / 2 : vhi - h.d / 2;
                 std::vector<Pend> helpers;
-                for (int k : utilOrder) {
+                for (int k = 0; k < 4; ++k) {
                     if (!in.utilBuild[k] || utilType[k][0] < 0) continue;
-                    bool nearNode = false;
-                    for (auto& nd : r.utilNodes[k]) if (hypotf(nd.u - hu, nd.v - hv) <= in.utilRadius[k] * 0.8f) { nearNode = true; break; }
-                    if (nearNode) continue;
-                    short g = (short)utilGrp[k]++;
-                    queued.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
-                    if (utilType[k][1] >= 0 && (k < 3 || g % 6 == 0)) helpers.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
-                    r.utilNodes[k].push_back({ hu, hv });           // the real spots replace these after the layout
+                    for (size_t s = 0; s < sites[k].size(); ++s) {
+                        const V2& st = sites[k][s];
+                        if (siteDone[k][s] || !(hypotf(st.u - hu, st.v - hv) < 25 || (fabsf(st.v - hv) < 6 && hu > st.u))) continue;
+                        siteDone[k][s] = 1;
+                        short g = (short)utilGrp[k]++;
+                        queued.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
+                        if (utilType[k][1] >= 0 && (k < 3 || (in.powerTrafo && g % 6 == 0))) helpers.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
+                    }
                 }
                 for (auto& hp : helpers) queued.push_back(hp);
             }
@@ -457,6 +458,16 @@ PlanResult MakePlan(const PlanInput& in) {
                 int qd = fabsf(qn.u) >= fabsf(qn.v) ? (qn.u > 0 ? 0 : 2) : (qn.v > 0 ? 1 : 3);
                 V2 qo = q;
                 for (int s = 0; s < 60 && fabsf(qo.u - B->u) < B->w / 2 + 1 + cell && fabsf(qo.v - B->v) < B->d / 2 + 1 + cell; ++s) { qo.u += du[qd]; qo.v += dv[qd]; }
+                // nothing in the way: one straight piece from port to port, the way a player draws it (pieces joined end
+                // to end come out as arcs in the game, so corners are the fallback only)
+                {
+                    float len = hypotf(q.u - p.u, q.v - p.v); bool clear = len > 0.5f;
+                    for (float s = 3; clear && s < len - 3; s += 1.0f) {
+                        float cu = p.u + (q.u - p.u) * s / len, cv = p.v + (q.v - p.v) * s / len;
+                        if (block[(size_t)cj(cv) * W + ci(cu)] & 4) clear = false;
+                    }
+                    if (clear) { r.utilLines.push_back({ net, p.u, p.v, q.u, q.v }); r.utilLen[net] += len; return; }
+                }
                 size_t gc = (size_t)cj(qo.v) * W + ci(qo.u);
                 goal[gc] |= 4;
                 std::vector<V2> line;
@@ -547,4 +558,49 @@ PlanResult MakePlan(const PlanInput& in) {
         }
     }
     return r;
+}
+
+// Utility nodes are few and central: a dry layout without them shows where the buildings stand, a greedy cover picks
+// the spots (the building that brings most uncovered ones into reach, radius less an allowance for the shift the
+// inserted nodes cause), then the real layout puts a node next to each chosen spot.
+PlanResult MakePlan(const PlanInput& in) {
+    bool any = false;
+    for (int k = 0; k < 4; ++k) any = any || in.utilBuild[k];
+    if (!any) return MakePlanImpl(in, nullptr);
+    PlanInput dry = in;
+    for (int k = 0; k < 4; ++k) dry.utilBuild[k] = false;
+    PlanResult cur = MakePlanImpl(dry, nullptr), best;
+    int bestScore = 1 << 30;
+    // the nodes take room in the rows and push later buildings along, so the spots are picked again on the layout
+    // that already holds them, a few times; the layout with the fewest buildings out of reach (then the fewest nodes) wins
+    for (int pass = 0; pass < 4; ++pass) {
+        std::vector<V2> sites[4];
+        std::vector<const Placed*> bs;
+        for (auto& b : cur.buildings) if (b.net < 0) bs.push_back(&b);
+        const size_t n = bs.size();
+        for (int k = 0; k < 4; ++k) {
+            if (!in.utilBuild[k]) continue;
+            const float R = std::max(40.0f, in.utilRadius[k] - 15.0f);
+            std::vector<char> covered(n, 0);
+            size_t left = n;
+            while (left > 0 && sites[k].size() < 60) {
+                int pick = -1, pickN = 0;
+                for (size_t c = 0; c < n; ++c) {
+                    int cnt = 0;
+                    for (size_t b = 0; b < n; ++b) if (!covered[b] && hypotf(bs[b]->u - bs[c]->u, bs[b]->v - bs[c]->v) <= R) ++cnt;
+                    if (cnt > pickN) { pickN = cnt; pick = (int)c; }
+                }
+                if (pick < 0) break;
+                sites[k].push_back({ bs[pick]->u, bs[pick]->v });
+                for (size_t b = 0; b < n; ++b) if (!covered[b] && hypotf(bs[b]->u - bs[pick]->u, bs[b]->v - bs[pick]->v) <= R) { covered[b] = 1; --left; }
+            }
+        }
+        cur = MakePlanImpl(in, sites);
+        int score = 0;
+        for (int k = 0; k < 4; ++k) score += cur.utilUncovered[k] * 1000;
+        for (auto& b : cur.buildings) if (b.net >= 0) ++score;
+        if (score < bestScore) { bestScore = score; best = cur; }
+        if (score < 1000) break;
+    }
+    return best;
 }

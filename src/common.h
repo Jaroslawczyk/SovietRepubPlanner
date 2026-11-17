@@ -101,7 +101,8 @@ struct PlanInput {
     std::vector<float> stopsU;                      // bus stops along the street
     float streetSpacing = 250;                      // a parallel street every N metres, 0 = one street only
     bool  utilBuild[4] = {};                        // put this network's buildings and lines into the plan
-    float utilRadius[4] = { 200, 200, 250, 150 };   // water, sewage, heating, power: how far a node serves, m
+    bool  powerTrafo = true;                        // put a transformer for the substations too
+    float utilRadius[4] = { 140, 170, 160, 140 };   // water, sewage, heating, power: how far a node serves, m
     float walkRadius = 400;                         // how tooFar residents walk to a stop
     float maxDiff = 3.0f;                           // allowed height difference under one building
     std::function<bool(float, float)> occupied;     // something already stands at (u, v); may be empty

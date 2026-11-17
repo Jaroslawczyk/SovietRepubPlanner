@@ -55,7 +55,8 @@ const ImU32 kUtilCol[4] = { IM_COL32(70, 150, 255, 255), IM_COL32(165, 110, 55, 
 bool  g_utilShow[4] = { false, false, false, false };
 bool  g_utilBuild[4] = { false, false, false, false };   // the network goes into the plan and gets built
 bool  g_powerUnder = true;                                // medium-voltage lines as underground cable
-float g_utilRadius[4] = { 200, 200, 250, 150 };
+float g_utilRadius[4] = { 140, 170, 160, 140 };   // seen working in the game at least this far (sewage 174 m, heat 162 m, power 141 m); the real limit is unknown
+bool  g_powerTrafo = true;
 float g_utilNorm[4] = { 0.12f, 0.12f, 0.9f, 0.25f };   // per resident; rough guesses, editable in the panel
 std::vector<std::vector<V3>> g_utilLines[4];
 std::vector<V3> g_utilPts[4];
@@ -194,6 +195,7 @@ void Regenerate() {
     in.services = &g_services;
     in.roadType = g_roadType; in.roadV = g_roadV; in.stopsU = g_stops; in.walkRadius = g_walk; in.maxDiff = g_maxDiff; in.streetSpacing = g_streetGap;
     for (int k = 0; k < 4; ++k) { in.utilRadius[k] = g_utilRadius[k]; in.utilBuild[k] = g_utilBuild[k]; }
+    in.powerTrafo = g_powerTrafo;
     in.occupied = [&a](float u, float v) { return eng::Occupied(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v) != 0; };
     in.height = [&a](float u, float v) { return eng::TerrainHeight(a.o.x + a.ux * u + a.vx * v, a.o.z + a.uz * u + a.vz * v); };
     g_plan = MakePlan(in);
@@ -636,7 +638,7 @@ struct InstantRun {
 void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2) {
     float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
     if (len < 1.5f) return;
-    int n = std::max(1, (int)ceilf(len / 60.0f));       // short pieces follow the ground
+    int n = kind == 3 ? 1 : std::max(1, (int)ceilf(len / 60.0f));       // short pieces follow the ground; a pipe / wire stays one piece (joints turn into arcs)
     for (int i = 0; i < n; ++i) {
         float t0 = (float)i / n, t1 = (float)(i + 1) / n;
         eng::InstantJob j; j.kind = kind; j.lineType = lineType;
@@ -818,7 +820,7 @@ void TabUtils() {
         if (ImGui::Checkbox(kUtilName[k], &g_utilBuild[k])) { g_dirty = true; g_utilShow[k] = g_utilBuild[k]; }
         ImGui::PopStyleColor();
         ImGui::SameLine(); ImGui::Checkbox("показывать", &g_utilShow[k]);
-        if (k == 3) { ImGui::SameLine(); ImGui::Checkbox("кабель под землёй", &g_powerUnder); }
+        if (k == 3) { ImGui::SameLine(); ImGui::Checkbox("кабель под землёй", &g_powerUnder); ImGui::SameLine(); if (ImGui::Checkbox("своя подстанция", &g_powerTrafo)) g_dirty = true; }
         ImGui::SetNextItemWidth(200);
         if (ImGui::SliderFloat("радиус узла, м", &g_utilRadius[k], 60.0f, 600.0f, "%.0f")) g_dirty = true;
         ImGui::SetNextItemWidth(120);
@@ -1096,7 +1098,7 @@ void SelfTest() {
         const auto& all = catalog::All();
         for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = all[i].id == "residental_brick_2";
         for (auto& sv : g_services) sv.enabled = false;
-        for (int k = 0; k < 4; ++k) { g_utilBuild[k] = g_utilShow[k] = true; g_utilRadius[k] = 110; }      // small radius: several nodes, so the chains get tested
+        for (int k = 0; k < 4; ++k) { g_utilBuild[k] = g_utilShow[k] = true; }
     }
     SetArea(pts);
 }
