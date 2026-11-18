@@ -712,6 +712,13 @@ std::vector<V3> BrushOutline() {
     return out;
 }
 
+void FinishBrush() {
+    auto pts = BrushOutline();
+    Log("brush: %d cells -> outline %d points", (int)g_brushCells.size(), (int)pts.size());
+    if (pts.size() >= 3) SetArea(pts);
+    g_brushCells.clear(); g_pick = false;
+}
+
 void Picking() {
     ImGuiIO& io = ImGui::GetIO();
     ImDrawList* dl = ImGui::GetForegroundDrawList();
@@ -758,11 +765,10 @@ void Picking() {
                 V3 w{ g_brushCells[k].first * 5.0f + 2.5f, 0, g_brushCells[k].second * 5.0f + 2.5f }; w.y = eng::TerrainHeight(w.x, w.z) + 0.3f;
                 if (Proj(w, s)) dl->AddRectFilled(ImVec2(s.x - 1.5f, s.y - 1.5f), ImVec2(s.x + 1.5f, s.y + 1.5f), IM_COL32(120, 200, 255, 160));
             }
-            if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !g_brushCells.empty()) {
-                auto pts = BrushOutline();
-                if (pts.size() >= 3) SetArea(pts);
-                g_brushCells.clear(); g_pick = false; return;
-            }
+            static bool entWas = false; bool entNow = (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;   // the game may eat the key before ImGui sees it
+            bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) || (entNow && !entWas);
+            entWas = entNow;
+            if (enter && !g_brushCells.empty()) { FinishBrush(); return; }
             snprintf(buf, sizeof(buf), "%s", T("Зажмите ЛКМ и закрашивайте участок, Enter — готово   (ПКМ — отмена)"));
         }
         ImVec2 tp(io.MousePos.x + 18, io.MousePos.y + 18), ts = ImGui::CalcTextSize(buf);
@@ -1055,7 +1061,7 @@ void TabArea() {
         }
         if (g_drawTool == 2) {
             ImGui::SetNextItemWidth(160); ImGui::SliderFloat(T("радиус кисти, м"), &g_brushR, 10, 150, "%.0f");
-            if (g_pick && !g_brushCells.empty()) { ImGui::SameLine(); if (ImGui::SmallButton(T("Готово"))) { auto pts = BrushOutline(); if (pts.size() >= 3) SetArea(pts); g_brushCells.clear(); g_pick = false; } }
+            if (g_pick && !g_brushCells.empty()) { ImGui::SameLine(); if (ImGui::SmallButton(T("Готово"))) FinishBrush(); }
         }
     }
     ImGui::EndDisabled();

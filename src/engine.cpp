@@ -120,7 +120,7 @@ MB_HOOK(h_MDown, o_MDown)
 typedef bool (*InName_t)(void*, char*);
 static InName_t o_BtnDown, o_BtnPress;
 char g_scriptButton[64] = "MOUSEDRAG";   // the named button the line tools read while the left button is held
-static bool ReadMem(const void* p, void* out, size_t n); static void GameThreadTick(); static void DumpLoadNow(); static void DumpRoadsNow(); extern std::atomic<bool> g_dumpRoads; static std::atomic<bool> g_dumpLoad{ false };
+static bool ReadMem(const void* p, void* out, size_t n); static void GameThreadTick(); static void CamMoveNow(); static std::atomic<bool> g_camMove{ false }; static V3 g_camDelta{}; static void DumpLoadNow(); static void DumpRoadsNow(); extern std::atomic<bool> g_dumpRoads; static std::atomic<bool> g_dumpLoad{ false };
 static bool NamedButton(InName_t orig, const char* kind, void* s, char* name) {
     bool v = orig(s, name);
     if (name && kind[0] == 'p' && strcmp(name, "TOOL_CANCEL") == 0) GameThreadTick();
@@ -828,6 +828,7 @@ static void GameThreadTick() {
     if (g_dumpTools.exchange(false)) gx::DumpTools();
     if (g_dumpLoad.exchange(false)) DumpLoadNow();
     if (g_dumpRoads.exchange(false)) DumpRoadsNow();
+    if (g_camMove.exchange(false)) CamMoveNow();
     if (g_dbgToolSet.exchange(false)) {
         void* tool = nullptr; const char* nm = gx::FindTool(g_dbgTool, &tool);
         if (nm) *(void**)(gx::Game() + 0xd428) = tool;
@@ -1081,11 +1082,24 @@ static void DumpLoadNow() {
 // both equal the position handed to C3D_CAMERA::ViewSetPosition); the look-at follows from the angles. Moving the
 // view = shifting both by the same vector. The look-at of the last frame tells where the view centre is.
 bool LookAtNow(V3& out) { out = g_lastLook; return g_lastLook.x != 0 || g_lastLook.z != 0; }
+// The game re-derives the view every frame from its own copies (writing G+0xe3c/0xe48 from the render thread was
+// overwritten at once: the same move was logged 13 times without effect). So the move is queued and done on the game
+// thread: every vec3 in G whose x/z equal the current look-at or view position is shifted (all copies at once).
 void MoveCamera(float dx, float dy, float dz) {
     if (!gx::Supported()) return;
-    BYTE* G = gx::Game();
-    for (int o : { 0xe3c, 0xe48 }) { V3* p = (V3*)(G + o); p->x += dx; p->y += dy; p->z += dz; }
-    Log("camera moved by %.0f %.0f %.0f", dx, dy, dz);
+    g_camDelta = { dx, dy, dz }; g_camMove = true;
+}
+static void CamMoveNow() {
+    BYTE* G = gx::Game(); V3 d = g_camDelta; V3 L = g_lastLook, P = g_lastPos;
+    std::vector<int> hit;
+    for (int o = 0; o < 0x30000; o += 4) {
+        float f[3]; if (!ReadMem(G + o, f, 12)) continue;
+        bool m = (fabsf(f[0] - L.x) < 0.5f && fabsf(f[2] - L.z) < 0.5f) || (fabsf(f[0] - P.x) < 0.5f && fabsf(f[2] - P.z) < 0.5f);
+        if (m && fabsf(f[1]) < 5000) hit.push_back(o);
+    }
+    for (int o : hit) { V3* p = (V3*)(G + o); p->x += d.x; p->y += d.y; p->z += d.z; }
+    std::string offs; char b[16]; for (int o : hit) { snprintf(b, sizeof(b), " 0x%x", o); offs += b; }
+    Log("camera moved by %.0f %.0f %.0f, copies:%s", d.x, d.y, d.z, offs.c_str());
 }
 void DebugCamFind() {
     BYTE* G = gx::Game();
