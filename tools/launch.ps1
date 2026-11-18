@@ -5,13 +5,17 @@
 #    exists only when saved_last exists. Loading takes ~25 s more.
 #  - tools\click.ps1 must be DPI-aware (Windows scale 125%).
 # -Restart kills a running game first. -NoLoad stops at the main menu.
-param([switch]$Restart, [switch]$NoLoad)
+# -Save "<folder in media_soviet\save>" starts from a fresh copy of that save every time (the save itself is not touched).
+param([switch]$Restart, [switch]$NoLoad, [string]$Save = "23151 - My republic")
 $root = "F:\steam\steamapps\common\SovietRepublic"
 $ms = "$root\media_soviet"
 $p = Get-Process SOVIET64 -ErrorAction SilentlyContinue
 if ($p -and -not $Restart) { "already running"; exit }
 if ($p) { $p | Stop-Process -Force; Start-Sleep 3 }
-if (Test-Path "$ms\saved_last\header.bin") {
+if ($Save -and (Test-Path "$ms\save\$Save\header.bin")) {
+  Remove-Item "$ms\saved_last" -Recurse -Force -EA 0
+  Copy-Item "$ms\save\$Save" "$ms\saved_last" -Recurse; "saved_last from save\$Save"
+} elseif (Test-Path "$ms\saved_last\header.bin") {
   Remove-Item "$ms\saved_last_bak" -Recurse -Force -EA 0
   Copy-Item "$ms\saved_last" "$ms\saved_last_bak" -Recurse
 } elseif (Test-Path "$ms\saved_last_bak\header.bin") {

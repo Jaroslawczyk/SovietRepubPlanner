@@ -94,6 +94,17 @@ static LRESULT CALLBACK GetMsgProc(int code, WPARAM wp, LPARAM lp) {
         bool anyMouse = msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST;
         bool wheel = msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL;
         if (!anyMouse || wheel) ImGui_ImplWin32_WndProcHandler(m->hwnd, msg, m->wParam, m->lParam);
+        // The game does not translate key presses into WM_CHAR (typing into a field did nothing): while a text field
+        // is active and no WM_CHAR has ever come, the character of the key is made here.
+        static bool sawChar = false;
+        if (msg == WM_CHAR) sawChar = true;
+        if (msg == WM_KEYDOWN && io.WantTextInput && !sawChar) {
+            BYTE ks[256]; wchar_t buf[4];
+            if (GetKeyboardState(ks)) {
+                int n = ToUnicode((UINT)m->wParam, (UINT)((m->lParam >> 16) & 0xff), ks, buf, 4, 0);
+                for (int i = 0; i < n; ++i) if (buf[i] >= 32) io.AddInputCharacterUTF16(buf[i]);
+            }
+        }
         bool mouseMsg = anyMouse && msg != WM_MOUSEMOVE;
         bool buttonMsg = mouseMsg && msg != WM_MOUSEWHEEL && msg != WM_MOUSEHWHEEL;
         bool keyMsg = msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR;

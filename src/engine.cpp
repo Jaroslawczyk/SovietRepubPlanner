@@ -40,12 +40,15 @@ static CamMat_t     f_ViewGetMatrix, f_ProjGetMatrix;
 static float g_lookDx = 0, g_lookDy = 0, g_lookDz = 0; static bool g_lookOn = false;     // debug: shift the view (screenshots of a spot)
 typedef void (*CamVec_t)(void*, V3*);
 static CamVec_t o_ViewSetLookAt = nullptr;
+static V3 g_lastLook{}, g_lastPos{};
 static void h_ViewSetLookAt(void* self, V3* p) {
+    if (p) g_lastLook = *p;
     if (g_lookOn && p) { p->x += g_lookDx; p->y += g_lookDy; p->z += g_lookDz; }
     o_ViewSetLookAt(self, p);
 }
 static void h_ViewSetPosition(void* self, V3* p) {
     if (g_camera != self) { Log("camera = %p", self); g_camera = self; }
+    if (p) g_lastPos = *p;
     if (g_lookOn && p) { p->x += g_lookDx; p->y += g_lookDy; p->z += g_lookDz; }
     o_ViewSetPosition(self, p);
 }
@@ -670,7 +673,7 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
         stage = 3; ((PUpdate_t)(Base() + 0x4fca80))(m, &b, type, sub, 0, 0, 0, 0, 0, 0);
         void* p428 = *(void**)((BYTE*)m + 0x428); void* p430 = *(void**)((BYTE*)m + 0x430);
         {   static int nl2 = 0, nl2p = 0;
-            if ((mgrOffset == 0xf7a0 && nl2++ < 20) || (mgrOffset == 0xf968 && nl2p++ < 30))
+            if ((mgrOffset == 0xf7a0 && nl2++ < 400) || (mgrOffset == 0xf968 && nl2p++ < 30))
                 Log("SNAP mgr+0x%x a(%.1f %.1f)->(%.1f %.1f) objs %p %p %p %p | b(%.1f %.1f)->(%.1f %.1f) objs %p %p %p %p", mgrOffset, a0.x, a0.z, a.x, a.z, sa[0], sa[1], sa[2], sa[3],
                     b0.x, b0.z, b.x, b.z, *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690)); }
         if (mgrOffset != 0xf7a0 && mgrOffset != 0xf968) {
@@ -694,7 +697,7 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
             if (mgrOffset == 0xf968 && rm) { size_t rr1 = NetSize(rm); if (rr1 != rr0) Log("FOOTPATH JOINED THE ROAD: road lists %zu -> %zu", rr0, rr1); }
             r = c1 > c0 ? 1 : 0;
             static int nl3 = 0, nl3p = 0;
-            if ((mgrOffset == 0xf968 ? nl3p++ : nl3++) < 40) Log("COMMIT mgr+0x%x lists %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, c0, c1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);
+            if ((mgrOffset == 0xf968 ? nl3p++ : nl3++) < 400) Log("COMMIT mgr+0x%x lists %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, c0, c1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);
         }
         else { static int nc = 0, ncp = 0; if ((mgrOffset == 0xf968 ? ncp++ : nc++) < 30) Log("NO PREVIEW mgr+0x%x p428 %p p430 %p a %.1f %.1f b %.1f %.1f", mgrOffset, p428, p430, a.x, a.z, b.x, b.z); ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
     } __except (CrashInfo(GetExceptionInformation(), "line", stage)) { r = -300; }
@@ -1073,6 +1076,29 @@ static void DumpLoadNow() {
         Log("LOAD %s id 0x%x n %d | P %.4g %.4g %.4g off %lld | H %.4g %.4g %.4g off %lld | lists %d %d", kv.first.c_str(), a.id, a.n,
             a.p / a.n, a.pmin, a.pmax, a.pr, a.h / a.n, a.hmin, a.hmax, a.hr, a.lp, a.lh);
     }
+}
+// Camera: the game keeps the view position at G+0xe3c and its target at G+0xe48 (two vec3, found by camfind:
+// both equal the position handed to C3D_CAMERA::ViewSetPosition); the look-at follows from the angles. Moving the
+// view = shifting both by the same vector. The look-at of the last frame tells where the view centre is.
+bool LookAtNow(V3& out) { out = g_lastLook; return g_lastLook.x != 0 || g_lastLook.z != 0; }
+void MoveCamera(float dx, float dy, float dz) {
+    if (!gx::Supported()) return;
+    BYTE* G = gx::Game();
+    for (int o : { 0xe3c, 0xe48 }) { V3* p = (V3*)(G + o); p->x += dx; p->y += dy; p->z += dz; }
+    Log("camera moved by %.0f %.0f %.0f", dx, dy, dz);
+}
+void DebugCamFind() {
+    BYTE* G = gx::Game();
+    Log("camfind: look-at %.2f %.2f %.2f, position %.2f %.2f %.2f", g_lastLook.x, g_lastLook.y, g_lastLook.z, g_lastPos.x, g_lastPos.y, g_lastPos.z);
+    int hits = 0;
+    for (int o = 0; o < 0x30000 && hits < 40; o += 4) {
+        float f[3]; if (!ReadMem(G + o, f, 12)) continue;
+        bool look = fabsf(f[0] - g_lastLook.x) < 0.5f && fabsf(f[2] - g_lastLook.z) < 0.5f;
+        bool pos = fabsf(f[0] - g_lastPos.x) < 0.5f && fabsf(f[2] - g_lastPos.z) < 0.5f;
+        if (look || pos) { Log("camfind: G+0x%x = %.2f %.2f %.2f (%s)", o, f[0], f[1], f[2], look ? "look-at" : "position"); ++hits; }
+    }
+    Log("camfind: %d hits", hits);
+    for (int o = 0xdc0; o < 0xf00; o += 0x20) { float f[8]; if (ReadMem(G + o, f, 32)) Log("camfind: G+0x%03x: %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f", o, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]); }
 }
 void SetLookOffset(bool on, float dx, float dy, float dz) { g_lookOn = on; g_lookDx = dx; g_lookDy = dy; g_lookDz = dz; }
 void SetStraightLines(bool on) { gx::g_straightLines = on; Log("straight lines %d", (int)on); }

@@ -15,6 +15,9 @@ const float kPi = 3.14159265f;
 
 bool g_open = false;
 bool g_pick = false;                // drawing the outline on the map
+int  g_drawTool = 1;                // 0 rectangle (two corners), 1 polygon (corner by corner), 2 brush (paint the area)
+float g_brushR = 30;                // brush radius, m
+std::vector<std::pair<int, int>> g_brushCells;   // painted 5 m cells (world grid)
 std::vector<V3> g_draft;            // outline points clicked so tooFar
 
 struct Area {
@@ -662,10 +665,111 @@ void StopsInteraction() {
 }
 
 // Outline drawing: every click adds a corner; click the first corner (or press Enter) to close.
+// Brush outline: the painted cells (5 m) -> the outer boundary of the biggest painted patch as a polygon, simplified.
+std::vector<V3> BrushOutline() {
+    std::vector<V3> out;
+    if (g_brushCells.empty()) return out;
+    int i0 = 1 << 30, j0 = 1 << 30, i1 = -(1 << 30), j1 = -(1 << 30);
+    for (auto& c : g_brushCells) { i0 = std::min(i0, c.first); i1 = std::max(i1, c.first); j0 = std::min(j0, c.second); j1 = std::max(j1, c.second); }
+    int W = i1 - i0 + 3, H = j1 - j0 + 3;
+    std::vector<char> g((size_t)W * H, 0);
+    for (auto& c : g_brushCells) g[(size_t)(c.second - j0 + 1) * W + (c.first - i0 + 1)] = 1;
+    auto at = [&](int x, int y) { return x >= 0 && y >= 0 && x < W && y < H && g[(size_t)y * W + x]; };
+    // boundary walk on cell corners, starting at the top-left corner of the first filled cell (left-hand rule)
+    int sx = -1, sy = -1;
+    for (int y = 0; y < H && sx < 0; ++y) for (int x = 0; x < W; ++x) if (at(x, y)) { sx = x; sy = y; break; }
+    if (sx < 0) return out;
+    std::vector<std::pair<int, int>> pts;
+    int x = sx, y = sy, dir = 0;            // corner coordinates; dir 0 +x, 1 +y, 2 -x, 3 -y
+    const int dx[4] = { 1, 0, -1, 0 }, dy[4] = { 0, 1, 0, -1 };
+    for (int step = 0; step < 200000; ++step) {
+        pts.push_back({ x, y });
+        // cells left / right of the edge ahead (the filled side kept on the right)
+        for (int t = 0; t < 4; ++t) {
+            int nd = (dir + 3 + t) % 4;      // try left turn first, then straight, right, back
+            int ex = x + dx[nd], ey = y + dy[nd];
+            // the edge from (x,y) to (ex,ey) has the cell on its right filled and the cell on its left empty
+            int rx = nd == 0 ? x : nd == 1 ? x - 1 : nd == 2 ? x - 1 : x, ry = nd == 0 ? y : nd == 1 ? y : nd == 2 ? y - 1 : y - 1;
+            int lx = nd == 0 ? x : nd == 1 ? x : nd == 2 ? x - 1 : x - 1, ly = nd == 0 ? y - 1 : nd == 1 ? y : nd == 2 ? y : y - 1;
+            if (at(rx, ry) && !at(lx, ly)) { dir = nd; x = ex; y = ey; break; }
+        }
+        if (x == sx && y == sy) break;
+    }
+    // corners -> world, then drop points that keep the line within 6 m (Douglas-Peucker light: collinear removal)
+    std::vector<V2> poly;
+    for (auto& p : pts) poly.push_back({ (p.first + i0 - 1) * 5.0f, (p.second + j0 - 1) * 5.0f });
+    std::vector<V2> simp;
+    for (size_t k = 0; k < poly.size(); ++k) {
+        if (!simp.empty() && simp.size() >= 2) {
+            const V2& a = simp[simp.size() - 2]; const V2& b = simp.back(); const V2& c = poly[k];
+            float cr = fabsf((b.u - a.u) * (c.v - a.v) - (b.v - a.v) * (c.u - a.u)) / std::max(0.01f, hypotf(c.u - a.u, c.v - a.v));
+            if (cr < 6.0f) { simp.back() = c; continue; }
+        }
+        simp.push_back(poly[k]);
+    }
+    if (simp.size() > 64) { std::vector<V2> t; for (size_t k = 0; k < simp.size(); k += (simp.size() + 63) / 64) t.push_back(simp[k]); simp = t; }
+    for (auto& p : simp) out.push_back({ p.u, eng::TerrainHeight(p.u, p.v), p.v });
+    return out;
+}
+
 void Picking() {
     ImGuiIO& io = ImGui::GetIO();
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const ImU32 yellow = IM_COL32(255, 235, 80, 255);
+    if (g_drawTool == 0 || g_drawTool == 2) {
+        V3 hit;
+        bool ok = !io.WantCaptureMouse && eng::ScreenToTerrain(io.MousePos.x, io.MousePos.y, io.DisplaySize.x, io.DisplaySize.y, hit);
+        if (ImGui::IsMouseClicked(1)) { g_pick = false; g_draft.clear(); g_brushCells.clear(); return; }
+        char buf[200];
+        if (g_drawTool == 0) {          // rectangle: first corner, opposite corner
+            if (ok && !g_draft.empty()) {
+                const V3& a = g_draft[0];
+                V3 c[4] = { { a.x, 0, a.z }, { hit.x, 0, a.z }, { hit.x, 0, hit.z }, { a.x, 0, hit.z } };
+                std::vector<V3> line;
+                for (int e = 0; e < 4; ++e) for (int k = 0; k <= 10; ++k) {
+                    const V3& p = c[e]; const V3& q = c[(e + 1) % 4];
+                    V3 w{ p.x + (q.x - p.x) * k / 10, 0, p.z + (q.z - p.z) * k / 10 }; w.y = eng::TerrainHeight(w.x, w.z) + 0.3f; line.push_back(w);
+                }
+                DrawPolyline(dl, line, yellow, 2.5f);
+                if (ImGui::IsMouseClicked(0) && fabsf(hit.x - a.x) > 20 && fabsf(hit.z - a.z) > 20) {
+                    std::vector<V3> pts; for (auto& p : c) pts.push_back({ p.x, eng::TerrainHeight(p.x, p.z), p.z });
+                    SetArea(pts); g_draft.clear(); g_pick = false; return;
+                }
+            } else if (ok && ImGui::IsMouseClicked(0)) g_draft.push_back(hit);
+            snprintf(buf, sizeof(buf), "%s", g_draft.empty() ? T("Клик — первый угол прямоугольника   (ПКМ — отмена)") : T("Клик — противоположный угол"));
+        } else {                        // brush: hold the left button and paint, Enter or the button "Готово" closes
+            if (ok) {
+                std::vector<V3> ring;
+                for (int k = 0; k <= 32; ++k) { float a = k * 6.2832f / 32; V3 w{ hit.x + cosf(a) * g_brushR, 0, hit.z + sinf(a) * g_brushR }; w.y = eng::TerrainHeight(w.x, w.z) + 0.3f; ring.push_back(w); }
+                DrawPolyline(dl, ring, IM_COL32(120, 200, 255, 255), 2.0f);
+                if (ImGui::IsMouseDown(0)) {
+                    int r = (int)ceilf(g_brushR / 5);
+                    int ci = (int)floorf(hit.x / 5), cj = (int)floorf(hit.z / 5);
+                    for (int dj = -r; dj <= r; ++dj) for (int di = -r; di <= r; ++di) {
+                        if ((di * di + dj * dj) * 25.0f > g_brushR * g_brushR) continue;
+                        std::pair<int, int> c{ ci + di, cj + dj };
+                        if (std::find(g_brushCells.begin(), g_brushCells.end(), c) == g_brushCells.end() && g_brushCells.size() < 400000) g_brushCells.push_back(c);
+                    }
+                }
+            }
+            // painted cells
+            ImVec2 s;
+            for (size_t k = 0; k < g_brushCells.size(); k += std::max<size_t>(1, g_brushCells.size() / 6000)) {
+                V3 w{ g_brushCells[k].first * 5.0f + 2.5f, 0, g_brushCells[k].second * 5.0f + 2.5f }; w.y = eng::TerrainHeight(w.x, w.z) + 0.3f;
+                if (Proj(w, s)) dl->AddRectFilled(ImVec2(s.x - 1.5f, s.y - 1.5f), ImVec2(s.x + 1.5f, s.y + 1.5f), IM_COL32(120, 200, 255, 160));
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !g_brushCells.empty()) {
+                auto pts = BrushOutline();
+                if (pts.size() >= 3) SetArea(pts);
+                g_brushCells.clear(); g_pick = false; return;
+            }
+            snprintf(buf, sizeof(buf), "%s", T("Зажмите ЛКМ и закрашивайте участок, Enter — готово   (ПКМ — отмена)"));
+        }
+        ImVec2 tp(io.MousePos.x + 18, io.MousePos.y + 18), ts = ImGui::CalcTextSize(buf);
+        dl->AddRectFilled(ImVec2(tp.x - 5, tp.y - 3), ImVec2(tp.x + ts.x + 5, tp.y + ts.y + 3), IM_COL32(0, 0, 0, 190), 4);
+        dl->AddText(tp, IM_COL32(255, 255, 255, 255), buf);
+        return;
+    }
     if (ImGui::IsMouseClicked(1)) {
         if (g_draft.empty()) { g_pick = false; return; }
         g_draft.pop_back();
@@ -941,13 +1045,32 @@ void TabArea() {
     ImGui::SetItemTooltip(T("Язык интерфейса и названий зданий (названия берутся из файлов игры)."));
     ImGui::SeparatorText(T("Территория"));
     ImGui::BeginDisabled(!eng::Ready());
-    if (ImGui::Button(g_pick ? T("Отменить рисование") : T("Нарисовать на карте"), ImVec2(210, 0))) { g_pick = !g_pick; g_draft.clear(); }
+    {   const char* names[3] = { T("Прямоугольник"), T("Многоугольник"), T("Кисть") };
+        for (int t = 0; t < 3; ++t) {
+            if (t) ImGui::SameLine();
+            bool active = g_pick && g_drawTool == t;
+            if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.573f, 0.176f, 0.149f, 1));
+            if (ImGui::Button(active ? T("Отмена") : names[t], ImVec2(118, 0))) { g_pick = !active; g_drawTool = t; g_draft.clear(); g_brushCells.clear(); }
+            if (active) ImGui::PopStyleColor();
+        }
+        if (g_drawTool == 2) {
+            ImGui::SetNextItemWidth(160); ImGui::SliderFloat(T("радиус кисти, м"), &g_brushR, 10, 150, "%.0f");
+            if (g_pick && !g_brushCells.empty()) { ImGui::SameLine(); if (ImGui::SmallButton(T("Готово"))) { auto pts = BrushOutline(); if (pts.size() >= 3) SetArea(pts); g_brushCells.clear(); g_pick = false; } }
+        }
+    }
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (g_area.ok) {
         ImGui::Text(T("%.1f га, %d точек"), g_area.sqm / 10000.0f, (int)g_area.pts.size());
         ImGui::SameLine();
         if (ImGui::SmallButton(T("Сбросить"))) { g_area.ok = false; g_dirty = g_areaChanged = true; }
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("К плану"))) {      // the view flies to the middle of the area
+            V3 c{ 0, 0, 0 }; for (auto& p : g_area.pts) { c.x += p.x / g_area.pts.size(); c.z += p.z / g_area.pts.size(); }
+            V3 now;
+            if (eng::LookAtNow(now)) eng::MoveCamera(c.x - now.x, eng::TerrainHeight(c.x, c.z) - now.y, c.z - now.z);
+        }
+        ImGui::SetItemTooltip(T("Перенести камеру к участку плана."));
     } else ImGui::TextDisabled(T("участок не выбран"));
     ImGui::TextDisabled(T("Кликайте по карте углы района любой формы, замкните кликом по первой точке."));
     ImGui::SetNextItemWidth(220);
@@ -1259,6 +1382,7 @@ void InstantStart() {
         V3 w = LocalToWorld(g_area, b.u, b.v, 0);
         if (eng::Occupied(w.x, w.z) & 1) continue;      // already there
         g_inst.jobs.push_back(InstantBuilding(b)); g_inst.plan.push_back((int)i);
+        if (b.stop) { V3 w2 = LocalToWorld(g_area, b.ou, b.ov, 0); Log("stop building at world %.0f %.0f", w2.x, w2.z); }
     }
     // a street is cut where it crosses a trail / footpath of the game, so each crossing becomes a joint of two pieces
     // (whole pieces across trails were refused, v0.38.0 test)
@@ -1271,12 +1395,15 @@ void InstantStart() {
         std::vector<PathSeg> mine;
         for (auto& pc : roadPieces) if (pc.second == k) mine.push_back(pc.first);
         if (mine.empty()) continue;
+        // a short stub at either end (past the last junction) is dropped, not merged: merging it removed the node
+        // where another street joins, and that street was refused
+        auto plen = [](const PathSeg& p) { return hypotf(p.u2 - p.u1, p.v2 - p.v1); };
+        if (mine.size() > 1 && plen(mine.front()) < 10) mine.erase(mine.begin());
+        if (mine.size() > 1 && plen(mine.back()) < 10) mine.pop_back();
         PathSeg cur = mine[0];
         for (size_t q = 1; q < mine.size(); ++q) {
-            float lc = hypotf(cur.u2 - cur.u1, cur.v2 - cur.v1);
+            float lc = plen(cur);
             if (lc < 10) { cur.u2 = mine[q].u2; cur.v2 = mine[q].v2; continue; }
-            float ln = hypotf(mine[q].u2 - mine[q].u1, mine[q].v2 - mine[q].v1);
-            if (ln < 10 && q + 1 == mine.size()) { cur.u2 = mine[q].u2; cur.v2 = mine[q].v2; continue; }
             streetPieces.push_back(cur); pieceCurve.push_back(0); cur = mine[q];
         }
         streetPieces.push_back(cur); pieceCurve.push_back(0);
@@ -2076,11 +2203,12 @@ void SelfTest() {
         if (f) {
             float x = 0, z = 0; fscanf(f, "%f %f", &x, &z); fclose(f);
             if (!on) {
-                ImVec2 ds = ImGui::GetIO().DisplaySize; V3 c;
-                if (eng::ScreenToTerrain(ds.x / 2, ds.y / 2, ds.x, ds.y, c)) { eng::SetLookOffset(true, x - c.x, eng::TerrainHeight(x, z) - c.y, z - c.z); on = true; Log("lookat %.0f %.0f (view centre was %.0f %.0f)", x, z, c.x, c.z); }
+                V3 now;
+                if (eng::LookAtNow(now)) { eng::MoveCamera(x - now.x, eng::TerrainHeight(x, z) - now.y, z - now.z); on = true; Log("lookat %.0f %.0f (view was at %.0f %.0f)", x, z, now.x, now.z); }
             }
-        } else if (on) { eng::SetLookOffset(false, 0, 0, 0); on = false; }
+        } else on = false;
     }
+    if (DeleteFileW((GameDir() + L"DistrictPlanner.camfind").c_str())) eng::DebugCamFind();
     if (DeleteFileW((GameDir() + L"DistrictPlanner.arccheck").c_str())) {     // debug: how bent are the game's road pieces in the area
         std::vector<std::vector<V3>> L; eng::ListNetLines(0xf7a0, L);
         int n = 0;

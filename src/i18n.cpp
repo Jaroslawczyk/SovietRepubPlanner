@@ -250,6 +250,12 @@ static const char* const kPairs[][2] = {
     { "Переходы дорожек через улицы: готово %d, ждут достройки улиц %d (мод пробует каждые 30 с)", "Footpath crossings over the streets: done %d, waiting for the streets to be finished %d (the mod retries every 30 s)" },
     { "своя котельная (а не только тепловые пункты)", "own boiler house (not only heat exchangers)" },
     { "Малая котельная встаёт на участке дальше всего от центра (дым подальше от жилья), от неё тянется труба к тепловым пунктам.", "A small boiler house goes to the lot farthest from the centre (smoke away from the homes); a pipe runs from it to the heat exchangers." },
+    { "К плану", "To the plan" }, { "Перенести камеру к участку плана.", "Move the camera to the planned area." },
+    { "Прямоугольник", "Rectangle" }, { "Многоугольник", "Polygon" }, { "Кисть", "Brush" }, { "Отмена", "Cancel" },
+    { "радиус кисти, м", "brush radius, m" }, { "Готово", "Done" },
+    { "Клик — первый угол прямоугольника   (ПКМ — отмена)", "Click — first corner of the rectangle   (RMB — cancel)" },
+    { "Клик — противоположный угол", "Click — the opposite corner" },
+    { "Зажмите ЛКМ и закрашивайте участок, Enter — готово   (ПКМ — отмена)", "Hold LMB and paint the area, Enter — done   (RMB — cancel)" },
     { "не изучено", "not researched" },
 };
 const char* T(const char* ru) {

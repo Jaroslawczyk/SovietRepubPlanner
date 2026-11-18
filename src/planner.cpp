@@ -233,6 +233,17 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 if (round[j]) { RoadSeg arc{ a[j].u, a[j].v, b[j].u, b[j].v, hw * 2 }; arc.curve = true; r.roads.push_back(arc); }
             }
             lanePoly = ring;
+            // the main street (laid before) must end on the ring, not 5 m past it: that stub was merged away and the
+            // ring and the lanes then ended mid-way on the main street - refused (v0.49.0 log)
+            for (auto& rd : r.roads) {
+                if (rd.curve || fabsf(rd.v1 - roadV) > 0.5f || fabsf(rd.v2 - roadV) > 0.5f) continue;
+                float L2, R2;
+                if (!PolyScan(lanePoly, roadV, L2, R2)) continue;
+                float a = std::max(std::min(rd.u1, rd.u2), L2), b = std::min(std::max(rd.u1, rd.u2), R2);
+                if (b - a > 1) { rd.u1 = a; rd.u2 = b; }
+            }
+            r.roads.erase(std::remove_if(r.roads.begin(), r.roads.end(), [&](const RoadSeg& rd) {
+                return !rd.curve && fabsf(rd.v1 - roadV) < 0.5f && fabsf(rd.u2 - rd.u1) < 1; }), r.roads.end());
         }
         std::vector<float> hvs{ roadV };
         for (float v = roadV + P; v < maxV - front - 4; v += P) hvs.push_back(v);
@@ -299,6 +310,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 pb.rot = 0; pb.ou = bu; pb.ov = bl->v; pb.stop = true;
                 r.buildings.push_back(pb);
                 r.stops.push_back({ bu, bl->v });
+                Log("auto stop at u %.0f v %.0f, street cut %.0f..%.0f", bu, bl->v, bu - hl, bu + hl);
                 for (size_t k = 0; k < pts.size(); ++k) if (hypotf(pts[k].u - bu, pts[k].v - bl->v) <= R) cov[k] = 1;
                 std::vector<RoadSeg> cut;           // the street is cut where the stop stands
                 for (auto& rd : r.roads) {

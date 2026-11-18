@@ -58,7 +58,10 @@ namespace eng {
     void LogDarkness();                             // debug: log exe+0x9d5d84 every 20 s while DistrictPlanner.darkness exists                           // debug: log node capacities and building loads from the running game
     void SetPathSnapMode(int mode);
     void SetStraightLines(bool on);
-    void SetLookOffset(bool on, float dx, float dy, float dz);   // debug: every view position is shifted by (dx, dz)                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
+    void SetLookOffset(bool on, float dx, float dy, float dz);
+    void DebugCamFind();
+    bool LookAtNow(V3& out);                       // the point the view looks at (last frame)
+    void MoveCamera(float dx, float dy, float dz); // shift the game view                            // debug: where the game keeps the camera look-at / position   // debug: every view position is shifted by (dx, dz)                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
     void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
     // buildings already standing in the game (engine list exe+0x9e6a18): ini name, position, yaw (radians, same
