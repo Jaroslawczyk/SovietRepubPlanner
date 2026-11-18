@@ -48,7 +48,7 @@ namespace eng {
     bool InstantSupported();                        // direct build calls exist for this game build
     // one direct call into the game: kind 0 = building "type" at a turned by rot, 1 = road a->b, 2 = footpath a->b
     // kind 3 = a utility line a->b: mgr = offset of the network manager in the game state, lineType / sub / arg as the game's own tool passes them
-    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; int mgr = 0, sub = 0, arg = -20; float ha = 0, hb = 0; bool curve = false; };
+    struct InstantJob { int kind = 0; std::string type; V3 a{}, b{}; float rot = 0; int lineType = 0; int mgr = 0, sub = 0, arg = -20; float ha = 0, hb = 0; bool curve = false; int chain = -1; };   // chain: pieces of one utility line, built in order, the rest skipped after a refusal
     void QueueInstant(const std::vector<InstantJob>& jobs);
     bool InstantBusy();
     void InstantResults(std::vector<int>& codes);   // building: -1 placed, 10 ground too uneven; line: 1 placed

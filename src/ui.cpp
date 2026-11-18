@@ -1294,6 +1294,7 @@ struct InstantRun {
 void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2, float h1 = 0, float h2 = 0, bool curve = false) {
     float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
     if (len < 0.5f) return;
+    static int chainNo = 0; ++chainNo;
     int n = std::max(1, (int)ceilf(len / 60.0f));     // pieces of at most 60 m: the game refuses a long wire / pipe in one piece (straight start tangents keep the joints from bending)
     for (int i = 0; i < n; ++i) {
         float t0 = (float)i / n, t1 = (float)(i + 1) / n;
@@ -1303,6 +1304,7 @@ void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2,
         if (i == 0) j.ha = h1;
         if (i == n - 1) j.hb = h2;
         j.curve = curve;
+        if (kind == 3) j.chain = chainNo;   // a utility line: once a piece is refused the rest would hang in the air
         g_inst.jobs.push_back(j); g_inst.plan.push_back(-1);
     }
 }

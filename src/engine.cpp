@@ -853,6 +853,13 @@ static void GameThreadTick() {
             }
             if (g_instAt >= g_inst.size()) { g_instBusy = false; Log("instant build: done"); return; } at = g_instAt++; j = g_inst[at]; }
         int code;
+        static int deadChain = -1;
+        if (j.chain >= 0 && j.chain == deadChain) {
+            // an earlier piece of this wire / pipe was refused: building the rest gave wires from nowhere to nowhere
+            Log("instant build: utility piece %.0f %.0f -> %.0f %.0f skipped, the line is broken before it", j.a.x, j.a.z, j.b.x, j.b.z);
+            std::lock_guard<std::mutex> l(g_instMx); if (at < g_instN) g_instRes[at] = 0;
+            continue;
+        }
         if (j.kind == 0) {
             void* tool = nullptr;
             const char* nm = gx::FindTool(j.type.c_str(), &tool);
@@ -879,6 +886,7 @@ static void GameThreadTick() {
             else code = gx::LineRaw(j.kind == 1 ? 0xf7a0 : 0xf968, j.lineType, 0, -20, tn, a, b);
             if (j.curve) Log("arc piece %.0f %.0f -> %.0f %.0f: %s", a.x, a.z, b.x, b.z, code == 1 ? "built" : "refused");
             gx::g_curveNow = false;
+            if (code != 1 && j.chain >= 0) deadChain = j.chain;
             if (code != 1) Log("instant build: %s %.0f %.0f -> %.0f %.0f: %s (code %d)", j.kind == 1 ? "road" : j.kind == 3 ? (j.mgr == 0xfaf0 ? (j.sub >= 5 ? "sewage" : "water") : j.mgr == 0xfa98 ? "heating" : "power") : "footpath", a.x, a.z, b.x, b.z,
                                code == -300 ? "CRASH caught" : "refused by the game", code);
         }
