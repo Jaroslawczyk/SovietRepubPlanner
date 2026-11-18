@@ -1679,6 +1679,44 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         r.joinedRoads = (int)joins.size();
         r.roads.insert(r.roads.end(), joins.begin(), joins.end());
     }
+    {
+    // A driveway that meets a street at its dead end makes a right-angle bend there, and the game refuses that (in-game
+    // log v0.56: every refused street / driveway piece ended on a dead-end node, a T in the middle of a street was
+    // accepted). Such a street is carried on 12 m past the driveway so the join becomes a T.
+    for (auto& dr : r.drives) for (int e = 0; e < 2; ++e) {
+        float pu = e ? dr.u2 : dr.u1, pv = e ? dr.v2 : dr.v1;
+        for (size_t k = 0; k < r.roads.size(); ++k) {
+            RoadSeg& rd = r.roads[k];
+            if (rd.curve) continue;
+            for (int f = 0; f < 2; ++f) {
+                float eu = f ? rd.u2 : rd.u1, ev = f ? rd.v2 : rd.v1;
+                { float du0 = rd.u2 - rd.u1, dv0 = rd.v2 - rd.v1, l2 = du0 * du0 + dv0 * dv0;   // the driveway must meet this piece
+                  float t = l2 > 0 ? std::clamp(((pu - rd.u1) * du0 + (pv - rd.v1) * dv0) / l2, 0.0f, 1.0f) : 0;
+                  if (hypotf(rd.u1 + du0 * t - pu, rd.v1 + dv0 * t - pv) > 1.0f) continue; }
+                float dEnd = hypotf(eu - pu, ev - pv);
+                if (dEnd > 12.5f) continue;   // the builder drops street cuts < 12 m from a node: the join slides onto the dead end
+                int ends = 0;                      // other street pieces ending here: then it is a junction, not a dead end
+                for (auto& o : r.roads) { if (&o == &rd) continue; if (hypotf(o.u1 - eu, o.v1 - ev) < 1 || hypotf(o.u2 - eu, o.v2 - ev) < 1) ++ends; }
+                if (ends) continue;
+                float du = f ? rd.u2 - rd.u1 : rd.u1 - rd.u2, dv = f ? rd.v2 - rd.v1 : rd.v1 - rd.v2, L = hypotf(du, dv);
+                if (L < 1) continue;
+                du /= L; dv /= L;
+                float ext = 13.0f - dEnd, nu = eu + du * ext, nv = ev + dv * ext;
+                bool hit = false;
+                for (auto& b : r.buildings)
+                    for (int t = 1; t <= (int)ext && !hit; ++t) {
+                        float qu = eu + du * t, qv = ev + dv * t;
+                        if (fabsf(qu - b.u) < b.w / 2 + rd.width / 2 && fabsf(qv - b.v) < b.d / 2 + rd.width / 2) hit = true;
+                    }
+                if (hit) { Log("plan: driveway at a dead end u %.0f v %.0f, no room to carry the street on", eu, ev); continue; }
+                if (f) { rd.u2 = nu; rd.v2 = nv; } else { rd.u1 = nu; rd.v1 = nv; }   // the same piece made longer: no node at the old end
+                Log("plan: street carried on %.0f m past its dead end u %.0f v %.0f (driveway %.1f m from it)", ext, eu, ev, dEnd);
+                goto nextEnd;
+            }
+        }
+        nextEnd:;
+    }
+    }
     for (auto& p : r.drives) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
     for (auto& p : r.roads) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
 
