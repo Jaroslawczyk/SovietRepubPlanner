@@ -845,7 +845,7 @@ static void GameThreadTick() {
                 g_instRetried = true; g_inst.resize(g_instN);
                 for (size_t i = g_instN; i-- > 0;) {
                     const InstantJob& o = g_inst[i];
-                    if ((o.kind != 1 && o.kind != 2 && o.kind != 3) || o.curve || g_instRes[i] == 1) continue;
+                    if (true) continue;   // retry from the far end switched off: roads / wires became rings, footpaths ran into junctions (user screenshots v0.54)   // footpaths only: a road / wire drawn from a loose end came out as a ring (user screenshot v0.54)
                     InstantJob rj = o; std::swap(rj.a, rj.b); std::swap(rj.ha, rj.hb); if (rj.chain >= 0) rj.chain += 1000000;   // wires / pipes too: drawn from the consumer end
                     g_inst.push_back(rj); g_instOrig.push_back(i);
                 }
@@ -1109,12 +1109,21 @@ bool LookAtNow(V3& out) { out = g_lastLook; return g_lastLook.x != 0 || g_lastLo
 // The game re-derives the view every frame from its own copies (writing G+0xe3c/0xe48 from the render thread was
 // overwritten at once: the same move was logged 13 times without effect). So the move is queued and done on the game
 // thread: every vec3 in G whose x/z equal the current look-at or view position is shifted (all copies at once).
+// absolute target: the delta is taken on the game thread from the game's own view target G+0xe48 (the look-at seen
+// in ViewSetLookAt is not refreshed every frame: after the player dragged the view, moves were made from a stale point)
+static std::atomic<bool> g_camAbs{ false }; static float g_camGoalX = 0, g_camGoalZ = 0;
+void MoveCameraTo(float x, float z) {
+    if (!gx::Supported()) return;
+    g_camGoalX = x; g_camGoalZ = z; g_camAbs = true; g_camMove = true;
+}
 void MoveCamera(float dx, float dy, float dz) {
     if (!gx::Supported()) return;
     g_camDelta = { dx, dy, dz }; g_camMove = true;
 }
 static void CamMoveNow() {
-    BYTE* G = gx::Game(); V3 d = g_camDelta; V3 L = g_lastLook, P = g_lastPos;
+    BYTE* G = gx::Game(); V3 d = g_camDelta;
+    V3 L = *(V3*)(G + 0xe48), P = *(V3*)(G + 0xe3c);     // where the view is now
+    if (g_camAbs.exchange(false)) d = { g_camGoalX - L.x, 0, g_camGoalZ - L.z };   // (unused now: G+0xe48 is the eye, not the centre)
     std::vector<int> hit;
     for (int o = 0; o < 0x30000; o += 4) {
         float f[3]; if (!ReadMem(G + o, f, 12)) continue;
@@ -1122,6 +1131,9 @@ static void CamMoveNow() {
         if (m && fabsf(f[1]) < 5000) hit.push_back(o);
     }
     for (int o : hit) { V3* p = (V3*)(G + o); p->x += d.x; p->y += d.y; p->z += d.z; }
+    // the next press before a new frame would move again from the old point: keep the last look-at in step
+    g_lastLook.x += d.x; g_lastLook.z += d.z; g_lastPos.x += d.x; g_lastPos.z += d.z;
+    Log("camera: view target was %.0f %.0f, now %.0f %.0f", L.x, L.z, ((V3*)(G + 0xe48))->x, ((V3*)(G + 0xe48))->z);
     std::string offs; char b[16]; for (int o : hit) { snprintf(b, sizeof(b), " 0x%x", o); offs += b; }
     Log("camera moved by %.0f %.0f %.0f, copies:%s", d.x, d.y, d.z, offs.c_str());
 }

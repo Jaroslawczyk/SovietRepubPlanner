@@ -1171,7 +1171,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                             (void)alongEnd;
                             if (!atJunction && tt < bestT) bestT = tt;
                         }
-                        if (bestT > 60) continue;
+                        if (bestT > 60 || bestT < 10) continue;   // shorter: the game turns it into a slanted stub into the junction
                         bool clear = true;
                         for (auto& b2 : r.buildings) {
                             if (&b2 == &b) continue;

@@ -61,7 +61,8 @@ namespace eng {
     void SetLookOffset(bool on, float dx, float dy, float dz);
     void DebugCamFind();
     bool LookAtNow(V3& out);                       // the point the view looks at (last frame)
-    void MoveCamera(float dx, float dy, float dz); // shift the game view                            // debug: where the game keeps the camera look-at / position   // debug: every view position is shifted by (dx, dz)                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
+    void MoveCamera(float dx, float dy, float dz); // shift the game view
+    void MoveCameraTo(float x, float z);           // put the view centre on this world point (read from the game at move time)                            // debug: where the game keeps the camera look-at / position   // debug: every view position is shifted by (dx, dz)                 // debug: 0 = snap footpath ends like the area paste, 1 = like the building tool
     void DebugSetTool(const char* name);            // debug: make this game tool the current one
     void InstallPathLogging();
     // buildings already standing in the game (engine list exe+0x9e6a18): ini name, position, yaw (radians, same

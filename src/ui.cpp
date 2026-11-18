@@ -698,18 +698,40 @@ std::vector<V3> BrushOutline() {
     // corners -> world, then drop points that keep the line within 6 m (Douglas-Peucker light: collinear removal)
     std::vector<V2> poly;
     for (auto& p : pts) poly.push_back({ (p.first + i0 - 1) * 5.0f, (p.second + j0 - 1) * 5.0f });
+    // keep a corner when any boundary point since the last kept corner strays > 4 m from the straight line to it
+    // (v0.49 compared only the last point, always < 6 m away: every outline collapsed to 2 points)
     std::vector<V2> simp;
-    for (size_t k = 0; k < poly.size(); ++k) {
-        if (!simp.empty() && simp.size() >= 2) {
-            const V2& a = simp[simp.size() - 2]; const V2& b = simp.back(); const V2& c = poly[k];
-            float cr = fabsf((b.u - a.u) * (c.v - a.v) - (b.v - a.v) * (c.u - a.u)) / std::max(0.01f, hypotf(c.u - a.u, c.v - a.v));
-            if (cr < 6.0f) { simp.back() = c; continue; }
-        }
-        simp.push_back(poly[k]);
+    size_t anchor = 0;
+    if (!poly.empty()) simp.push_back(poly[0]);
+    for (size_t k = 2; k < poly.size(); ++k) {
+        const V2& a = poly[anchor]; const V2& c = poly[k];
+        float L = std::max(0.01f, hypotf(c.u - a.u, c.v - a.v));
+        bool bad = false;
+        for (size_t m = anchor + 1; m < k && !bad; ++m)
+            if (fabsf((poly[m].u - a.u) * (c.v - a.v) - (poly[m].v - a.v) * (c.u - a.u)) / L > 4.0f) bad = true;
+        if (bad) { anchor = k - 1; simp.push_back(poly[anchor]); }
     }
     if (simp.size() > 64) { std::vector<V2> t; for (size_t k = 0; k < simp.size(); k += (simp.size() + 63) / 64) t.push_back(simp[k]); simp = t; }
     for (auto& p : simp) out.push_back({ p.u, eng::TerrainHeight(p.u, p.v), p.v });
     return out;
+}
+
+// The view centre = the ground under the middle of the screen, from this frame's matrices (the game's own look-at
+// copies are not refreshed while the player drags the view: moves made from them landed anywhere).
+static int g_camCheck = 0; static float g_camGX = 0, g_camGZ = 0;
+bool ViewCentre(V3& out) {
+    ImGuiIO& io = ImGui::GetIO();
+    return eng::ScreenToTerrain(io.DisplaySize.x / 2, io.DisplaySize.y / 2, io.DisplaySize.x, io.DisplaySize.y, out);
+}
+void ViewGoTo(float x, float z) {
+    V3 c; if (!ViewCentre(c)) { Log("camera: no ground under the screen centre"); return; }
+    eng::MoveCamera(x - c.x, 0, z - c.z);
+    g_camCheck = 30; g_camGX = x; g_camGZ = z;
+    Log("camera: centre %.0f %.0f -> goal %.0f %.0f", c.x, c.z, x, z);
+}
+void ViewCheckTick() {
+    if (g_camCheck <= 0 || --g_camCheck) return;
+    V3 c; if (ViewCentre(c)) Log("camera: centre now %.0f %.0f, goal %.0f %.0f, off %.1f m", c.x, c.z, g_camGX, g_camGZ, hypotf(c.x - g_camGX, c.z - g_camGZ));
 }
 
 void FinishBrush() {
@@ -1074,7 +1096,7 @@ void TabArea() {
         if (ImGui::SmallButton(T("К плану"))) {      // the view flies to the middle of the area
             V3 c{ 0, 0, 0 }; for (auto& p : g_area.pts) { c.x += p.x / g_area.pts.size(); c.z += p.z / g_area.pts.size(); }
             V3 now;
-            if (eng::LookAtNow(now)) eng::MoveCamera(c.x - now.x, eng::TerrainHeight(c.x, c.z) - now.y, c.z - now.z);
+            (void)now; ViewGoTo(c.x, c.z);   // height stays: the old -187 m drop threw the view about
         }
         ImGui::SetItemTooltip(T("Перенести камеру к участку плана."));
     } else ImGui::TextDisabled(T("участок не выбран"));
@@ -2214,14 +2236,24 @@ void SelfTest() {
         static bool on = false;
         FILE* f = _wfopen((GameDir() + L"DistrictPlanner.lookat").c_str(), L"r");
         if (f) {
-            float x = 0, z = 0; fscanf(f, "%f %f", &x, &z); fclose(f);
+            float x = 0, z = 0; fscanf(f, "%f %f", &x, &z); fclose(f); DeleteFileW((GameDir() + L"DistrictPlanner.lookat").c_str()); on = false;
             if (!on) {
                 V3 now;
-                if (eng::LookAtNow(now)) { eng::MoveCamera(x - now.x, eng::TerrainHeight(x, z) - now.y, z - now.z); on = true; Log("lookat %.0f %.0f (view was at %.0f %.0f)", x, z, now.x, now.z); }
+                if (eng::LookAtNow(now)) { ViewGoTo(x, z); on = true; Log("lookat %.0f %.0f (view was at %.0f %.0f)", x, z, now.x, now.z); }
             }
         } else on = false;
     }
     if (DeleteFileW((GameDir() + L"DistrictPlanner.camfind").c_str())) eng::DebugCamFind();
+    ViewCheckTick();
+    if (DeleteFileW((GameDir() + L"DistrictPlanner.brushtest").c_str())) {   // debug: paint two 40 m discs at the view centre and close the brush
+        V3 c; if (eng::LookAtNow(c)) {
+            g_brushCells.clear();
+            for (int d = 0; d < 2; ++d) for (int j = -8; j <= 8; ++j) for (int i = -8; i <= 8; ++i)
+                if (i * i + j * j <= 64) { std::pair<int, int> cc{ (int)floorf(c.x / 5) + i + d * 10, (int)floorf(c.z / 5) + j }; if (std::find(g_brushCells.begin(), g_brushCells.end(), cc) == g_brushCells.end()) g_brushCells.push_back(cc); }
+            g_pick = true; FinishBrush();
+            Log("brushtest: area ok %d, %d points, %.1f ha", (int)g_area.ok, (int)g_area.pts.size(), g_area.sqm / 10000.0f);
+        }
+    }
     if (DeleteFileW((GameDir() + L"DistrictPlanner.arccheck").c_str())) {     // debug: how bent are the game's road pieces in the area
         std::vector<std::vector<V3>> L; eng::ListNetLines(0xf7a0, L);
         int n = 0;
