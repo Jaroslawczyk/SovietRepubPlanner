@@ -1659,6 +1659,11 @@ void CheckGaps(const InstantRun& r) {
             V3 m{ p.x + (q.x - p.x) * t / len, 0, p.z + (q.z - p.z) * t / len };
             V2 l = WorldToLocal(g_area, m);
             for (auto& bb : g_plan.buildings) if (fabsf(l.u - bb.u) < bb.w / 2 + 3.0f && fabsf(l.v - bb.v) < bb.d / 2 + 6.0f) return true;   // the zone with its apron: the game cuts a path there
+            if (t < len - 7) for (auto& rd : g_plan.roads) {       // never along / on a street (in-game: 100 m repair pieces on the pavement line, all refused)
+                float du = rd.u2 - rd.u1, dv = rd.v2 - rd.v1, l2 = du * du + dv * dv;
+                float k = l2 > 0 ? std::clamp(((l.u - rd.u1) * du + (l.v - rd.v1) * dv) / l2, 0.0f, 1.0f) : 0;
+                if (hypotf(rd.u1 + du * k - l.u, rd.v1 + dv * k - l.v) < rd.width / 2 + 2.5f) return true;
+            }
         }
         return false;
     };
@@ -1812,7 +1817,7 @@ void InstantTick() {
         }
         else if (j.kind == 3) { if (r.phase == 1) ++r.nAll; if (codes[i] == 1) ++r.nOk; else if (r.phase == 1) failedLines.push_back(j); }
         else if (j.kind == 5) { if (r.phase == 1) { ++r.dAll; if (codes[i] == 1) ++r.dOk; } }
-        else { ++r.pAll; if (codes[i] == 1) { ++r.pOk; r.built.push_back(j); } }
+        else { if (r.phase != 4) ++r.pAll; if (codes[i] == 1) { ++r.pOk; r.built.push_back(j); } }   // repair attempts are not planned pieces: not counted in the total
     }
     if (r.phase == 1 && (!r.retry.empty() || !steepStreets.empty())) {
         r.lineRetry = failedLines;
