@@ -199,13 +199,40 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         const float crossSp = std::clamp(in.streetSpacing > 0 ? in.streetSpacing : 200.0f, 100.0f, 400.0f);
         // optional street round the outline: its axis runs hw + 1 m inside the edge; the lanes stop at it
         std::vector<V2> lanePoly = in.poly;
+        std::vector<RoadSeg> ringLegs;          // the ring road's pieces (for the junction angle check below)
         if (in.ringRoad && roadHalf > 0 && in.poly.size() >= 3) {
             float area2 = 0; size_t n = in.poly.size();
             for (size_t i = 0; i < n; ++i) { const V2& a = in.poly[i]; const V2& b = in.poly[(i + 1) % n]; area2 += a.u * b.v - b.u * a.v; }
             float sgn = area2 > 0 ? 1.0f : -1.0f, inset = hw + 1;
+            // A brush / free outline has dozens of short edges; a ring along them was a chain of 12-50 m pieces joined at
+            // small kinks, and the game refuses a kink between two pieces (only straight runs, arcs and junctions): 15 of
+            // 60 pieces refused in the user's test. The ring follows a simplified outline instead - legs >= 35 m, no
+            // corner flatter than ~6 degrees - and every corner gets an arc.
+            std::vector<V2> sp = in.poly;
+            auto height = [&](size_t i) {
+                size_t m = sp.size(); const V2& p0 = sp[(i + m - 1) % m]; const V2& p1 = sp[i]; const V2& p2 = sp[(i + 1) % m];
+                float L = std::max(0.01f, hypotf(p2.u - p0.u, p2.v - p0.v));
+                return fabsf((p1.u - p0.u) * (p2.v - p0.v) - (p1.v - p0.v) * (p2.u - p0.u)) / L;
+            };
+            while (sp.size() > 3) {
+                size_t m = sp.size(), worst = 0; float wh = 1e9f;
+                for (size_t i = 0; i < m; ++i) {
+                    const V2& p0 = sp[(i + m - 1) % m]; const V2& p1 = sp[i]; const V2& p2 = sp[(i + 1) % m];
+                    float l1 = hypotf(p1.u - p0.u, p1.v - p0.v), l2 = hypotf(p2.u - p1.u, p2.v - p1.v);
+                    float h = height(i);
+                    float t = acosf(std::clamp(((p1.u - p0.u) * (p2.u - p1.u) + (p1.v - p0.v) * (p2.v - p1.v)) / std::max(0.01f, l1 * l2), -1.0f, 1.0f));
+                    // a vertex goes when it hardly bends the outline, or when one of its legs is short
+                    float score = (h < 10 || t < 0.1f) ? h : (std::min(l1, l2) < 35 ? 100 + h : 1e9f);
+                    if (score < wh) { wh = score; worst = i; }
+                }
+                if (wh >= 1e8f) break;
+                sp.erase(sp.begin() + worst);
+            }
+            if (sp.size() != n) Log("ring road: outline %d points -> %d corners", (int)n, (int)sp.size());
+            n = sp.size();
             std::vector<V2> ring(n);
             for (size_t i = 0; i < n; ++i) {
-                const V2& p0 = in.poly[(i + n - 1) % n]; const V2& p1 = in.poly[i]; const V2& p2 = in.poly[(i + 1) % n];
+                const V2& p0 = sp[(i + n - 1) % n]; const V2& p1 = sp[i]; const V2& p2 = sp[(i + 1) % n];
                 float d1u = p1.u - p0.u, d1v = p1.v - p0.v, l1 = std::max(0.01f, hypotf(d1u, d1v));
                 float d2u = p2.u - p1.u, d2v = p2.v - p1.v, l2 = std::max(0.01f, hypotf(d2u, d2v));
                 V2 n1{ -d1v / l1 * sgn, d1u / l1 * sgn }, n2{ -d2v / l2 * sgn, d2u / l2 * sgn };   // inward normals
@@ -222,14 +249,15 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 float l1 = hypotf(p1.u - p0.u, p1.v - p0.v), l2 = hypotf(p2.u - p1.u, p2.v - p1.v);
                 V2 d1{ (p1.u - p0.u) / std::max(0.01f, l1), (p1.v - p0.v) / std::max(0.01f, l1) }, d2{ (p2.u - p1.u) / std::max(0.01f, l2), (p2.v - p1.v) / std::max(0.01f, l2) };
                 float turn = acosf(std::clamp(d1.u * d2.u + d1.v * d2.v, -1.0f, 1.0f));
-                float rr = std::min({ 18.0f, l1 * 0.3f, l2 * 0.3f });
-                round[i] = turn > 0.44f && rr > 8;
+                float rr = std::min({ 18.0f, l1 * 0.4f, l2 * 0.4f });
+                round[i] = turn > 0.05f && rr > 4;      // every real corner is an arc: a kink between two pieces is refused
                 a[i] = round[i] ? V2{ p1.u - d1.u * rr, p1.v - d1.v * rr } : p1;
                 b[i] = round[i] ? V2{ p1.u + d2.u * rr, p1.v + d2.v * rr } : p1;
             }
             for (size_t i = 0; i < n; ++i) {
                 size_t j = (i + 1) % n;
                 r.roads.push_back({ b[i].u, b[i].v, a[j].u, a[j].v, hw * 2 });                  // the straight leg
+                ringLegs.push_back({ ring[i].u, ring[i].v, ring[j].u, ring[j].v, hw * 2 });   // the whole edge: lanes end on the polygon, also inside the arcs
                 if (round[j]) { RoadSeg arc{ a[j].u, a[j].v, b[j].u, b[j].v, hw * 2 }; arc.curve = true; r.roads.push_back(arc); }
             }
             lanePoly = ring;
@@ -281,6 +309,43 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 if (roadHalf > 0) { r.paths.push_back({ u - hw - 2, B, u - hw - 2, T }); r.paths.push_back({ u + hw + 2, B, u + hw + 2, T }); }
             }
         }
+        // A street meeting the ring at a sharp angle (< 45 deg) is refused by the game (in-game selftest 5: a lane ran into
+        // the ring at ~25 deg and was refused together with the rest of its run). Such a street stops 15 m short of the
+        // ring instead; one meeting it near an arc (within 20 m of its ends) stops short too.
+        for (auto& rd : r.roads) {
+            if (rd.curve || ringLegs.empty()) continue;
+            bool isRing = false;     // a ring piece lies on a ring edge with both ends
+            for (auto& lg : ringLegs) {
+                float du = lg.u2 - lg.u1, dv = lg.v2 - lg.v1, l2 = std::max(1e-4f, du * du + dv * dv);
+                auto off = [&](float pu, float pv) { float t = std::clamp(((pu - lg.u1) * du + (pv - lg.v1) * dv) / l2, 0.0f, 1.0f); return hypotf(lg.u1 + du * t - pu, lg.v1 + dv * t - pv); };
+                if (off(rd.u1, rd.v1) < 0.5f && off(rd.u2, rd.v2) < 0.5f) isRing = true;
+            }
+            if (isRing) continue;
+            for (int e = 0; e < 2 && rd.width > 0; ++e) {
+                float pu = e ? rd.u2 : rd.u1, pv = e ? rd.v2 : rd.v1;
+                for (auto& lg : ringLegs) {
+                    float du = lg.u2 - lg.u1, dv = lg.v2 - lg.v1, l2 = du * du + dv * dv;
+                    if (l2 < 1) continue;
+                    float t = std::clamp(((pu - lg.u1) * du + (pv - lg.v1) * dv) / l2, 0.0f, 1.0f);
+                    if (hypotf(lg.u1 + du * t - pu, lg.v1 + dv * t - pv) > 1.5f) continue;
+                    float ru = rd.u2 - rd.u1, rv = rd.v2 - rd.v1, rl = hypotf(ru, rv), ll = sqrtf(l2);
+                    float sn = fabsf(ru * dv - rv * du) / std::max(0.01f, rl * ll);
+                    float fromEnd = std::min(t, 1 - t) * ll;
+                    if (sn >= 0.7f && fromEnd >= 30) break;   // 30 m: the arc takes up to 18 m of the edge
+                    if (sn < 0.5f) {                  // nearly along the ring (< 30 deg): the street duplicates it - dropped
+                        Log("ring road: street u %.0f v %.0f - u %.0f v %.0f runs along the ring (%.0f deg), dropped", rd.u1, rd.v1, rd.u2, rd.v2, asinf(sn) * 57.3f);
+                        rd.width = -1; break;
+                    }
+                    if (rl < 35) break;               // too short to pull back: leave it
+                    float k = 15.0f / rl;
+                    if (e) { rd.u2 -= ru * k; rd.v2 -= rv * k; } else { rd.u1 += ru * k; rd.v1 += rv * k; }
+                    Log("ring road: street end at u %.0f v %.0f meets the ring at %.0f deg%s, stopped 15 m short", pu, pv,
+                        asinf(std::min(1.0f, sn)) * 57.3f, fromEnd < 30 ? " next to an arc" : "");
+                    break;
+                }
+            }
+        }
+        r.roads.erase(std::remove_if(r.roads.begin(), r.roads.end(), [](const RoadSeg& x) { return x.width < 0; }), r.roads.end());
         std::sort(lanes.begin(), lanes.end(), [&](const Lane& a, const Lane& b) { return fabsf(a.v - roadV) < fabsf(b.v - roadV); });
         // Stops spread over the whole area, not in a row on the main street: greedy cover of the area (points every
         // 25 m) within the walking radius; each stop goes on the street and spot that covers most still-uncovered

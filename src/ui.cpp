@@ -2328,6 +2328,13 @@ void SelfTest() {
                 pts = { { x0, 0, z0 }, { x0 + side, 0, z0 }, { x0 + side, 0, z0 + side }, { x0, 0, z0 + side } };
                 for (auto& q : pts) q.y = eng::TerrainHeight(q.x, q.z);
                 Log("selftest: free square at %.0f %.0f (ring %d, height %.0f..%.0f)", x0, z0, ring, lo, hi);
+                if (stMode == 5) {      // 5 = free-form outline like a brush one (40 corners) with a ring road and services
+                    pts.clear();
+                    for (int k = 0; k < 40; ++k) {
+                        float an = k * 6.2832f / 40, rad = 125 + 14 * sinf(3 * an) + 7 * sinf(7 * an + 1);
+                        V3 q{ x0 + side / 2 + cosf(an) * rad, 0, z0 + side / 2 + sinf(an) * rad }; q.y = eng::TerrainHeight(q.x, q.z); pts.push_back(q);
+                    }
+                }
                 found = true;
             }
     }
@@ -2337,7 +2344,7 @@ void SelfTest() {
         const auto& all = catalog::All();
         for (size_t i = 0; i < all.size(); ++i) g_houseSel[i] = stMode == 4 ? (all[i].id == "civ_dedina1a" || all[i].id == "civ_dedina1b") : all[i].id == "residental_brick_2";
         g_layout = stMode == 4 ? 1 : 0;   // 4 = village test
-        g_ringRoad = stMode == 4;
+        g_ringRoad = stMode == 4 || stMode == 5;
         for (auto& sv : g_services) sv.enabled = stMode >= 2 && sv.typeIndex >= 0;
         for (int k = 0; k < 4; ++k) { g_utilBuild[k] = g_utilShow[k] = true; }
     }
