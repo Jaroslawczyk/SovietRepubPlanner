@@ -346,3 +346,11 @@ exe+0x9e6fb8 видны только создание (0x4d5470), загрузк
 - A span from a pole across a whole row of houses is refused (probes from such a pole: back valid, across the row all 0).
 - Two lines given the same transformer port: the second start snaps onto the first line's pole and gets nowhere - the
   planner's start-port re-pick ignored taken ports (removed).
+
+- v0.65.0 wire planner (in game): candidate pole spots = both road sides 9 / 13 m off the axis every 12 m, the planner's
+  route corners, rings round every free port of the transformer and the substation (free = connection kind 8 with
+  +0x28 == 0). A* over spots; at each expansion the best candidate of every 15-degree sector x length band (25/50/80/120 m)
+  is probed (up to 60); cost = length + 25 per pole + 40 x (1 - cos bend), bends > 70 deg not allowed. The whole line is
+  found before anything is built: an unreachable substation leaves no stubs. Selftest 1: 4 spans (was 22).
+  Dense selftest 3: 3 of 6 lines; the other substations stand inside rows of houses where no span reaches their ports
+  (2000+ valid spans found around, none into the port) - placement problem, not search.

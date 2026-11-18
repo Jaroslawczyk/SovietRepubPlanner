@@ -2,6 +2,7 @@
 #include "common.h"
 #include <cmath>
 #include <algorithm>
+#include <queue>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -971,64 +972,113 @@ static void GameThreadTick() {
                 // best-first search over pole spots with probes (nothing is built while searching); then the first span
                 // of the found way is built and the search runs again from that pole (now a real one, so the game also
                 // judges the bend there). Turns at a pole are kept within 75 degrees.
-                V3 inDir{ 0, 0, 0 }; std::vector<V3> built{ a };
-                // (tried: following the planner's route corners as waypoints - 24 poles instead of 9 on a plain district and no
-                // gain in dense rows; dropped)
-                for (int step = 0; step < 60 && !ok; ++step) {
-                    const bool last = true; V3 T = B;
-                    if (last && hypotf(B.x - cur.x, B.z - cur.z) < 40 && P(cur, B)) { ok = Build(cur, B); spans += ok; break; }   // no long slanted span across streets into the port (user: looked bad)
-                    struct N { V3 p; int par; float g; float f; V3 dir; };
-                    std::vector<N> nodes{ { cur, -1, 0, hypotf(T.x - cur.x, T.z - cur.z), inDir } };
-                    std::vector<int> open{ 0 }; int goal = -1; int budget = 600;
-                    while (!open.empty() && goal < 0 && budget > 0) {
-                        size_t bi = 0; for (size_t k = 1; k < open.size(); ++k) if (nodes[open[k]].f < nodes[open[bi]].f) bi = k;
-                        int ni = open[bi]; open.erase(open.begin() + bi);
-                        N n = nodes[ni];
-                        float th = atan2f(T.z - n.p.z, T.x - n.p.x);
-                        float thStraight = hypotf(n.dir.x, n.dir.z) > 0.01f ? atan2f(n.dir.z, n.dir.x) : th;
-                        for (float len : { 35.0f, 25.0f, 15.0f, 10.0f, 7.0f }) {   // spans of a player's line, not 60 m diagonals
-                            if (len < 12 && hypotf(T.x - n.p.x, T.z - n.p.z) > 45) continue;   // short steps only near the target
-                            for (float dg = -180; dg <= 180 && goal < 0; dg += 15) {
-                                float an = dg == -180 ? thStraight : th + dg * 0.017453f;     // -180 slot: straight on from the last span
-                                V3 c{ n.p.x + cosf(an) * len, 0, n.p.z + sinf(an) * len }; c.y = TerrainHeight(c.x, c.z);
-                                float dl = hypotf(n.dir.x, n.dir.z);
-                                if (dl > 0.01f && (cosf(an) * n.dir.x + sinf(an) * n.dir.z) / dl < -0.17f) continue;   // bend > 100 degrees (a right-angle corner at a junction is taken)
-                                if (hypotf(c.x - A0.x, c.z - A0.z) < 15) continue;                                    // never back at the own building
-                                { bool crowd = false; for (auto& op : gx::g_wirePoles) if (hypotf(op.x - c.x, op.z - c.z) < 6) { crowd = true; break; } if (crowd) continue; }   // not next to another line's pole
-                                bool seen = false; for (auto& o : nodes) if (hypotf(o.p.x - c.x, o.p.z - c.z) < 4) { seen = true; break; }
-                                if (seen) continue;
-                                if (--budget < 0) break;
-                                if (!P(n.p, c)) continue;
-                                float rest = hypotf(T.x - c.x, T.z - c.z);
-                                float cb2 = dl > 0.01f ? (cosf(an) * n.dir.x + sinf(an) * n.dir.z) / dl : 1.0f; float bendPen = (1.0f - cb2) * 45.0f;   // every bend costs, the sharper the more (user: no left-right zigzag)   // bends > 20 deg cost: straight runs
-                                nodes.push_back({ c, ni, n.g + len + bendPen, n.g + len + bendPen + rest * 1.3f, { cosf(an), 0, sinf(an) } });
-                                int ci2 = (int)nodes.size() - 1;
-                                if (last ? (rest < 40 && P(c, B)) : rest < 15) { goal = ci2; break; }
-                                open.push_back(ci2);
-                            }
-                            if (goal >= 0 || budget < 0) break;
+                // Planned like a player does it (user, 2026-11-18): any free port of the transformer, any free port of the
+                // substation, poles along the streets, long straight spans, few poles. Candidate pole spots: both road sides
+                // (7 m off the axis, every 12 m) and rings round the ports. Lazy A*: a span is asked of the game (probe)
+                // only when the search takes it up; cost = length + 25 per pole + bend. Then the found line is built; if
+                // a span is refused after all (bend at a real pole), the search runs again from the last standing pole.
+                auto freePorts = [&](V3 p, std::vector<V3>& out) {
+                    int n = gx::NearBuildings(p, 60.0f); BYTE* owner = nullptr;
+                    for (int q = 0; q < n && !owner; ++q) {
+                        BYTE* bl = gx::g_near[q]; BYTE* c0 = *(BYTE**)(bl + 0xa10); BYTE* c1 = *(BYTE**)(bl + 0xa18);
+                        for (BYTE* c = c0; c && c < c1; c += 0x30) { V3 cp = *(V3*)(c + 8); if (*(int*)c == 8 && hypotf(cp.x - p.x, cp.z - p.z) < 4) { owner = bl; break; } }
+                    }
+                    if (!owner) { out.push_back(p); return; }
+                    BYTE* c0 = *(BYTE**)(owner + 0xa10); BYTE* c1 = *(BYTE**)(owner + 0xa18);
+                    for (BYTE* c = c0; c && c < c1; c += 0x30) if (*(int*)c == 8 && !*(void**)(c + 0x28)) { V3 cp = *(V3*)(c + 8); out.push_back(cp); }
+                    if (out.empty()) out.push_back(p);
+                };
+                std::vector<V3> SA, SB; freePorts(a, SA); freePorts(B, SB);
+                struct Nd { V3 p; int kind; };            // kind 0 start port, 1 goal port, 2 pole spot
+                std::vector<Nd> nd;
+                for (auto& q : SA) nd.push_back({ q, 0 });
+                for (auto& q : SB) nd.push_back({ q, 1 });
+                float x0 = std::min(a.x, B.x) - 150, x1 = std::max(a.x, B.x) + 150, z0 = std::min(a.z, B.z) - 150, z1 = std::max(a.z, B.z) + 150;
+                {   std::vector<std::vector<V3>> roads; eng::ListNetLines(0xf7a0, roads);
+                    for (auto& L : roads) for (size_t k = 0; k + 1 < L.size(); ++k) {
+                        float dx = L[k + 1].x - L[k].x, dz = L[k + 1].z - L[k].z, len = hypotf(dx, dz); if (len < 1) continue;
+                        float nx = -dz / len, nz = dx / len;
+                        for (float t = 0; t <= len; t += 12) for (float off : { -13.0f, -9.0f, 9.0f, 13.0f }) {   // beyond the pavement, as the player stood them
+                            V3 q{ L[k].x + dx * t / len + nx * off, 0, L[k].z + dz * t / len + nz * off };
+                            if (q.x < x0 || q.x > x1 || q.z < z0 || q.z > z1) continue;
+                            q.y = TerrainHeight(q.x, q.z); nd.push_back({ q, 2 });
                         }
                     }
-                    if (goal < 0) {      // not reached within the budget: head for the best spot found (the search runs again from there)
-                        float dNow = hypotf(T.x - cur.x, T.z - cur.z), bestF = 1e9f;
-                        for (size_t q = 1; q < nodes.size(); ++q) {
-                            float rest = hypotf(T.x - nodes[q].p.x, T.z - nodes[q].p.z);
-                            bool back = false; for (auto& bp : built) if (hypotf(bp.x - nodes[q].p.x, bp.z - nodes[q].p.z) < 12) back = true;
-                            if (!back && rest < dNow + 60 && nodes[q].f < bestF) { bestF = nodes[q].f; goal = (int)q; }
-                        }
+                    {   std::lock_guard<std::mutex> l(g_instMx);           // the planner's route corners too
+                        for (size_t q = at; q < e; ++q) { V3 w = g_inst[q].b; w.y = TerrainHeight(w.x, w.z); nd.push_back({ w, 2 }); } }
+                    for (auto* S : { &SA, &SB }) for (auto& pp : *S) for (float rad : { 8.0f, 14.0f, 22.0f }) for (int k = 0; k < 12; ++k) {
+                        float an = k * 0.5236f; V3 q{ pp.x + cosf(an) * rad, 0, pp.z + sinf(an) * rad }; q.y = TerrainHeight(q.x, q.z); nd.push_back({ q, 2 });
                     }
-                    if (goal < 0) {
-                        Log("wire: no way found from %.0f %.0f (%d probes)", cur.x, cur.z, probes);
-                        gx::g_probeLog = 8;          // what the probes from this pole attach to
-                        for (int k = 0; k < 8; ++k) { float an = k * 0.785f; V3 c{ cur.x + cosf(an) * 20, 0, cur.z + sinf(an) * 20 }; c.y = TerrainHeight(c.x, c.z); P(cur, c); }
-                        gx::g_probeLog = 0;
-                        break;
-                    }
-                    int first = goal; while (nodes[first].par != 0) first = nodes[first].par;
-                    V3 nxt = nodes[first].p;
-                    if (!Build(cur, nxt)) { Log("wire: span to %.0f %.0f passed the probe but was refused", nxt.x, nxt.z); break; }
-                    ++spans; inDir = { nxt.x - cur.x, 0, nxt.z - cur.z }; cur = nxt; built.push_back(nxt); gx::g_wirePoles.push_back(nxt);
                 }
+                int validSpans = 0;
+                auto search = [&](const std::vector<int>& starts, V3 startDir, std::vector<int>& path) {
+                    // node state: best cost, parent, verified; open list (f, node, parent, cost, dir)
+                    struct Op { float f; int n, par; float g; V3 dir; };
+                    auto cmp = [](const Op& x, const Op& y) { return x.f > y.f; };
+                    std::priority_queue<Op, std::vector<Op>, decltype(cmp)> open(cmp);
+                    std::vector<int> par(nd.size(), -2); std::vector<char> closed(nd.size(), 0);
+                    auto hB = [&](const V3& p) { float d = 1e9f; for (auto& q : SB) d = std::min(d, hypotf(q.x - p.x, q.z - p.z)); return d * 1.15f; };
+                    for (int st : starts) open.push({ hB(nd[st].p), st, -1, 0, startDir });
+                    int pops = 0; validSpans = 0;
+                    std::vector<float> best(nd.size(), 1e9f);
+                    while (!open.empty() && probes < 15000) {
+                        Op o = open.top(); open.pop();
+                        if (closed[o.n]) continue;
+                        closed[o.n] = 1; par[o.n] = o.par; ++pops;
+                        if (nd[o.n].kind == 1) { path.clear(); for (int x = o.n; x >= 0; x = par[x]) path.push_back(x); std::reverse(path.begin(), path.end()); return true; }
+                        float dl = hypotf(o.dir.x, o.dir.z);
+                        struct C { float f, g; int m; V3 dir; };
+                        std::vector<C> cs;
+                        for (size_t m = 0; m < nd.size(); ++m) {
+                            if (closed[m] || nd[m].kind == 0 || nd[m].kind == 3 || (int)m == o.n) continue;
+                            float dx = nd[m].p.x - nd[o.n].p.x, dz = nd[m].p.z - nd[o.n].p.z, L = hypotf(dx, dz);
+                            if (L < 6 || L > 120) continue;
+                            float cb = dl > 0.01f ? (dx * o.dir.x + dz * o.dir.z) / (L * dl) : 1.0f;
+                            if (cb < 0.34f) continue;                                    // bend over 70 degrees
+                            if (nd[m].kind == 2) { bool crowd = false; for (auto& op : gx::g_wirePoles) if (hypotf(op.x - nd[m].p.x, op.z - nd[m].p.z) < 6) { crowd = true; break; } if (crowd) continue; }
+                            float g = o.g + L + (nd[m].kind == 2 ? 25.0f : 0.0f) + (1.0f - cb) * 40.0f;
+                            if (g >= best[m]) continue;
+                            cs.push_back({ g + hB(nd[m].p), g, (int)m, { dx, 0, dz } });
+                        }
+                        // diversity: the best candidate of every 15-degree sector and length band (<=25, 50, 80, 120 m)
+                        {   std::map<int, C> bucket;
+                            for (auto& c : cs) {
+                                float L = hypotf(c.dir.x, c.dir.z);
+                                int sec = (int)floorf((atan2f(c.dir.z, c.dir.x) + 3.1416f) / 0.2618f), band = L <= 25 ? 0 : L <= 50 ? 1 : L <= 80 ? 2 : 3;
+                                int key = sec * 4 + band;
+                                auto it = bucket.find(key);
+                                if (it == bucket.end() || c.f < it->second.f) bucket[key] = c;
+                            }
+                            cs.clear(); for (auto& kv : bucket) cs.push_back(kv.second);
+                        }
+                        std::sort(cs.begin(), cs.end(), [](const C& x, const C& y) { return x.f < y.f; });
+                        int tried = 0;
+                        for (auto& c : cs) {
+                            if (tried >= 60) break;
+                            ++tried;
+                            if (!P(nd[o.n].p, nd[c.m].p)) continue;                     // the game judges the span
+                            ++validSpans; best[c.m] = c.g;
+                            open.push({ c.f, c.m, o.n, c.g, c.dir });
+                        }
+                    }
+                    return false;
+                };
+                std::vector<int> starts; for (size_t q = 0; q < nd.size(); ++q) if (nd[q].kind == 0) starts.push_back((int)q);
+                V3 startDir{ 0, 0, 0 };
+                for (int round = 0; round < 4 && !ok; ++round) {
+                    std::vector<int> path;
+                    if (!search(starts, startDir, path)) { Log("wire: no way found (%zu spots, %d probes, %d spans valid, start ports %zu, goal ports %zu)", nd.size(), probes, validSpans, SA.size(), SB.size()); break; }
+                    bool broke = false;
+                    for (size_t k = 0; k + 1 < path.size(); ++k) {
+                        V3 p = nd[path[k]].p, q = nd[path[k + 1]].p;
+                        if (!Build(p, q)) { Log("wire: span %.0f %.0f -> %.0f %.0f refused when built, searching again", p.x, p.z, q.x, q.z); broke = true;
+                            starts = { path[k] }; nd[path[k]].kind = 0; startDir = k > 0 ? V3{ p.x - nd[path[k - 1]].p.x, 0, p.z - nd[path[k - 1]].p.z } : V3{ 0, 0, 0 };
+                            nd[path[k + 1]].kind = 3; break; }   // that spot is dropped from the next round
+                        ++spans; if (nd[path[k + 1]].kind == 2) gx::g_wirePoles.push_back(q);
+                    }
+                    if (!broke) ok = true;
+                }
+                (void)A0; (void)cur;
                 Log("wire %s: %.0f %.0f -> %.0f %.0f, %d spans, %d probes", ok ? "built" : "NOT finished", A0.x, A0.z, B.x, B.z, spans, probes);
                 code = ok ? 1 : 0;
                 {   std::lock_guard<std::mutex> l(g_instMx);
