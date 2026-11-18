@@ -1310,7 +1310,7 @@ struct InstantRun {
     std::vector<int> retry;             // plan buildings waiting for levelling
     std::vector<eng::InstantJob> lineRetry;     // utility lines that failed while some buildings were still missing
     std::vector<eng::InstantJob> built;         // road / footpath pieces the game accepted (checked in its network)
-    int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0, nOk = 0, nAll = 0;
+    int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0, nOk = 0, nAll = 0, dOk = 0, dAll = 0;
     std::string note;
 } g_inst;
 bool g_sameChain = false;   // the next InstantLine continues the previous wire / pipe (a corner of one route)
@@ -1541,8 +1541,18 @@ void InstantStart() {
                 InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
             }
     }
+    // every building that needs a road: check its road exit in the game and find a driveway the game accepts if the
+    // planned one did not join (after streets, driveways and footpaths, before the power lines and their poles)
+    {   const auto& all = catalog::All();
+        for (auto& b : g_plan.buildings) {
+            if (b.stop || b.type < 0 || !all[b.type].needsRoad) continue;
+            eng::InstantJob j; j.kind = 5; j.a = LocalToWorld(g_area, b.ou, b.ov, 0); j.lineType = g_roadKind;
+            g_inst.jobs.push_back(j); g_inst.plan.push_back(-1);
+        }
+    }
     const UtilSeg* prevSeg = nullptr;
     for (auto& s : g_plan.utilLines) {      // after the buildings, so the ends snap to their connections
+        if (s.net < 3) continue;            // water, sewage and heating lines are the player's (user, 2026-11-18): power only
         // manager offset, type, sub-type, start argument - as logged from the game's own tools
         const int pw = g_powerUnder ? 20 : 10;
         // net 4: high voltage (feed of the district's own transformer)
@@ -1797,6 +1807,7 @@ void InstantTick() {
             }
         }
         else if (j.kind == 3) { if (r.phase == 1) ++r.nAll; if (codes[i] == 1) ++r.nOk; else if (r.phase == 1) failedLines.push_back(j); }
+        else if (j.kind == 5) { if (r.phase == 1) { ++r.dAll; if (codes[i] == 1) ++r.dOk; } }
         else { ++r.pAll; if (codes[i] == 1) { ++r.pOk; r.built.push_back(j); } }
     }
     if (r.phase == 1 && (!r.retry.empty() || !steepStreets.empty())) {
@@ -1850,7 +1861,7 @@ void InstantTick() {
     r.note = t;
     if (!g_gapPts.empty()) { char g[160]; snprintf(g, sizeof(g), T(" Разрывы: %d вход(ов) не связаны с улицей — отмечены красным."), (int)g_gapPts.size()); r.note += g; }
     r.phase = 0;
-    Log("instant build summary: buildings %d/%d, roads %d/%d, footpaths %d/%d, utility lines %d/%d", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll);
+    Log("instant build summary: buildings %d/%d, roads %d/%d, footpaths %d/%d, utility lines %d/%d, buildings joined to a road %d/%d", r.bOk, r.bAll, r.rOk, r.rAll, r.pOk, r.pAll, r.nOk, r.nAll, r.dOk, r.dAll);
 }
 void InstantUi() {
     InstantTick();

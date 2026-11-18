@@ -884,6 +884,7 @@ void QueueInstant(const std::vector<InstantJob>& jobs) {
 bool InstantBusy() { return g_instBusy; }
 void InstantResults(std::vector<int>& codes) { std::lock_guard<std::mutex> l(g_instMx); codes = g_instRes; }
 // Runs on the game's own update thread (from one of its per-frame input polls).
+static bool RoadRepair(V3 at, int roadType);
 static void GameThreadTick() {
     if (!gx::Supported()) return;
     if (g_dumpTools.exchange(false)) gx::DumpTools();
@@ -910,6 +911,11 @@ static void GameThreadTick() {
             }
             if (g_instAt >= g_inst.size()) { g_instBusy = false; Log("instant build: done"); return; } at = g_instAt++; j = g_inst[at]; }
         int code;
+        if (j.kind == 5) {      // driveway check / repair for the building standing at j.a
+            code = RoadRepair(j.a, j.lineType) ? 1 : 0;
+            { std::lock_guard<std::mutex> l(g_instMx); if (at < g_instN) g_instRes[at] = code; }
+            continue;
+        }
         static int deadChain = -1;
         if (j.chain >= 0 && j.chain == deadChain) {
             // an earlier piece of this wire / pipe was refused: building the rest gave wires from nowhere to nowhere
@@ -1014,6 +1020,16 @@ static void GameThreadTick() {
                 // a pole within ~16 m of a port of the line's own start building is useless: anything started at it snaps
                 // onto that port instead (in-game probe log v0.65) - such spots are dropped
                 for (auto& n2 : nd) if (n2.kind == 2) for (auto& q : SA) if (hypotf(n2.p.x - q.x, n2.p.z - q.z) < 17) { n2.kind = 3; break; }
+                {   // no pole in front of a building's road exit: it blocked the driveway (user screenshot v0.66)
+                    V3 mid{ (a.x + B.x) / 2, 0, (a.z + B.z) / 2 };
+                    int nb = gx::NearBuildings(mid, std::max(fabsf(a.x - B.x), fabsf(a.z - B.z)) / 2 + 160);
+                    std::vector<V3> exits;
+                    for (int q = 0; q < nb; ++q) { BYTE* bl = gx::g_near[q]; BYTE* c0 = *(BYTE**)(bl + 0xa10); BYTE* c1 = *(BYTE**)(bl + 0xa18);
+                        for (BYTE* c = c0; c && c < c1; c += 0x30) if (*(int*)c == 0) exits.push_back(*(V3*)(c + 8)); }
+                    int dropped = 0;
+                    for (auto& n2 : nd) if (n2.kind == 2) for (auto& x : exits) if (hypotf(n2.p.x - x.x, n2.p.z - x.z) < 14) { n2.kind = 3; ++dropped; break; }
+                    Log("wire: %zu road exits nearby, %d pole spots in front of them dropped", exits.size(), dropped);
+                }
                 auto search = [&](const std::vector<int>& starts, V3 startDir, std::vector<int>& path) {
                     // node state: best cost, parent, verified; open list (f, node, parent, cost, dir)
                     struct Op { float f; int n, par; float g; V3 dir; };
@@ -1089,6 +1105,29 @@ static void GameThreadTick() {
                         ++spans; if (nd[path[k + 1]].kind == 2) gx::g_wirePoles.push_back(q);
                     }
                     if (!broke) ok = true;
+                }
+                if (!ok && spans == 0 && j.lineType == 10) {
+                    // the overhead line found no way: an underground cable of the same network (no poles, user: every booth
+                    // must get its line) - straight port to port first, then the same search
+                    int cs = 0; float bestCap = 1e9f, maxC = -1; int maxS = 0;
+                    for (int v = 0; v < 4; ++v) { float cap = gx::LineCapacity(20, v); if (cap >= 2.0f && cap < bestCap) { bestCap = cap; cs = v; } if (cap > maxC) { maxC = cap; maxS = v; } }
+                    if (bestCap > 1e8f) cs = maxS;
+                    static char cname[32]; snprintf(cname, sizeof(cname), "eletric_ulow%d", cs);
+                    j.lineType = 20; j.arg = 20; j.sub = cs; tn = cname;
+                    Log("wire: trying underground cable %s (%.2f MW)", cname, gx::LineCapacity(20, cs));
+                    for (auto& p0 : SA) { for (auto& q0 : SB) if (P(p0, q0) && Build(p0, q0)) { ok = true; ++spans; break; } if (ok) break; }
+                    for (auto& n2 : nd) if (n2.kind == 3) n2.kind = 2;
+                    for (int round = 0; round < 3 && !ok; ++round) {
+                        std::vector<int> path;
+                        if (!search(starts, V3{ 0, 0, 0 }, path)) break;
+                        bool broke = false;
+                        for (size_t k = 0; k + 1 < path.size(); ++k) {
+                            V3 p = nd[path[k]].p, q = nd[path[k + 1]].p;
+                            if (!Build(p, q)) { broke = true; starts = { path[k] }; nd[path[k]].kind = 0; nd[path[k + 1]].kind = 3; break; }
+                            ++spans;
+                        }
+                        if (!broke) ok = true;
+                    }
                 }
                 (void)A0; (void)cur;
                 Log("wire %s: %.0f %.0f -> %.0f %.0f, %d spans, %d probes", ok ? "built" : "NOT finished", A0.x, A0.z, B.x, B.z, spans, probes);
@@ -1211,6 +1250,52 @@ void ListNetLines(int mgrOffset, std::vector<std::vector<V3>>& out) {
         std::vector<V3> pts;
         if (ReadPiece(e, pts)) out.push_back(pts);
     }
+}
+
+// A building's road exit not joined to a road (connection kind 0, +0x28 null): the game itself is asked (probe) for a
+// driveway - one straight piece to any point of a road within 70 m, else two pieces through a spot round the exit
+// (bend <= 60 deg). Only what the game accepts is built.
+static bool RoadRepair(V3 at, int roadType) {
+    int n = gx::NearBuildings(at, 4.0f);
+    BYTE* bl = nullptr;
+    for (int q = 0; q < n; ++q) { V3 p{}; static NodeVec_t gp = (NodeVec_t)GetProcAddress(GetModuleHandleW(L"C3DDLL64.dll"), "?GetPosition@C3D_NODE@@QEAA?AVC3DVECTOR3@@XZ"); gp(gx::g_near[q] + 0x320, &p); if (hypotf(p.x - at.x, p.z - at.z) < 2.5f) { bl = gx::g_near[q]; break; } }
+    if (!bl) { Log("road repair: no building at %.0f %.0f", at.x, at.z); return false; }
+    const char* nm = *(const char**)(bl + 0x318);
+    std::vector<V3> exits; bool joined = false;
+    {   BYTE* c0 = *(BYTE**)(bl + 0xa10); BYTE* c1 = *(BYTE**)(bl + 0xa18);
+        for (BYTE* c = c0; c && c < c1; c += 0x30) if (*(int*)c == 0) { if (*(void**)(c + 0x28)) joined = true; else exits.push_back(*(V3*)(c + 8)); } }
+    if (joined || exits.empty()) return true;
+    const char* tn = roadType < 0 ? "road_mud" : roadType == 0 ? "road_gravel" : roadType == 2 ? "road_asphaltside" : "road_asphalt";
+    std::vector<std::vector<V3>> L; ListNetLines(0xf7a0, L);
+    int probes = 0;
+    auto P = [&](V3 p, V3 q) { ++probes; return gx::LineProbe(0xf7a0, roadType, 0, -20, tn, p, q); };
+    auto Bd = [&](V3 p, V3 q) { return gx::LineRaw(0xf7a0, roadType, 0, -20, tn, p, q) == 1; };
+    for (auto& ex : exits) {
+        std::vector<V3> T;
+        for (auto& l : L) for (size_t k = 0; k + 1 < l.size(); ++k) {
+            float dx = l[k + 1].x - l[k].x, dz = l[k + 1].z - l[k].z, len = hypotf(dx, dz);
+            for (float t = 0; t <= len; t += 4) { V3 p{ l[k].x + dx * t / std::max(len, 0.01f), 0, l[k].z + dz * t / std::max(len, 0.01f) }; float d = hypotf(p.x - ex.x, p.z - ex.z); if (d >= 9 && d <= 70) { p.y = TerrainHeight(p.x, p.z); T.push_back(p); } }
+        }
+        std::sort(T.begin(), T.end(), [&](const V3& p, const V3& q) { return hypotf(p.x - ex.x, p.z - ex.z) < hypotf(q.x - ex.x, q.z - ex.z); });
+        for (size_t k = 0; k < T.size() && k < 80; ++k) if (P(ex, T[k]) && Bd(ex, T[k])) { Log("road repair: '%s' joined straight, %.0f m (%d probes)", nm, hypotf(T[k].x - ex.x, T[k].z - ex.z), probes); return true; }
+        for (float rad : { 12.0f, 18.0f, 25.0f }) for (int a2 = 0; a2 < 24; ++a2) {
+            float an = a2 * 0.2618f; V3 m{ ex.x + cosf(an) * rad, 0, ex.z + sinf(an) * rad }; m.y = TerrainHeight(m.x, m.z);
+            if (!P(ex, m)) continue;
+            int tried = 0;
+            for (auto& t : T) {
+                float d1x = m.x - ex.x, d1z = m.z - ex.z, d2x = t.x - m.x, d2z = t.z - m.z, l2 = hypotf(d2x, d2z);
+                if (l2 < 9 || (d1x * d2x + d1z * d2z) / (rad * l2) < 0.5f) continue;
+                if (++tried > 20) break;
+                if (!P(m, t)) continue;
+                if (!Bd(ex, m)) break;
+                bool ok2 = Bd(m, t);
+                Log("road repair: '%s' joined through a bend, %.0f + %.0f m: %s (%d probes)", nm, rad, l2, ok2 ? "built" : "second piece REFUSED", probes);
+                return ok2;
+            }
+        }
+    }
+    Log("road repair: '%s' at %.0f %.0f - no driveway the game accepts (%d probes)", nm, at.x, at.z, probes);
+    return false;
 }
 void ListBuildings(std::vector<WorldBld>& out) {
     out.clear();
