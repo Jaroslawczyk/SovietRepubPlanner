@@ -1430,6 +1430,93 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             }
         }
     }
+    // Footpath / street / building conflicts (user report v0.49: paths cut diagonally over streets near junctions,
+    // ran under buildings and along the carriageway, short stubs hung in the air; the game then refused those pieces
+    // and also neighbouring roads and lines). A built footpath is dropped when it
+    //  - runs along a street inside its carriageway,
+    //  - crosses a street at a slant (> ~10 degrees off square) or within 8 m of a street junction / corner,
+    //  - passes through a building (footprint shrunk 1.5 m: entrance links end on the wall),
+    //  - is a short (< 20 m) stub whose end touches nothing (no footpath, street or building).
+    {
+        auto segDist = [](float pu, float pv, float au, float av, float bu, float bv) {
+            float du = bu - au, dv = bv - av, l2 = du * du + dv * dv;
+            float t = l2 > 0 ? std::clamp(((pu - au) * du + (pv - av) * dv) / l2, 0.0f, 1.0f) : 0.0f;
+            return hypotf(au + du * t - pu, av + dv * t - pv);
+        };
+        auto cross = [](float au, float av, float bu, float bv, float cu, float cv, float du, float dv, float& t) {
+            float ru = bu - au, rv = bv - av, su = du - cu, sv = dv - cv, den = ru * sv - rv * su;
+            if (fabsf(den) < 1e-6f) return false;
+            t = ((cu - au) * sv - (cv - av) * su) / den; float w = ((cu - au) * rv - (cv - av) * ru) / den;
+            return t > 0.02f && t < 0.98f && w > -0.02f && w < 1.02f;
+        };
+        // street junctions and corners: piece ends shared by 3+ ends, or by 2 that turn
+        std::vector<V2> junc;
+        for (size_t i = 0; i < r.roads.size(); ++i) for (int e = 0; e < 2; ++e) {
+            const RoadSeg& a = r.roads[i]; float pu = e ? a.u2 : a.u1, pv = e ? a.v2 : a.v1;
+            int n = 0; bool turn = false; float adu = a.u2 - a.u1, adv = a.v2 - a.v1, al = std::max(0.01f, hypotf(adu, adv));
+            for (auto& b : r.roads) for (int f = 0; f < 2; ++f) {
+                float qu = f ? b.u2 : b.u1, qv = f ? b.v2 : b.v1;
+                if (hypotf(qu - pu, qv - pv) > 1.0f) continue;
+                ++n; float bl = std::max(0.01f, hypotf(b.u2 - b.u1, b.v2 - b.v1));
+                if (fabsf((adu * (b.u2 - b.u1) + adv * (b.v2 - b.v1)) / (al * bl)) < 0.95f) turn = true;
+            }
+            if (n >= 3 || (n == 2 && turn)) junc.push_back({ pu, pv });
+        }
+        int onRoad = 0, slant = 0, nearJ = 0, inBld = 0, stub = 0;
+        for (size_t k = 0; k < r.paths.size(); ++k) {
+            if (!r.pathBuild[k]) continue;
+            const PathSeg& p = r.paths[k];
+            float pdu = p.u2 - p.u1, pdv = p.v2 - p.v1, pl = hypotf(pdu, pdv);
+            if (pl < 0.5f) { r.pathBuild[k] = 0; continue; }
+            bool drop = false;
+            for (auto& rd : r.roads) {
+                if (rd.curve) continue;
+                float rdu = rd.u2 - rd.u1, rdv = rd.v2 - rd.v1, rl = std::max(0.01f, hypotf(rdu, rdv));
+                float c = fabsf((pdu * rdu + pdv * rdv) / (pl * rl));
+                if (c > 0.98f && segDist(p.u1, p.v1, rd.u1, rd.v1, rd.u2, rd.v2) < rd.width / 2 + 0.3f
+                              && segDist(p.u2, p.v2, rd.u1, rd.v1, rd.u2, rd.v2) < rd.width / 2 + 0.3f) { drop = true; ++onRoad; break; }
+                float t;
+                if (cross(p.u1, p.v1, p.u2, p.v2, rd.u1, rd.v1, rd.u2, rd.v2, t)) {
+                    if (c > 0.17f) { drop = true; ++slant; break; }
+                    float xu = p.u1 + pdu * t, xv = p.v1 + pdv * t;
+                    for (auto& j : junc) if (hypotf(j.u - xu, j.v - xv) < 8.0f) { drop = true; break; }
+                    if (drop) { ++nearJ; break; }
+                }
+            }
+            for (size_t b = 0; b < r.buildings.size() && !drop; ++b) {
+                const Placed& B = r.buildings[b];
+                float hu = B.w / 2 - 1.5f, hv = B.d / 2 - 1.5f;
+                if (hu <= 0 || hv <= 0) continue;
+                for (int s2 = 0; s2 <= 20; ++s2) {
+                    float u = p.u1 + pdu * s2 / 20, v = p.v1 + pdv * s2 / 20;
+                    if (fabsf(u - B.u) < hu && fabsf(v - B.v) < hv) { drop = true; ++inBld; break; }
+                }
+            }
+            if (drop) r.pathBuild[k] = 0;
+        }
+        for (int pass = 0; pass < 5; ++pass) {
+            bool changed = false;
+            for (size_t k = 0; k < r.paths.size(); ++k) {
+                if (!r.pathBuild[k]) continue;
+                const PathSeg& p = r.paths[k];
+                if (hypotf(p.u2 - p.u1, p.v2 - p.v1) >= 20) continue;
+                for (int e = 0; e < 2; ++e) {
+                    float eu = e ? p.u2 : p.u1, ev = e ? p.v2 : p.v1;
+                    bool touch = false;
+                    for (size_t j = 0; j < r.paths.size() && !touch; ++j)
+                        if (j != k && r.pathBuild[j] && segDist(eu, ev, r.paths[j].u1, r.paths[j].v1, r.paths[j].u2, r.paths[j].v2) < 1.0f) touch = true;
+                    for (size_t j = 0; j < r.paths.size() && !touch; ++j)       // a walking line along a street counts as the street
+                        if (j != k && !r.pathBuild[j] && segDist(eu, ev, r.paths[j].u1, r.paths[j].v1, r.paths[j].u2, r.paths[j].v2) < 1.0f) touch = true;
+                    for (auto& rd : r.roads) if (!touch && segDist(eu, ev, rd.u1, rd.v1, rd.u2, rd.v2) < rd.width / 2 + 4.0f) touch = true;
+                    for (auto& B : r.buildings) if (!touch && fabsf(eu - B.u) < B.w / 2 + 2.5f && fabsf(ev - B.v) < B.d / 2 + 2.5f) touch = true;
+                    if (!touch) { Log("plan: loose footpath stub %.1f %.1f - %.1f %.1f dropped", p.u1, p.v1, p.u2, p.v2); r.pathBuild[k] = 0; ++stub; changed = true; break; }
+                }
+            }
+            if (!changed) break;
+        }
+        Log("plan: footpath conflicts dropped: on street %d, slant crossing %d, near junction %d, through building %d, loose stub %d",
+            onRoad, slant, nearJ, inBld, stub);
+    }
     for (size_t k = 0; k < r.paths.size(); ++k) if (r.pathBuild[k]) r.pathLength += fabsf(r.paths[k].u2 - r.paths[k].u1) + fabsf(r.paths[k].v2 - r.paths[k].v1);
     // streets go round steep ground: a street stops where the slope along it exceeds 15 % over 10 m (the game refuses
     // roads there, levelling helps only part of the way, see docs/internals.md)
