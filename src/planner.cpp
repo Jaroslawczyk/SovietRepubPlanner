@@ -175,6 +175,10 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                                                { "heating_endstation_small", "heating_pumpingstation_small" }, { "eletric_substation", "eletric_transformator" } };
         for (size_t t = 0; t < all.size(); ++t) for (int k = 0; k < 4; ++k) for (int j = 0; j < 2; ++j) if (all[t].id == ids[k][j]) utilType[k][j] = (int)t;
     }
+    // a transformer feeds as many substations as it has outputs (4 on eletric_transformator); one per 6 left the 5th and
+    // 6th without a wire (user, 2026-11-18)
+    int trafoOuts = 4;
+    if (utilType[3][1] >= 0) { int c = 0; for (auto& cn : all[utilType[3][1]].conns) if (cn.kind == 9) ++c; if (c > 0) trafoOuts = c; }
     struct Pend { Item it; signed char net, role; short grp; };
     std::deque<Pend> pending, queued;   // utility buildings waiting for the next free spot in a row / for the building that asked for them
     std::vector<char> siteDone[4];
@@ -466,7 +470,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 V2 st = sites[k][s]; short g = (short)utilGrp[k]++;
                 auto nearSite = [&](float u, float v) { return -hypotf(u - st.u, v - st.v); };
                 if (!placeBest(MakeItem(utilType[k][0]), nearSite, k, 0, g)) { ++r.unplaced; continue; }
-                if (k == 3 && in.powerTrafo && utilType[3][1] >= 0 && g % 6 == 0) {
+                if (k == 3 && in.powerTrafo && utilType[3][1] >= 0 && g % trafoOuts == 0) {
                     // the transformer goes to the outskirts (user: the centre is for shops and services; the feed comes
                     // from outside anyway): the free lot farthest from the outline's middle
                     float mu = 0, mv = 0; for (auto& q : in.poly) { mu += q.u / in.poly.size(); mv += q.v / in.poly.size(); }
@@ -539,7 +543,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         siteDone[k][s] = 1;
                         short g = (short)utilGrp[k]++;
                         queued.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
-                        if (utilType[k][1] >= 0 && (k < 3 ? in.utilChain : (in.powerTrafo && g % 6 == 0))) helpers.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
+                        if (utilType[k][1] >= 0 && (k < 3 ? in.utilChain : (in.powerTrafo && g % trafoOuts == 0))) helpers.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
                     }
                 }
                 for (auto& hp : helpers) queued.push_back(hp);
@@ -864,7 +868,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     siteDone[k][s] = 1;
                     short g = (short)utilGrp[k]++;
                     nodeQ.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
-                    if (utilType[k][1] >= 0 && (k < 3 ? in.utilChain : (in.powerTrafo && g % 6 == 0))) nodeQ.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
+                    if (utilType[k][1] >= 0 && (k < 3 ? in.utilChain : (in.powerTrafo && g % trafoOuts == 0))) nodeQ.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
                 }
             }
         };
@@ -1993,7 +1997,7 @@ PlanResult MakePlan(const PlanInput& inRaw) {
             if (in.utilNodeCap[k] > 0 && !sites[k].empty()) {
                 float dem = 0;
                 for (size_t b = 0; b < n; ++b) dem += Demand(all[bs[b]->type], in.utilPerPerson[k], k);
-                size_t need = (size_t)ceilf(dem / (0.6f * in.utilNodeCap[k])) + extra[k];   // 60 %: one node read 109 % in the game at 85 % planning
+                size_t need = (size_t)ceilf(dem / (0.8f * in.utilNodeCap[k])) + extra[k];   // 80 % (user: too many nodes at 60 %; an overloaded plan still adds one via extra[]) - was 60 %: one node read 109 % in the game at 85 % planning
                 while (sites[k].size() < need && sites[k].size() < 60) {
                     int farIdx = -1; float farD = -1;
                     for (size_t b = 0; b < n; ++b) {
