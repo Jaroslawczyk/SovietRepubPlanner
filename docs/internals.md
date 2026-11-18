@@ -318,3 +318,11 @@ exe+0x9e6fb8 видны только создание (0x4d5470), загрузк
   с домов и улиц; короткие пролёты и опоры у концов убираются; порт выбирается по направлению последнего пролёта.
 - Кандидатов мод подставлял не больше 256 — в плотной застройке подстанция не попадала в список. Теперь до 2048.
 - Итог селфтеста 1: провода 1/15 → 4/5.
+
+- v0.61.0 (in-game, 2026-11-18): the rules "span >= 20 m" and "no span over a house" were WRONG - the user built a 19 m
+  span over a house by hand. What the game does enforce (seen in search logs): a span out of a port is accepted only
+  towards the side the port faces; a line cannot turn back sharply at a pole (a span into a pole that came out of a
+  port from behind it was refused every time). The mod now, after a refused wire piece: moves a middle pole along /
+  across the line (12 spots), and for the last piece to a building searches up to 120 spots round the port (the game
+  judges each), then joins the line's end to that pole directly or through one more pole. Open: a substation boxed in
+  by other buildings (no free 20 m in front of its ports) still is not reached - the planner should keep that space.

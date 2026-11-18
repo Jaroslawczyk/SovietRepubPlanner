@@ -1,6 +1,7 @@
 // Access to the game engine (C3DDLL64.dll) through IAT hooks in SOVIET64.exe.
 #include "common.h"
 #include <cmath>
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -897,7 +898,67 @@ static void GameThreadTick() {
                            : j.kind == 2 ? (j.lineType < 0 ? "pedestrianway_mud" : j.lineType == 0 ? "pedestrianway" : "pedestrianway_asplhalt")
                            : j.mgr == 0xfaf0 ? (j.sub >= 5 ? "sewagepipe_0" : "waterpipe_0") : j.mgr == 0xfa98 ? "heating_pipe_small" : j.lineType == 20 ? "eletric_ulow0" : "eletric_low0";
             gx::g_curveNow = j.curve;
-            if (j.kind == 3) code = gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, a, b);
+            if (j.kind == 3) {
+                // a pole the plan thought free may still be blocked by something in the game: a refused wire piece whose
+                // end is a pole (the next job continues the same chain) is tried again with that pole moved along the
+                // line by 8 / 16 m, and the next piece then starts from where the pole really stands
+                static V3 movedFrom{}, movedTo{}; static int movedChain = -1;
+                if (j.chain >= 0 && j.chain == movedChain && fabsf(a.x - movedFrom.x) + fabsf(a.z - movedFrom.z) < 0.5f) a = movedTo;
+                code = gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, a, b);
+                bool pole = false;
+                { std::lock_guard<std::mutex> l(g_instMx); pole = j.chain >= 0 && at + 1 < g_inst.size() && g_inst[at + 1].chain == j.chain; }
+                if (code != 1 && pole) {
+                    // a middle pole: try it moved along the line and sideways; the game itself judges every spot
+                    float dx = b.x - a.x, dz = b.z - a.z, L = hypotf(dx, dz), ux = dx / L, uz = dz / L;
+                    const float offs[][2] = { { -8, 0 }, { 8, 0 }, { 0, 6 }, { 0, -6 }, { -16, 0 }, { 16, 0 }, { 0, 12 }, { 0, -12 }, { -8, 8 }, { -8, -8 }, { 8, 8 }, { 8, -8 } };
+                    for (auto& o : offs) {
+                        V3 b2{ b.x + ux * o[0] - uz * o[1], 0, b.z + uz * o[0] + ux * o[1] }; b2.y = TerrainHeight(b2.x, b2.z) + j.hb;
+                        if (hypotf(b2.x - a.x, b2.z - a.z) < 6) continue;
+                        int c2 = gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, a, b2);
+                        Log("wire: pole moved %.0f / %.0f m to %.0f %.0f: %s", o[0], o[1], b2.x, b2.z, c2 == 1 ? "built" : "refused");
+                        if (c2 == 1) { code = 1; movedFrom = j.b; movedTo = b2; movedChain = j.chain; break; }
+                    }
+                }
+                if (code != 1 && !pole && j.chain >= 0) {
+                    // the last piece to a building (b = its port): find a spot for one more pole round the port that the
+                    // game accepts - first the span port -> spot (the building end snaps), then previous pole -> spot
+                    // (user, 2026-11-18: he finished such a line by hand with a pole on the pavement edge, 19 m over a house)
+                    // Find a way the way a player does (user, 2026-11-18): the game takes a span out of a port only towards
+                    // the side the port faces, so first a pole c that the span port -> c reaches, then the line's end joined
+                    // to c - straight, or through one more pole d. Every spot is judged by the game itself.
+                    bool done = false; int tries = 0; V3 c{}; bool haveC = false;
+                    auto ringPts = [&](V3 ctr, std::initializer_list<float> radii, int n) {
+                        std::vector<V3> v;
+                        for (float rad : radii) for (int k = 0; k < n; ++k) { float an = k * 6.2832f / n; V3 q{ ctr.x + cosf(an) * rad, 0, ctr.z + sinf(an) * rad }; q.y = TerrainHeight(q.x, q.z); v.push_back(q); }
+                        return v;
+                    };
+                    // nearest to the line's end first
+                    auto cands = ringPts(b, { 10.0f, 15.0f, 20.0f, 26.0f, 32.0f }, 24);
+                    std::stable_sort(cands.begin(), cands.end(), [&](const V3& p, const V3& q) { return hypotf(p.x - a.x, p.z - a.z) < hypotf(q.x - a.x, q.z - a.z); });
+                    for (auto& q : cands) {
+                        if (hypotf(q.x - a.x, q.z - a.z) < 6) continue;
+                        ++tries;
+                        if (gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, b, q) == 1) { c = q; haveC = true; break; }
+                    }
+                    if (haveC) {
+                        Log("wire: pole by the port at %.0f %.0f (try %d)", c.x, c.z, tries);
+                        if (gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, a, c) == 1) done = true;
+                        else {
+                            V3 mid{ (a.x + c.x) / 2, 0, (a.z + c.z) / 2 };
+                            for (auto& d : ringPts(mid, { 0.0f, 6.0f, 12.0f, 18.0f }, 12)) {
+                                if (hypotf(d.x - a.x, d.z - a.z) < 6 || hypotf(d.x - c.x, d.z - c.z) < 6) continue;
+                                ++tries;
+                                if (gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, d, c) != 1) continue;   // the pole joins c first
+                                int c3 = gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, a, d);
+                                Log("wire: middle pole at %.0f %.0f (try %d): from the line %s", d.x, d.z, tries, c3 == 1 ? "built" : "refused");
+                                if (c3 == 1) { done = true; break; }
+                            }
+                        }
+                        if (done) code = 1;
+                    }
+                    if (!done) Log("wire: could not reach the port at %.0f %.0f (%d tries)", b.x, b.z, tries);
+                }
+            }
             else code = gx::LineRaw(j.kind == 1 ? 0xf7a0 : 0xf968, j.lineType, 0, -20, tn, a, b);
             if (j.curve) Log("arc piece %.0f %.0f -> %.0f %.0f: %s", a.x, a.z, b.x, b.z, code == 1 ? "built" : "refused");
             gx::g_curveNow = false;
