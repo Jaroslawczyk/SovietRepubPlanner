@@ -1623,6 +1623,7 @@ void CheckGaps(const InstantRun& r) {
         for (float t = 0; t <= len + 0.01f; t += 4.0f) {
             V3 p{ sg.a.x + (sg.b.x - sg.a.x) * std::min(t, len) / std::max(len, 0.01f), 0, sg.a.z + (sg.b.z - sg.a.z) * std::min(t, len) / std::max(len, 0.01f) };
             if (!sg.road) { targets.push_back(p); continue; }
+            if (t < 12 || t > len - 12) continue;   // street pieces end at junctions: no footpath into a road junction
             float nx = -(sg.b.z - sg.a.z) / std::max(len, 0.01f), nz = (sg.b.x - sg.a.x) / std::max(len, 0.01f), off = 0.0f;   // onto the street itself: only that joins
             targets.push_back({ p.x + nx * off, 0, p.z + nz * off });
             targets.push_back({ p.x - nx * off, 0, p.z - nz * off });

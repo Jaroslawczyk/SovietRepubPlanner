@@ -213,6 +213,12 @@ void Load() {
             for (auto& o : b.conns) if (o.kind == cn.kind && fabsf(o.x - cn.x) + fabsf(o.z - cn.z) < 0.5f) dup = true;
             if (!dup) b.conns.push_back(cn);
         }
+        // one point that serves both a footpath and a road is always a road exit in the game (user, 2026-11-18): no
+        // footpath link is drawn from it
+        b.conns.erase(std::remove_if(b.conns.begin(), b.conns.end(), [&](const Conn& p) {
+            if (p.kind != 0) return false;
+            for (auto& q : b.conns) if (q.kind == 1 && fabsf(q.x - p.x) + fabsf(q.z - p.z) < 1.0f) return true;
+            return false; }), b.conns.end());
         for (auto& cn : b.conns) if (cn.kind == 1 && b.category != "LIVING") b.needsRoad = true;
         ComputeLoads(b);
         auto it = names.find(nameId);

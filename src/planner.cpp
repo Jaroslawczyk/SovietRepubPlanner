@@ -466,7 +466,13 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 V2 st = sites[k][s]; short g = (short)utilGrp[k]++;
                 auto nearSite = [&](float u, float v) { return -hypotf(u - st.u, v - st.v); };
                 if (!placeBest(MakeItem(utilType[k][0]), nearSite, k, 0, g)) { ++r.unplaced; continue; }
-                if (k == 3 && in.powerTrafo && utilType[3][1] >= 0 && g % 6 == 0) placeBest(MakeItem(utilType[3][1]), nearSite, 3, 1, g);
+                if (k == 3 && in.powerTrafo && utilType[3][1] >= 0 && g % 6 == 0) {
+                    // the transformer goes to the outskirts (user: the centre is for shops and services; the feed comes
+                    // from outside anyway): the free lot farthest from the outline's middle
+                    float mu = 0, mv = 0; for (auto& q : in.poly) { mu += q.u / in.poly.size(); mv += q.v / in.poly.size(); }
+                    auto farOut = [&](float u, float v) { return hypotf(u - mu, v - mv); };
+                    placeBest(MakeItem(utilType[3][1]), farOut, 3, 1, g);
+                }
             }
         }
         // services: farthest from the same kind; the first of a kind as close to the stop / centre as possible
@@ -1614,6 +1620,14 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     for (auto& j : junc) if (hypotf(j.u - xu, j.v - xv) < 8.0f) { drop = true; break; }
                     if (drop) { ++nearJ; break; }
                 }
+            }
+            // an end on a street next to its junction: the game does not join a footpath into a road junction (user)
+            for (int e = 0; e < 2 && !drop; ++e) {
+                float eu = e ? p.u2 : p.u1, ev = e ? p.v2 : p.v1;
+                bool onStreet = false;
+                for (auto& rd : r.roads) if (segDist(eu, ev, rd.u1, rd.v1, rd.u2, rd.v2) < rd.width / 2 + 3.0f) onStreet = true;
+                if (!onStreet) continue;
+                for (auto& j : junc) if (hypotf(j.u - eu, j.v - ev) < 12.0f + 4.0f) { drop = true; ++nearJ; break; }
             }
             for (size_t b = 0; b < r.buildings.size() && !drop; ++b) {
                 const Placed& B = r.buildings[b];
