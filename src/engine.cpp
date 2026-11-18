@@ -788,6 +788,10 @@ static void InstallPathLogging() {
 } // namespace gx
 
 static std::vector<InstantJob> g_inst; static std::vector<int> g_instRes; static size_t g_instAt = 0; static std::mutex g_instMx;
+// refused street / footpath pieces are tried once more at the end, in reverse order and drawn from the far end:
+// one blocked piece made every following piece of the street start from a loose end, and the game refused them all
+// (log v0.49: roads 72/99, each street broken from the first refusal on). From the far end they join the cross street.
+static size_t g_instN = 0; static std::vector<size_t> g_instOrig; static bool g_instRetried = false;
 static std::atomic<bool> g_instBusy{ false };
 static std::atomic<bool> g_dumpTools{ false };
 static char g_dbgTool[96] = ""; static std::atomic<bool> g_dbgToolSet{ false };
@@ -817,7 +821,7 @@ int ToolOrder(const std::string& id) {
 }
 void QueueInstant(const std::vector<InstantJob>& jobs) {
     std::lock_guard<std::mutex> l(g_instMx);
-    g_inst = jobs; g_instRes.assign(jobs.size(), -999); g_instAt = 0; g_instBusy = !jobs.empty();
+    g_inst = jobs; g_instRes.assign(jobs.size(), -999); g_instAt = 0; g_instN = jobs.size(); g_instOrig.clear(); g_instRetried = false; g_instBusy = !jobs.empty();
     Log("instant build: %d jobs queued", (int)jobs.size());
 }
 bool InstantBusy() { return g_instBusy; }
@@ -837,7 +841,17 @@ static void GameThreadTick() {
     if (!g_instBusy) return;
     for (int k = 0; k < 12; ++k) {
         InstantJob j; size_t at;
-        { std::lock_guard<std::mutex> l(g_instMx); if (g_instAt >= g_inst.size()) { g_instBusy = false; Log("instant build: done"); return; } at = g_instAt++; j = g_inst[at]; }
+        { std::lock_guard<std::mutex> l(g_instMx); if (g_instAt >= g_inst.size() && !g_instRetried) {
+                g_instRetried = true; g_inst.resize(g_instN);
+                for (size_t i = g_instN; i-- > 0;) {
+                    const InstantJob& o = g_inst[i];
+                    if ((o.kind != 1 && o.kind != 2) || o.curve || g_instRes[i] == 1) continue;
+                    InstantJob rj = o; std::swap(rj.a, rj.b); std::swap(rj.ha, rj.hb);
+                    g_inst.push_back(rj); g_instOrig.push_back(i);
+                }
+                Log("instant build: retrying %zu refused street / footpath pieces from the far end", g_instOrig.size());
+            }
+            if (g_instAt >= g_inst.size()) { g_instBusy = false; Log("instant build: done"); return; } at = g_instAt++; j = g_inst[at]; }
         int code;
         if (j.kind == 0) {
             void* tool = nullptr;
@@ -868,7 +882,9 @@ static void GameThreadTick() {
             if (code != 1) Log("instant build: %s %.0f %.0f -> %.0f %.0f: %s (code %d)", j.kind == 1 ? "road" : j.kind == 3 ? (j.mgr == 0xfaf0 ? (j.sub >= 5 ? "sewage" : "water") : j.mgr == 0xfa98 ? "heating" : "power") : "footpath", a.x, a.z, b.x, b.z,
                                code == -300 ? "CRASH caught" : "refused by the game", code);
         }
-        { std::lock_guard<std::mutex> l(g_instMx); if (at < g_instRes.size()) g_instRes[at] = code; }
+        { std::lock_guard<std::mutex> l(g_instMx);
+          if (at < g_instN) g_instRes[at] = code;
+          else if (code == 1 && at - g_instN < g_instOrig.size()) { g_instRes[g_instOrig[at - g_instN]] = 1; Log("instant build: piece built on the second try"); } }
     }
 }
 void DebugDumpTools() { g_dumpTools = true; }
