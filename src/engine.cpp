@@ -659,6 +659,11 @@ typedef void* (*PStart_t)(void*, V3*, UINT64, unsigned char, int, UINT64, V3*);
 typedef void* (*PUpdate_t)(void*, V3*, int, int, unsigned char, unsigned char, unsigned char, UINT64, unsigned char, unsigned char);
 typedef void* (*PCommit_t)(void*, UINT64, UINT64, UINT64, unsigned char, unsigned char, unsigned char);
 typedef void* (*PCancel_t)(void*);
+static bool g_probe = false;          // LineRaw1 only tests the piece (preview validity) and cancels it
+static void DumpPrev(int r, int mgr, const BYTE* p, size_t n) {
+    FILE* f = _wfopen((GameDir() + L"DistrictPlanner.prevdump").c_str(), L"ab");
+    if (f) { int hdr[2] = { r, mgr }; fwrite(hdr, 4, 2, f); fwrite(p, 1, n, f); fclose(f); }
+}
 static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolName, V3 a, V3 b) {
     BYTE* G = Game();
     void* m = *(void**)(G + mgrOffset);
@@ -671,6 +676,15 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
     __try {
         a0 = a; b0 = b;
         *(V3*)(G + 0xf6c) = a; SnapNear(G, m, mgrOffset, type, sub); a = *(V3*)(G + 0xf6c);
+        // connections taken by this attempt (+0x28 of a building's connection record, 0x30 bytes each from +0xa10):
+        // a cancelled or refused attempt left them marked as used, and later wires to that port were all refused
+        BYTE* snapB[2] = { *(BYTE**)(G + 0xf6a0), nullptr }; void* save28[2][16] = {}; int nsave[2] = { 0, 0 };
+        auto keep = [&](int k) {
+            BYTE* bl = snapB[k]; if (!bl) return;
+            BYTE* c0 = *(BYTE**)(bl + 0xa10); BYTE* c1 = *(BYTE**)(bl + 0xa18);
+            for (BYTE* c = c0; c && c < c1 && nsave[k] < 16; c += 0x30) save28[k][nsave[k]++] = *(void**)(c + 0x28);
+        };
+        keep(0);
         void* sa[4] = { *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690) };
         V3 out{}; stage = 1;
         ((PStart_t)(Base() + 0x4fbfd0))(m, &a, (UINT64)(unsigned)sub, 0, arg, 0, &out);
@@ -679,6 +693,7 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
         // vector there (what start writes when nothing is attached) gives a straight piece.
         if (g_straightLines && !g_curveNow) *(V3*)((BYTE*)m + 0x328) = V3{ 0, 0, 0 };
         stage = 2; *(V3*)(G + 0xf6c) = b; SnapNear(G, m, mgrOffset, type, sub); b = *(V3*)(G + 0xf6c);
+        snapB[1] = *(BYTE**)(G + 0xf6a0); if (snapB[1] == snapB[0]) snapB[1] = nullptr; keep(1);
         // a short piece out of an entrance: the end snaps back onto the same connection and the piece has no length
         // (the game refuses it). Then the end stays where the plan put it, on the footpath / street.
         if (fabsf(b.x - a.x) + fabsf(b.z - a.z) < 1.0f && fabsf(b0.x - a.x) + fabsf(b0.z - a.z) > 1.5f) {
@@ -699,7 +714,13 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
                 *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690));
         }
         stage = 4;
-        if (p430 && p428 != p430) {
+        if (g_probe) {
+            // probe only: mgr+0x315 is the preview's validity (1 = the game would take the piece; found by comparing the
+            // manager after 400 previews with their commit results - no exception on roads, footpaths and wires)
+            r = ((BYTE*)m)[0x315] ? 1 : 0;
+            ((PCancel_t)(Base() + 0x520530))(m);
+        }
+        else if (p430 && p428 != p430) {
             // the real test: the manager's node list (mgr+0x298..0x2a0) grows when the game accepts the piece
             size_t n0 = (size_t)(*(BYTE**)((BYTE*)m + 0x2a0) - *(BYTE**)((BYTE*)m + 0x298)) / 8;
             // Proof that the game accepted the piece: one of the network's own lists grows (new node pair at
@@ -712,10 +733,16 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
             size_t c1 = NetSize(m);
             if (mgrOffset == 0xf968 && rm) { size_t rr1 = NetSize(rm); if (rr1 != rr0) Log("FOOTPATH JOINED THE ROAD: road lists %zu -> %zu", rr0, rr1); }
             r = c1 > c0 ? 1 : 0;
+
             static int nl3 = 0, nl3p = 0;
             if ((mgrOffset == 0xf968 ? nl3p++ : nl3++) < 400) Log("COMMIT mgr+0x%x lists %zu -> %zu (%s) %.1f %.1f -> %.1f %.1f", mgrOffset, c0, c1, r == 1 ? "built" : "REFUSED", a.x, a.z, b.x, b.z);
         }
         else { static int nc = 0, ncp = 0; if ((mgrOffset == 0xf968 ? ncp++ : nc++) < 30) Log("NO PREVIEW mgr+0x%x p428 %p p430 %p a %.1f %.1f b %.1f %.1f", mgrOffset, p428, p430, a.x, a.z, b.x, b.z); ((PCancel_t)(Base() + 0x520530))(m); r = 0; }
+        if (r != 1 || g_probe)          // nothing was built (refused or only a probe): give the connections back
+            for (int k = 0; k < 2; ++k) if (snapB[k]) {
+                BYTE* c0 = *(BYTE**)(snapB[k] + 0xa10); BYTE* c1 = *(BYTE**)(snapB[k] + 0xa18); int i2 = 0;
+                for (BYTE* c = c0; c && c < c1 && i2 < nsave[k]; c += 0x30, ++i2) *(void**)(c + 0x28) = save28[k][i2];
+            }
     } __except (CrashInfo(GetExceptionInformation(), "line", stage)) { r = -300; }
     *(V3*)(G + 0xf6c) = sp; *(void**)(G + 0xd428) = st;
     return r;
@@ -723,6 +750,10 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
 
 // A refused piece is tried again as two halves (a long piece over uneven ground or across another line is refused
 // whole). Retrying without the end snaps was tried and dropped: an unattached driveway end comes out as a loop.
+static bool LineProbe(int mgrOffset, int type, int sub, int arg, const char* toolName, V3 a, V3 b) {
+    g_probe = true; int r = LineRaw1(mgrOffset, type, sub, arg, toolName, a, b); g_probe = false;
+    return r == 1;
+}
 static int LineRaw(int mgrOffset, int type, int sub, int arg, const char* toolName, V3 a, V3 b) {
     int r = LineRaw1(mgrOffset, type, sub, arg, toolName, a, b);
     if (r != 0) return r;
@@ -898,6 +929,69 @@ static void GameThreadTick() {
                            : j.kind == 2 ? (j.lineType < 0 ? "pedestrianway_mud" : j.lineType == 0 ? "pedestrianway" : "pedestrianway_asplhalt")
                            : j.mgr == 0xfaf0 ? (j.sub >= 5 ? "sewagepipe_0" : "waterpipe_0") : j.mgr == 0xfa98 ? "heating_pipe_small" : j.lineType == 20 ? "eletric_ulow0" : "eletric_low0";
             gx::g_curveNow = j.curve;
+            if (j.kind == 3 && j.chain >= 0 && (j.mgr == 0xfa20 || j.mgr == 0xfa18) && j.lineType == 10) {
+                // Overhead wire: built like a player does it (user, 2026-11-18). The whole chain from the plan is one
+                // line port A -> port B; from the current pole the mod asks the game (preview validity mgr+0x315, no
+                // building) whether a span to B is taken, else probes spots ahead (12-70 m, up to 90 degrees off the
+                // direction) and stands the pole where the game accepts it and B is nearest / directly reachable.
+                size_t e = at;
+                { std::lock_guard<std::mutex> l(g_instMx); while (e + 1 < g_inst.size() && g_inst[e + 1].chain == j.chain) ++e; }
+                V3 B; float hbB;
+                { std::lock_guard<std::mutex> l(g_instMx); B = g_inst[e].b; hbB = g_inst[e].hb; }
+                B.y = TerrainHeight(B.x, B.z) + hbB;
+                V3 A0 = a, cur = a; int spans = 0, probes = 0; bool ok = false;
+                auto P = [&](V3 p, V3 q) { ++probes; return gx::LineProbe(j.mgr, j.lineType, j.sub, j.arg, tn, p, q); };
+                auto Build = [&](V3 p, V3 q) { return gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, p, q) == 1; };
+                // best-first search over pole spots with probes (nothing is built while searching); then the first span
+                // of the found way is built and the search runs again from that pole (now a real one, so the game also
+                // judges the bend there). Turns at a pole are kept within 75 degrees.
+                V3 inDir{ 0, 0, 0 };
+                for (int step = 0; step < 20 && !ok; ++step) {
+                    if (P(cur, B)) { ok = Build(cur, B); spans += ok; break; }
+                    struct N { V3 p; int par; float g; float f; V3 dir; };
+                    std::vector<N> nodes{ { cur, -1, 0, hypotf(B.x - cur.x, B.z - cur.z), inDir } };
+                    std::vector<int> open{ 0 }; int goal = -1; int budget = 1500;
+                    while (!open.empty() && goal < 0 && budget > 0) {
+                        size_t bi = 0; for (size_t k = 1; k < open.size(); ++k) if (nodes[open[k]].f < nodes[open[bi]].f) bi = k;
+                        int ni = open[bi]; open.erase(open.begin() + bi);
+                        N n = nodes[ni];
+                        float th = atan2f(B.z - n.p.z, B.x - n.p.x);
+                        for (float len : { 60.0f, 40.0f, 25.0f, 14.0f, 10.0f, 7.0f }) {
+                            if (len < 12 && hypotf(B.x - n.p.x, B.z - n.p.z) > 45) continue;   // short steps only near the target
+                            for (float dg = -165; dg <= 180 && goal < 0; dg += 15) {
+                                float an = th + dg * 0.017453f;
+                                V3 c{ n.p.x + cosf(an) * len, 0, n.p.z + sinf(an) * len }; c.y = TerrainHeight(c.x, c.z);
+                                float dl = hypotf(n.dir.x, n.dir.z);
+                                if (dl > 0.01f && (cosf(an) * n.dir.x + sinf(an) * n.dir.z) / dl < 0.26f) continue;   // bend > 75 degrees
+                                if (hypotf(c.x - A0.x, c.z - A0.z) < 15) continue;                                    // never back at the own building
+                                bool seen = false; for (auto& o : nodes) if (hypotf(o.p.x - c.x, o.p.z - c.z) < 4) { seen = true; break; }
+                                if (seen) continue;
+                                if (--budget < 0) break;
+                                if (!P(n.p, c)) continue;
+                                float rest = hypotf(B.x - c.x, B.z - c.z);
+                                nodes.push_back({ c, ni, n.g + len, n.g + len + rest * 1.5f, { cosf(an), 0, sinf(an) } });
+                                int ci2 = (int)nodes.size() - 1;
+                                if (rest < 120 && P(c, B)) { goal = ci2; break; }
+                                open.push_back(ci2);
+                            }
+                            if (goal >= 0 || budget < 0) break;
+                        }
+                    }
+                    if (goal < 0) { Log("wire: no way found from %.0f %.0f (%d probes)", cur.x, cur.z, probes); break; }
+                    int first = goal; while (nodes[first].par != 0) first = nodes[first].par;
+                    V3 nxt = nodes[first].p;
+                    if (!Build(cur, nxt)) { Log("wire: span to %.0f %.0f passed the probe but was refused", nxt.x, nxt.z); break; }
+                    ++spans; inDir = { nxt.x - cur.x, 0, nxt.z - cur.z }; cur = nxt;
+                }
+                Log("wire %s: %.0f %.0f -> %.0f %.0f, %d spans, %d probes", ok ? "built" : "NOT finished", A0.x, A0.z, B.x, B.z, spans, probes);
+                code = ok ? 1 : 0;
+                {   std::lock_guard<std::mutex> l(g_instMx);
+                    for (size_t q = at; q <= e && q < g_instN; ++q) g_instRes[q] = code;
+                    g_instAt = e + 1;
+                }
+                gx::g_curveNow = false;
+                continue;
+            }
             if (j.kind == 3) {
                 // a pole the plan thought free may still be blocked by something in the game: a refused wire piece whose
                 // end is a pole (the next job continues the same chain) is tried again with that pole moved along the

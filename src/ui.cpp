@@ -1313,10 +1313,11 @@ struct InstantRun {
     int bOk = 0, bAll = 0, rOk = 0, rAll = 0, pOk = 0, pAll = 0, nOk = 0, nAll = 0;
     std::string note;
 } g_inst;
+bool g_sameChain = false;   // the next InstantLine continues the previous wire / pipe (a corner of one route)
 void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2, float h1 = 0, float h2 = 0, bool curve = false) {
     float len = sqrtf((u2 - u1) * (u2 - u1) + (v2 - v1) * (v2 - v1));
     if (len < 0.5f) return;
-    static int chainNo = 0; ++chainNo;
+    static int chainNo = 0; if (!g_sameChain) ++chainNo;
     int n = std::max(1, (int)ceilf(len / 60.0f));     // pieces of at most 60 m: the game refuses a long wire / pipe in one piece (straight start tangents keep the joints from bending)
     // every cut is a pole / joint: it must not stand on a building or a street (the game refuses that pole and the
     // rest of the line, in-game log v0.59). A cut that does is slid along the line to the nearest free spot.
@@ -1540,13 +1541,17 @@ void InstantStart() {
                 InstantLine(2, g_pathKind - 1, pc.first.u1, pc.first.v1, pc.first.u2, pc.first.v2);
             }
     }
+    const UtilSeg* prevSeg = nullptr;
     for (auto& s : g_plan.utilLines) {      // after the buildings, so the ends snap to their connections
         // manager offset, type, sub-type, start argument - as logged from the game's own tools
         const int pw = g_powerUnder ? 20 : 10;
         // net 4: high voltage (feed of the district's own transformer)
         const int net[5][4] = { { 0xfaf0, 20, 0, -20 }, { 0xfaf0, 20, 5, -20 }, { 0xfa98, 10, 0, -20 }, { 0xfa20, pw, 0, pw }, { 0xfa18, 10, 0, 10 } };
         size_t from = g_inst.jobs.size();
+        g_sameChain = prevSeg && prevSeg->net == s.net && fabsf(prevSeg->u2 - s.u1) + fabsf(prevSeg->v2 - s.v1) < 0.1f;
+        prevSeg = &s;
         InstantLine(3, net[s.net][1], s.u1, s.v1, s.u2, s.v2, s.h1, s.h2);
+        g_sameChain = false;
         for (size_t k = from; k < g_inst.jobs.size(); ++k) { g_inst.jobs[k].mgr = net[s.net][0]; g_inst.jobs[k].sub = net[s.net][2]; g_inst.jobs[k].arg = net[s.net][3]; }
     }
     if (g_inst.jobs.empty()) { g_inst.note = T("Нечего строить."); return; }

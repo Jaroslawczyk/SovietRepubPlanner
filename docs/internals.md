@@ -326,3 +326,15 @@ exe+0x9e6fb8 видны только создание (0x4d5470), загрузк
   across the line (12 spots), and for the last piece to a building searches up to 120 spots round the port (the game
   judges each), then joins the line's end to that pole directly or through one more pole. Open: a substation boxed in
   by other buildings (no free 20 m in front of its ports) still is not reached - the planner should keep that space.
+
+## Wire search by preview validity (v0.62.0, checked in game 2026-11-18)
+
+- `mgr+0x315` (byte) after the line preview (start 0x4fbfd0 + update 0x4fca80) = 1 when the game would accept the piece,
+  0 when it would refuse it. Found by comparing 400 manager snapshots with their commit results: no exception on roads
+  (0xf7a0), footpaths (0xf968) and wires (0xfa20). Probe = preview, read the byte, cancel 0x520530 - nothing is built.
+- A cancelled or refused attempt leaves the building connections it snapped to marked as used (`+0x28` of the
+  connection record); the mod saves and restores them, else every later wire to that port was refused.
+- A boxed-in substation took spans only 7-10 m long, in a narrow sector in front of its port.
+- Overhead wires are now built per whole line (port to port): best-first search over pole spots with probes (steps 7-60 m,
+  15 degree fan, bend at a pole <= 75 degrees, never back within 15 m of the own building = no loops into the next
+  port), build the first span, search again from the new real pole. Selftest 1: 5/5 pieces, 6 spans, ~3000 probes.
