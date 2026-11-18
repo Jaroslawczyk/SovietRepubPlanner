@@ -1509,6 +1509,10 @@ void CheckGaps(const InstantRun& r) {
     struct S { V3 a, b; bool road; };
     std::vector<S> segs;
     for (auto& j : r.built) segs.push_back({ j.a, j.b, j.kind == 1 });
+    // crossings still waiting for their street to be finished count as links (the game joins them once the street
+    // stands, CrossTick); without this every house behind one was a "gap" and the repair drew pieces onto the axis of
+    // an unfinished street, which the game always refuses (in-game test 2026-11-18: 3 rounds, 0 built)
+    for (auto& j : g_crossPending) segs.push_back({ j.a, j.b, true });
     // a stop is a pass-through piece of the street that people walk through
     for (auto& b : g_plan.buildings) if (b.stop) {
         V3 w = LocalToWorld(g_area, b.ou, b.ov, 0);
@@ -1592,6 +1596,7 @@ void CheckGaps(const InstantRun& r) {
         if (root((int)k) != mainRoot) continue;
         const S& sg = segs[k];
         if (!sg.road) { targets.push_back({ sg.a.x, 0, sg.a.z }); targets.push_back({ sg.b.x, 0, sg.b.z }); continue; }   // footpaths join at piece ends only
+        if (!g_crossPending.empty()) continue;   // streets still under construction: a piece onto one is refused
         float len = hypotf(sg.b.x - sg.a.x, sg.b.z - sg.a.z);
         for (float t = 0; t <= len + 0.01f; t += 4.0f) {
             V3 p{ sg.a.x + (sg.b.x - sg.a.x) * std::min(t, len) / std::max(len, 0.01f), 0, sg.a.z + (sg.b.z - sg.a.z) * std::min(t, len) / std::max(len, 0.01f) };
