@@ -1201,6 +1201,30 @@ static void GameThreadTick() {
                 }
             }
             else code = gx::LineRaw(j.kind == 1 ? 0xf7a0 : 0xf968, j.lineType, 0, -20, tn, a, b);
+            if (code != 1 && j.kind == 1 && !j.curve) {
+                // a refused street piece: variants asked of the game first (probe), the first it accepts is built -
+                // reversed, ends moved along the line by 2-6 m, ends moved sideways by 1-2 m
+                float dx = b.x - a.x, dz = b.z - a.z, L = hypotf(dx, dz), ux = dx / std::max(L, 0.01f), uz = dz / std::max(L, 0.01f);
+                std::vector<std::pair<V3, V3>> vs{ { b, a } };
+                for (float d : { 2.0f, 4.0f, 6.0f }) { vs.push_back({ { a.x + ux * d, a.y, a.z + uz * d }, b }); vs.push_back({ a, { b.x - ux * d, b.y, b.z - uz * d } });
+                    vs.push_back({ { a.x + ux * d, a.y, a.z + uz * d }, { b.x - ux * d, b.y, b.z - uz * d } }); }
+                for (float d : { 1.0f, -1.0f, 2.0f, -2.0f }) vs.push_back({ { a.x - uz * d, a.y, a.z + ux * d }, { b.x - uz * d, b.y, b.z + ux * d } });
+                int tried = 0;
+                for (auto& v : vs) {
+                    if (hypotf(v.second.x - v.first.x, v.second.z - v.first.z) < 9.5f) continue;
+                    ++tried;
+                    if (!gx::LineProbe(0xf7a0, j.lineType, 0, -20, tn, v.first, v.second)) continue;
+                    code = gx::LineRaw(0xf7a0, j.lineType, 0, -20, tn, v.first, v.second);
+                    Log("street piece %.0f %.0f -> %.0f %.0f: variant %.0f %.0f -> %.0f %.0f %s", a.x, a.z, b.x, b.z, v.first.x, v.first.z, v.second.x, v.second.z, code == 1 ? "built" : "passed the probe, refused");
+                    if (code == 1) break;
+                }
+                if (code != 1) {
+                    std::string occ; char t2[8];
+                    for (int k = 0; k <= 10; ++k) { snprintf(t2, sizeof(t2), "%d", Occupied(a.x + dx * k / 10, a.z + dz * k / 10)); occ += t2; }
+                    void* rm = *(void**)(gx::Game() + 0xf7a0);
+                    Log("street piece %.0f %.0f -> %.0f %.0f: none of %d variants accepted; occupied along it: %s; result code %d", a.x, a.z, b.x, b.z, tried, occ.c_str(), *(int*)(gx::Game() + 0x11a10)); (void)rm;
+                }
+            }
             if (j.curve) Log("arc piece %.0f %.0f -> %.0f %.0f: %s", a.x, a.z, b.x, b.z, code == 1 ? "built" : "refused");
             gx::g_curveNow = false;
             if (code != 1 && j.chain >= 0) deadChain = j.chain;

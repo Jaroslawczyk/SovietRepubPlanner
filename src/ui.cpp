@@ -1433,7 +1433,11 @@ void InstantStart() {
     std::vector<PathSeg> rd;        // streets and driveways cut at each other's ends, so they join
     for (auto& s : g_plan.roads) rd.push_back({ s.u1, s.v1, s.u2, s.v2 });
     const int nStreets = (int)rd.size();
-    rd.insert(rd.end(), g_plan.drives.begin(), g_plan.drives.end());
+    // a driveway shorter than 10 m is refused by the game, and the street cut where it would join then lost its piece
+    // too (in-game selftest 3). Such driveways are left out; the road check after the build (RoadRepair) asks the game
+    // for a driveway to those buildings instead.
+    for (auto& d : g_plan.drives) if (hypotf(d.u2 - d.u1, d.v2 - d.v1) >= 10.0f) rd.push_back(d);
+    else Log("driveway %.0f %.0f - %.0f %.0f (%.1f m) left to the road check", d.u1, d.v1, d.u2, d.v2, hypotf(d.u2 - d.u1, d.v2 - d.v1));
     const auto roadPieces = Noded(rd);
     // order: buildings (stops included), then streets - whole, cut only by length and at the stops, whose road
     // connections they snap to - then driveways (cut where they meet each other, joined to the middle of the street),

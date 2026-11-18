@@ -265,7 +265,8 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             for (size_t i = 0; i < n; ++i) {
                 size_t j = (i + 1) % n;
                 r.roads.push_back({ b[i].u, b[i].v, a[j].u, a[j].v, hw * 2 });                  // the straight leg
-                ringLegs.push_back({ ring[i].u, ring[i].v, ring[j].u, ring[j].v, hw * 2 });   // the whole edge: lanes end on the polygon, also inside the arcs
+                ringLegs.push_back({ b[i].u, b[i].v, a[j].u, a[j].v, hw * 2 });                       // the road as built: straight leg...
+                if (round[j]) ringLegs.push_back({ a[j].u, a[j].v, b[j].u, b[j].v, hw * 2 });          // ...and the arc's chord
                 if (round[j]) { RoadSeg arc{ a[j].u, a[j].v, b[j].u, b[j].v, hw * 2 }; arc.curve = true; r.roads.push_back(arc); }
             }
             lanePoly = ring;
@@ -335,11 +336,13 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     float du = lg.u2 - lg.u1, dv = lg.v2 - lg.v1, l2 = du * du + dv * dv;
                     if (l2 < 1) continue;
                     float t = std::clamp(((pu - lg.u1) * du + (pv - lg.v1) * dv) / l2, 0.0f, 1.0f);
-                    if (hypotf(lg.u1 + du * t - pu, lg.v1 + dv * t - pv) > 1.5f) continue;
+                    // near the ring as built (in game: a street ending 6 m off the ring, inside its carriageway at an arc,
+                    // and a street running 6 m beside it were refused on clear ground)
+                    if (hypotf(lg.u1 + du * t - pu, lg.v1 + dv * t - pv) > hw * 2 + 4) continue;
                     float ru = rd.u2 - rd.u1, rv = rd.v2 - rd.v1, rl = hypotf(ru, rv), ll = sqrtf(l2);
                     float sn = fabsf(ru * dv - rv * du) / std::max(0.01f, rl * ll);
                     float fromEnd = std::min(t, 1 - t) * ll;
-                    if (sn >= 0.7f && fromEnd >= 30) break;   // 30 m: the arc takes up to 18 m of the edge
+                    if (sn >= 0.7f && fromEnd >= 12 && hypotf(lg.u1 + du * t - pu, lg.v1 + dv * t - pv) < 1.5f) break;   // a clean T on a straight leg
                     if (sn < 0.5f) {                  // nearly along the ring (< 30 deg): the street duplicates it - dropped
                         Log("ring road: street u %.0f v %.0f - u %.0f v %.0f runs along the ring (%.0f deg), dropped", rd.u1, rd.v1, rd.u2, rd.v2, asinf(sn) * 57.3f);
                         rd.width = -1; break;
@@ -348,7 +351,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     float k = 15.0f / rl;
                     if (e) { rd.u2 -= ru * k; rd.v2 -= rv * k; } else { rd.u1 += ru * k; rd.v1 += rv * k; }
                     Log("ring road: street end at u %.0f v %.0f meets the ring at %.0f deg%s, stopped 15 m short", pu, pv,
-                        asinf(std::min(1.0f, sn)) * 57.3f, fromEnd < 30 ? " next to an arc" : "");
+                        asinf(std::min(1.0f, sn)) * 57.3f, fromEnd < 12 ? " next to an arc" : "");
                     break;
                 }
             }
@@ -1843,6 +1846,43 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
         }
         nextEnd:;
     }
+    }
+    {   // An L-corner - exactly two street ends meeting at an angle, no arc - is a kink the game refuses (in-game: both
+        // streets refused on clear flat ground, no variant accepted). One of them is carried on 13 m past the corner, so
+        // the corner becomes a T; if a building is in the way the other one is tried.
+        for (size_t i = 0; i < r.roads.size(); ++i) for (int e = 0; e < 2; ++e) {
+            RoadSeg& A = r.roads[i];
+            if (A.curve) continue;
+            float pu = e ? A.u2 : A.u1, pv = e ? A.v2 : A.v1;
+            int ends = 0, other = -1, oe = 0; bool mid = false;
+            for (size_t k = 0; k < r.roads.size(); ++k) {
+                if (k == i) continue;
+                const RoadSeg& O = r.roads[k];
+                for (int f = 0; f < 2; ++f) if (hypotf((f ? O.u2 : O.u1) - pu, (f ? O.v2 : O.v1) - pv) < 1.0f) { ++ends; other = (int)k; oe = f; }
+                float du = O.u2 - O.u1, dv = O.v2 - O.v1, l2 = du * du + dv * dv;
+                if (l2 > 1) { float t = ((pu - O.u1) * du + (pv - O.v1) * dv) / l2; if (t > 0.05f && t < 0.95f && hypotf(O.u1 + du * t - pu, O.v1 + dv * t - pv) < 1.0f) mid = true; }
+            }
+            if (ends != 1 || mid || r.roads[other].curve) continue;
+            const RoadSeg& O = r.roads[other];
+            float au = e ? A.u2 - A.u1 : A.u1 - A.u2, av = e ? A.v2 - A.v1 : A.v1 - A.v2, al = hypotf(au, av);
+            float ou2 = oe ? O.u2 - O.u1 : O.u1 - O.u2, ov2 = oe ? O.v2 - O.v1 : O.v1 - O.v2, ol = hypotf(ou2, ov2);
+            if (al < 1 || ol < 1 || (au * ou2 + av * ov2) / (al * ol) < -0.94f) continue;     // straight on: no corner
+            auto tryExt = [&](RoadSeg& S, int se, float du, float dv) {
+                du /= hypotf(du, dv); dv /= hypotf(du, dv) > 0 ? 1 : 1;
+                float l = hypotf(du, dv); du /= l; dv /= l;
+                float eu = (se ? S.u2 : S.u1) + du * 13, ev = (se ? S.v2 : S.v1) + dv * 13;
+                if (!PolyContains(in.poly, eu, ev)) return false;
+                for (auto& b : r.buildings) for (int t = 1; t <= 13; ++t) {
+                    float qu = (se ? S.u2 : S.u1) + du * t, qv = (se ? S.v2 : S.v1) + dv * t;
+                    if (fabsf(qu - b.u) < b.w / 2 + S.width / 2 && fabsf(qv - b.v) < b.d / 2 + S.width / 2) return false;
+                }
+                if (se) { S.u2 = eu; S.v2 = ev; } else { S.u1 = eu; S.v1 = ev; }
+                return true;
+            };
+            bool ok = tryExt(r.roads[i], e, au, av);
+            if (!ok) ok = tryExt(r.roads[other], oe, ou2, ov2);
+            Log("plan: L-corner of two streets at u %.0f v %.0f %s", pu, pv, ok ? "made a T (one street carried on 13 m)" : "left (no room)");
+        }
     }
     for (auto& p : r.drives) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);
     for (auto& p : r.roads) r.roadLength += fabsf(p.u2 - p.u1) + fabsf(p.v2 - p.v1);

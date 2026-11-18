@@ -359,3 +359,10 @@ exe+0x9e6fb8 видны только создание (0x4d5470), загрузк
   line's own start building is useless: a span started at it snaps onto that port (probe log) - such spots are dropped.
   Port rings 10-36 m, 24 directions; a span into a goal port is always probed (bend up to 90 deg).
   In game: selftest 1 8/8 (6 spans), dense selftest 3 5 of 6 lines (was 3), no stubs.
+
+- v0.69.0 streets: refused street pieces on clear flat ground had two causes. (1) Next to the ring road: a street end
+  ~6 m off the ring (inside its carriageway at an arc) and a street running 6 m beside the ring - the ring check now
+  uses the ring as built (legs + arc chords) with a tolerance of road width + 4 m. (2) A driveway shorter than 10 m
+  (refused) cut the street where it joined, and the street piece ending at that node was refused too - such
+  driveways are left to the post-build road check. Refused street pieces are retried with game-probed variants
+  (reversed, ends moved 2-6 m along / 1-2 m across). In game: selftest 5 roads 50/50, selftest 3 105/106, selftest 1 43/43.
