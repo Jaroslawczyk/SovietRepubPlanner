@@ -1318,8 +1318,38 @@ void InstantLine(int kind, int lineType, float u1, float v1, float u2, float v2,
     if (len < 0.5f) return;
     static int chainNo = 0; ++chainNo;
     int n = std::max(1, (int)ceilf(len / 60.0f));     // pieces of at most 60 m: the game refuses a long wire / pipe in one piece (straight start tangents keep the joints from bending)
+    // every cut is a pole / joint: it must not stand on a building or a street (the game refuses that pole and the
+    // rest of the line, in-game log v0.59). A cut that does is slid along the line to the nearest free spot.
+    std::vector<float> ts(n + 1);
+    for (int i = 0; i <= n; ++i) ts[i] = (float)i / n;
+    if (kind == 3) for (int i = 1; i < n; ++i) {
+        auto bad = [&](float t) {
+            float u = u1 + (u2 - u1) * t, v = v1 + (v2 - v1) * t;
+            for (auto& b : g_plan.buildings) if (fabsf(u - b.u) < b.w / 2 + 3 && fabsf(v - b.v) < b.d / 2 + 3) return true;
+            for (auto& rd : g_plan.roads) {
+                float du = rd.u2 - rd.u1, dv = rd.v2 - rd.v1, l2 = du * du + dv * dv;
+                float k = l2 > 0 ? std::clamp(((u - rd.u1) * du + (v - rd.v1) * dv) / l2, 0.0f, 1.0f) : 0;
+                if (hypotf(rd.u1 + du * k - u, rd.v1 + dv * k - v) < rd.width / 2 + 2) return true;
+            }
+            for (auto& rd : g_plan.drives) {
+                float du = rd.u2 - rd.u1, dv = rd.v2 - rd.v1, l2 = du * du + dv * dv;
+                float k = l2 > 0 ? std::clamp(((u - rd.u1) * du + (v - rd.v1) * dv) / l2, 0.0f, 1.0f) : 0;
+                if (hypotf(rd.u1 + du * k - u, rd.v1 + dv * k - v) < 6) return true;
+            }
+            return false;
+        };
+        if (!bad(ts[i])) continue;
+        float best = -1;
+        for (float d = 1; d <= 25 && best < 0; d += 1)
+            for (int sg = -1; sg <= 1; sg += 2) {
+                float t = ts[i] + sg * d / len;
+                if (t > ts[i - 1] + 10 / len && t < 1 - 10 / len && !bad(t)) { best = t; break; }
+            }
+        if (best >= 0) ts[i] = best;
+        else Log("wire: no free spot for a pole near %.0f %.0f", u1 + (u2 - u1) * ts[i], v1 + (v2 - v1) * ts[i]);
+    }
     for (int i = 0; i < n; ++i) {
-        float t0 = (float)i / n, t1 = (float)(i + 1) / n;
+        float t0 = ts[i], t1 = ts[i + 1];
         eng::InstantJob j; j.kind = kind; j.lineType = lineType;
         j.a = LocalToWorld(g_area, u1 + (u2 - u1) * t0, v1 + (v2 - v1) * t0, 0);
         j.b = LocalToWorld(g_area, u1 + (u2 - u1) * t1, v1 + (v2 - v1) * t1, 0);

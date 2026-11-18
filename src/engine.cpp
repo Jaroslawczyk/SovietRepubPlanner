@@ -592,14 +592,14 @@ typedef void (*RoadSnap_t)(void*, int, unsigned char, UINT64, unsigned char, uns
 // (0x139a70) refills every tick - the buildings in view. A line end at a building out of view (or not yet in the list)
 // finds nothing. For the duration of a snap the list is replaced by the buildings standing near the point.
 typedef V3* (*NodeVec2_t)(void*, V3*);
-static BYTE* g_near[256];
+static BYTE* g_near[2048];
 static int NearBuildings(const V3& p, float radius) {
     static NodeVec2_t gp = nullptr;
     if (!gp) gp = (NodeVec2_t)GetProcAddress(GetModuleHandleW(L"C3DDLL64.dll"), "?GetPosition@C3D_NODE@@QEAA?AVC3DVECTOR3@@XZ");
     if (!gp) return 0;
     BYTE** v = *(BYTE***)(Base() + 0x9e6a18); BYTE** e = *(BYTE***)(Base() + 0x9e6a20);
     int n = 0;
-    for (BYTE** it = v; it && it < e && n < 256; ++it) {
+    for (BYTE** it = v; it && it < e && n < 2048; ++it) {
         if (!*it || !*(BYTE**)(*it + 0x318)) continue;
         V3 q{}; gp(*it + 0x320, &q);
         if (fabsf(q.x - p.x) < radius && fabsf(q.z - p.z) < radius) g_near[n++] = *it;
@@ -637,6 +637,21 @@ static void SnapNearRaw(BYTE* G, void* m, int mgrOffset, int type, int sub) {
     BYTE** lst = (BYTE**)(G + 0x11dc0);
     BYTE* save0 = lst[0]; BYTE* save1 = lst[1]; BYTE* save2 = lst[2];
     if (n > 0) { lst[0] = (BYTE*)g_near; lst[1] = (BYTE*)(g_near + n); lst[2] = (BYTE*)(g_near + n); }
+    if (mgrOffset == 0xfa20 || mgrOffset == 0xfa18) {   // what the wire snap (0x3b8b20) checks: +0x5d0 == 0, conn kind 8 free (+0x28 == 0)
+        static int nl = 0;
+        V3 p = *(V3*)(G + 0xf6c);
+        for (int i = 0; i < n && nl < 60; ++i) {
+            BYTE* b = g_near[i]; char kinds[160] = ""; int len = 0;
+            __try {
+                BYTE* c0 = *(BYTE**)(b + 0xa10); BYTE* c1 = *(BYTE**)(b + 0xa18);
+                for (BYTE* c = c0; c && c < c1 && len < 140; c += 0x30) {
+                    V3 cp = *(V3*)(c + 8);
+                    if (fabsf(cp.x - p.x) < 25 && fabsf(cp.z - p.z) < 25) len += snprintf(kinds + len, sizeof(kinds) - len, " k%d%s(%.0f,%.0f)", *(int*)c, *(void**)(c + 0x28) ? "used" : "", cp.x, cp.z);
+                }
+                if (len) { ++nl; Log("WIRESNAP at %.0f %.0f: bld '%s' +5d0 %p +ea8 %d conns:%s", p.x, p.z, *(char**)(b + 0x318), *(void**)(b + 0x5d0), (int)b[0xea8], kinds); }
+            } __except (1) {}
+        }
+    }
     __try { SnapAt(G, m, mgrOffset, type, sub); } __finally { lst[0] = save0; lst[1] = save1; lst[2] = save2; }
 }
 typedef void* (*PStart_t)(void*, V3*, UINT64, unsigned char, int, UINT64, V3*);

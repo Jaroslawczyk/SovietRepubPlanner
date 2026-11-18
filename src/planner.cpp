@@ -1393,10 +1393,9 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         return best;
                     };
                     ca = pick(A, ca, B); cb = pick(B, cb, A);
-                    V2 p = Turn(A->rot, ca->x, ca->z), q = Turn(B->rot, cb->x, cb->z);
-                    p.u += A->ou; p.v += A->ov; q.u += B->ou; q.v += B->ov;
-                    r.utilLines.push_back({ net, p.u, p.v, q.u, q.v, ca->y, cb->y }); r.utilLen[net] += hypotf(q.u - p.u, q.v - p.v);
-                    return;
+                    // and it does NOT go over everything: the game puts a pole at every piece end and refuses one on a
+                    // building (in-game log: the pole 7 m from a house was refused, the line broke there). So a wire takes
+                    // the straight way only when it is clear of buildings, else the pipe route round them (below).
                 }
                 V2 p = Turn(A->rot, ca->x, ca->z), pn = Turn(A->rot, ca->dx, ca->dz);
                 V2 q = Turn(B->rot, cb->x, cb->z), qn = Turn(B->rot, cb->dx, cb->dz);
@@ -1422,6 +1421,33 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                 goal[gc] &= ~4;
                 if (price < 0) { ++r.utilNoLine[net]; return; }
                 line.push_back(q);
+                if (net >= 3)       // wire: a span shorter than 20 m between poles is refused (in-game log) - fold it into its neighbour
+                    for (bool again = true; again && line.size() > 2;) {
+                        again = false;
+                        for (size_t k = 1; k + 1 < line.size(); ++k) {
+                            float l1 = hypotf(line[k].u - line[k - 1].u, line[k].v - line[k - 1].v), l2 = hypotf(line[k + 1].u - line[k].u, line[k + 1].v - line[k].v);
+                            float dq = hypotf(line[k].u - q.u, line[k].v - q.v), dp = hypotf(line[k].u - p.u, line[k].v - p.v);   // a pole within the snap reach of an end building jumps onto its port
+                            if (l1 < 20 || l2 < 20 || dq < 15 || dp < 15) { line.erase(line.begin() + k); again = true; break; }
+                        }
+                    }
+                if (net >= 3 && line.size() > 2) {   // a routed wire arrives from its last span: the port must face that span
+                    auto face = [&](const Placed* X, const Conn* cur, V2 from) {
+                        const Conn* best = cur; float bd = -2;
+                        for (auto& c : all[X->type].conns) {
+                            if (c.kind != cur->kind) continue;
+                            V2 o = Turn(X->rot, c.x, c.z), nn = Turn(X->rot, c.dx, c.dz);
+                            float tu = from.u - (X->ou + o.u), tv = from.v - (X->ov + o.v), tl = hypotf(tu, tv), nl = hypotf(nn.u, nn.v);
+                            if (tl < 0.01f || nl < 0.01f) continue;
+                            float d = (nn.u * tu + nn.v * tv) / (nl * tl);
+                            if (d > bd) { bd = d; best = &c; }
+                        }
+                        return best;
+                    };
+                    cb = face(B, cb, line[line.size() - 2]);
+                    V2 o = Turn(B->rot, cb->x, cb->z); line.back() = { B->ou + o.u, B->ov + o.v };
+                    ca = face(A, ca, line[1]);
+                    V2 oa = Turn(A->rot, ca->x, ca->z); line[0] = { A->ou + oa.u, A->ov + oa.v };
+                }
                 for (size_t k = 0; k + 1 < line.size(); ++k) {
                     float len = hypotf(line[k + 1].u - line[k].u, line[k + 1].v - line[k].v);
                     if (len < 0.05f) continue;
