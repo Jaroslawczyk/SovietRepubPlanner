@@ -1006,11 +1006,14 @@ static void GameThreadTick() {
                     }
                     {   std::lock_guard<std::mutex> l(g_instMx);           // the planner's route corners too
                         for (size_t q = at; q < e; ++q) { V3 w = g_inst[q].b; w.y = TerrainHeight(w.x, w.z); nd.push_back({ w, 2 }); } }
-                    for (auto* S : { &SA, &SB }) for (auto& pp : *S) for (float rad : { 8.0f, 14.0f, 22.0f }) for (int k = 0; k < 12; ++k) {
-                        float an = k * 0.5236f; V3 q{ pp.x + cosf(an) * rad, 0, pp.z + sinf(an) * rad }; q.y = TerrainHeight(q.x, q.z); nd.push_back({ q, 2 });
+                    for (auto* S : { &SA, &SB }) for (auto& pp : *S) for (float rad : { 10.0f, 15.0f, 20.0f, 28.0f, 36.0f }) for (int k = 0; k < 24; ++k) {
+                        float an = k * 0.2618f; V3 q{ pp.x + cosf(an) * rad, 0, pp.z + sinf(an) * rad }; q.y = TerrainHeight(q.x, q.z); nd.push_back({ q, 2 });
                     }
                 }
                 int validSpans = 0;
+                // a pole within ~16 m of a port of the line's own start building is useless: anything started at it snaps
+                // onto that port instead (in-game probe log v0.65) - such spots are dropped
+                for (auto& n2 : nd) if (n2.kind == 2) for (auto& q : SA) if (hypotf(n2.p.x - q.x, n2.p.z - q.z) < 17) { n2.kind = 3; break; }
                 auto search = [&](const std::vector<int>& starts, V3 startDir, std::vector<int>& path) {
                     // node state: best cost, parent, verified; open list (f, node, parent, cost, dir)
                     struct Op { float f; int n, par; float g; V3 dir; };
@@ -1034,7 +1037,7 @@ static void GameThreadTick() {
                             float dx = nd[m].p.x - nd[o.n].p.x, dz = nd[m].p.z - nd[o.n].p.z, L = hypotf(dx, dz);
                             if (L < 6 || L > 120) continue;
                             float cb = dl > 0.01f ? (dx * o.dir.x + dz * o.dir.z) / (L * dl) : 1.0f;
-                            if (cb < 0.34f) continue;                                    // bend over 70 degrees
+                            if (cb < (nd[m].kind == 1 ? 0.0f : 0.34f)) continue;          // bend over 70 degrees
                             if (nd[m].kind == 2) { bool crowd = false; for (auto& op : gx::g_wirePoles) if (hypotf(op.x - nd[m].p.x, op.z - nd[m].p.z) < 6) { crowd = true; break; } if (crowd) continue; }
                             float g = o.g + L + (nd[m].kind == 2 ? 25.0f : 0.0f) + (1.0f - cb) * 40.0f;
                             if (g >= best[m]) continue;
@@ -1052,6 +1055,13 @@ static void GameThreadTick() {
                             cs.clear(); for (auto& kv : bucket) cs.push_back(kv.second);
                         }
                         std::sort(cs.begin(), cs.end(), [](const C& x, const C& y) { return x.f < y.f; });
+                        for (size_t m = 0; m < nd.size(); ++m) if (nd[m].kind == 1 && !closed[m]) {   // a span into a goal port is always asked
+                            float dx = nd[m].p.x - nd[o.n].p.x, dz = nd[m].p.z - nd[o.n].p.z, L = hypotf(dx, dz);
+                            if (L < 6 || L > 60) continue;
+                            if (dl > 0.01f && (dx * o.dir.x + dz * o.dir.z) / (L * dl) < 0.0f) continue;
+                            float g = o.g + L;
+                            cs.insert(cs.begin(), { g, g, (int)m, { dx, 0, dz } });
+                        }
                         int tried = 0;
                         for (auto& c : cs) {
                             if (tried >= 60) break;
@@ -1067,12 +1077,14 @@ static void GameThreadTick() {
                 V3 startDir{ 0, 0, 0 };
                 for (int round = 0; round < 4 && !ok; ++round) {
                     std::vector<int> path;
-                    if (!search(starts, startDir, path)) { Log("wire: no way found (%zu spots, %d probes, %d spans valid, start ports %zu, goal ports %zu)", nd.size(), probes, validSpans, SA.size(), SB.size()); break; }
+                    if (!search(starts, startDir, path)) { Log("wire: no way found (%zu spots, %d probes, %d spans valid, start ports %zu, goal ports %zu)", nd.size(), probes, validSpans, SA.size(), SB.size());
+                        for (auto& g : SB) { int okIn = 0, okOut = 0; for (int k = 0; k < 24; ++k) { float an = k * 0.2618f; for (float rad : { 10.0f, 20.0f }) { V3 c{ g.x + cosf(an) * rad, 0, g.z + sinf(an) * rad }; c.y = TerrainHeight(c.x, c.z); okIn += P(c, g); okOut += P(g, c); } }
+                            Log("wire: goal port %.1f %.1f: spans in %d / out %d of 48", g.x, g.z, okIn, okOut); } break; }
                     bool broke = false;
                     for (size_t k = 0; k + 1 < path.size(); ++k) {
                         V3 p = nd[path[k]].p, q = nd[path[k + 1]].p;
                         if (!Build(p, q)) { Log("wire: span %.0f %.0f -> %.0f %.0f refused when built, searching again", p.x, p.z, q.x, q.z); broke = true;
-                            starts = { path[k] }; nd[path[k]].kind = 0; startDir = k > 0 ? V3{ p.x - nd[path[k - 1]].p.x, 0, p.z - nd[path[k - 1]].p.z } : V3{ 0, 0, 0 };
+                            starts = { path[k] }; nd[path[k]].kind = 0; startDir = V3{ 0, 0, 0 };   // from a real pole the game itself judges the bend (probe)
                             nd[path[k + 1]].kind = 3; break; }   // that spot is dropped from the next round
                         ++spans; if (nd[path[k + 1]].kind == 2) gx::g_wirePoles.push_back(q);
                     }

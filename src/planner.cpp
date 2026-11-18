@@ -33,7 +33,11 @@ bool PolyContains(const std::vector<V2>& poly, float u, float v) {
 
 namespace {
 struct Item { int type; float w, d; bool rotated; int rot; };
-const float kApron = 8.0f, kSide = 1.5f;   // extra depth / width the game needs beyond the model's bounding box
+const float kApron = 8.0f, kSide = 1.5f;
+// A power substation keeps 14 m free on both sides of its lot (user, 2026-11-18: substations boxed in by rows of houses
+// could not be reached by any overhead line - the poles before its ports need that room). The lot is simply wider; the
+// model stays in its middle.
+static Item PowerRoom(Item it) { it.w += 28.0f; return it; }   // extra depth / width the game needs beyond the model's bounding box
 
 // A model point after "rot" quarter turns, in plan axes (model X along +u, +v, -u, -v).
 V2 Turn(int rot, float x, float z) {
@@ -469,7 +473,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             for (size_t s = 0; s < sites[k].size(); ++s) {
                 V2 st = sites[k][s]; short g = (short)utilGrp[k]++;
                 auto nearSite = [&](float u, float v) { return -hypotf(u - st.u, v - st.v); };
-                if (!placeBest(MakeItem(utilType[k][0]), nearSite, k, 0, g)) { ++r.unplaced; continue; }
+                if (!placeBest((k == 3 ? PowerRoom(MakeItem(utilType[k][0])) : MakeItem(utilType[k][0])), nearSite, k, 0, g)) { ++r.unplaced; continue; }
                 if (k == 3 && in.powerTrafo && utilType[3][1] >= 0 && g % trafoOuts == 0) {
                     // the transformer goes to the outskirts (user: the centre is for shops and services; the feed comes
                     // from outside anyway): the free lot farthest from the outline's middle
@@ -542,7 +546,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         if (siteDone[k][s] || !(hypotf(st.u - hu, st.v - hv) < 25 || (fabsf(st.v - hv) < 6 && hu > st.u))) continue;
                         siteDone[k][s] = 1;
                         short g = (short)utilGrp[k]++;
-                        queued.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
+                        queued.push_back({ (k == 3 ? PowerRoom(MakeItem(utilType[k][0])) : MakeItem(utilType[k][0])), (signed char)k, 0, g });
                         if (utilType[k][1] >= 0 && (k < 3 ? in.utilChain : (in.powerTrafo && g % trafoOuts == 0))) helpers.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
                     }
                 }
@@ -867,7 +871,7 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     if (siteDone[k][s] || hypotf(sites[k][s].u - hu, sites[k][s].v - hv2) > 40) continue;
                     siteDone[k][s] = 1;
                     short g = (short)utilGrp[k]++;
-                    nodeQ.push_back({ MakeItem(utilType[k][0]), (signed char)k, 0, g });
+                    nodeQ.push_back({ (k == 3 ? PowerRoom(MakeItem(utilType[k][0])) : MakeItem(utilType[k][0])), (signed char)k, 0, g });
                     if (utilType[k][1] >= 0 && (k < 3 ? in.utilChain : (in.powerTrafo && g % trafoOuts == 0))) nodeQ.push_back({ MakeItem(utilType[k][1]), (signed char)k, 1, g });
                 }
             }

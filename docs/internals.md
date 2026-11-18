@@ -354,3 +354,8 @@ exe+0x9e6fb8 видны только создание (0x4d5470), загрузк
   found before anything is built: an unreachable substation leaves no stubs. Selftest 1: 4 spans (was 22).
   Dense selftest 3: 3 of 6 lines; the other substations stand inside rows of houses where no span reaches their ports
   (2000+ valid spans found around, none into the port) - placement problem, not search.
+
+- v0.66.0: power substation lots get 14 m of free room on both sides (planner). A pole within ~16 m of a port of the
+  line's own start building is useless: a span started at it snaps onto that port (probe log) - such spots are dropped.
+  Port rings 10-36 m, 24 directions; a span into a goal port is always probed (bend up to 90 deg).
+  In game: selftest 1 8/8 (6 spans), dense selftest 3 5 of 6 lines (was 3), no stubs.
