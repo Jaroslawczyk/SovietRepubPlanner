@@ -845,8 +845,8 @@ static void GameThreadTick() {
                 g_instRetried = true; g_inst.resize(g_instN);
                 for (size_t i = g_instN; i-- > 0;) {
                     const InstantJob& o = g_inst[i];
-                    if ((o.kind != 1 && o.kind != 2) || o.curve || g_instRes[i] == 1) continue;
-                    InstantJob rj = o; std::swap(rj.a, rj.b); std::swap(rj.ha, rj.hb);
+                    if ((o.kind != 1 && o.kind != 2 && o.kind != 3) || o.curve || g_instRes[i] == 1) continue;
+                    InstantJob rj = o; std::swap(rj.a, rj.b); std::swap(rj.ha, rj.hb); if (rj.chain >= 0) rj.chain += 1000000;   // wires / pipes too: drawn from the consumer end
                     g_inst.push_back(rj); g_instOrig.push_back(i);
                 }
                 Log("instant build: retrying %zu refused street / footpath pieces from the far end", g_instOrig.size());
