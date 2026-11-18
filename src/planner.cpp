@@ -439,11 +439,27 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     for (int rr = 0; rr < 4 && l > 0.01f; ++rr) if (Turn(rr, c.dx, c.dz).v * -side > 0.7f * l) { roadRot = rr; break; }
                     break;
                 }
-                if (roadRot >= 0) { const BuildingType& bt = all[it.type]; w0 = (roadRot & 1) ? bt.sz : bt.sx; d0 = (roadRot & 1) ? bt.sx : bt.sz; }
+                if (roadRot >= 0) { const BuildingType& bt = all[it.type]; w0 = (roadRot & 1) ? bt.sz : bt.sx; d0 = (roadRot & 1) ? bt.sx : bt.sz;
+                    w0 += 10.0f + (it.w - kSide - std::min(it.w - kSide, (it.rotated ? bt.sz : bt.sx)));   // 5 m free beside it for the driveway (plan: kiosk / pub / parking squeezed by neighbours got none); keeps any extra room asked (power)
+                }
             }
-            float cv = ln.v + side * (hw + front + d0 / 2);
+            // a building with a road exit stands 5 m further back: its driveway to the street is then >= 12 m long (the game
+            // refuses roads under ~10 m; 9 m driveways came out slanted into junctions or were refused)
+            const float yardX = (roadRot >= 0) ? 5.0f : 0.0f;
+            float cv = ln.v + side * (hw + front + yardX + d0 / 2);
             if (u - w0 / 2 < ln.L + margin || u + w0 / 2 > ln.R - margin) return false;
             if (!inside(u, cv, w0, d0) || overlaps(u, cv, w0, d0) || busy(u, cv, w0, d0) || heightRange(u, cv, w0, d0) > in.maxDiff) return false;
+            if (roadRot >= 0 && roadHalf > 0) {
+                // the driveway needs a street in front of it: not cut away by a stop, not within 14 m of a street end /
+                // junction (plan log: kiosk, pub, nodes beside a stop got no driveway)
+                bool street = false;
+                for (auto& rd : r.roads) {
+                    if (rd.curve || fabsf(rd.v1 - ln.v) > 0.5f || fabsf(rd.v2 - ln.v) > 0.5f) continue;
+                    float a2 = std::min(rd.u1, rd.u2), b2 = std::max(rd.u1, rd.u2);
+                    if (u > a2 + 14 && u < b2 - 14) { street = true; break; }
+                }
+                if (!street) return false;
+            }
             if (!commit) return true;
             Placed pb{ it.type, u, cv, w0, d0, it.rotated };
             pb.rot = side > 0 ? (it.rot + 2) & 3 : it.rot;
