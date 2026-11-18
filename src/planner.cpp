@@ -1140,6 +1140,52 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                     if (price >= 0 && (best < 0 || price < best)) { best = price; bestLine = line; }
                 }
                 if (!has) continue;
+                if (best < 0 && mode == 1 && !r.roads.empty()) {
+                    // fallback (v0.52, services by the street got no driveway: the search keeps a road 5 m off every
+                    // building, so a pub / kiosk / fire station squeezed between neighbours could not even start):
+                    // one straight driveway out of the road connection to the street it faces, if it passes 3.5 m
+                    // clear of the other buildings and meets the street at least 10 m from a junction.
+                    for (auto& c : t.conns) {
+                        if (c.kind != 1 || best >= 0) continue;
+                        V2 o = Turn(b.rot, c.x, c.z); o.u += b.ou; o.v += b.ov;
+                        V2 n = Turn(b.rot, c.dx, c.dz); float nl = hypotf(n.u, n.v);
+                        if (nl < 0.01f) continue;
+                        n.u /= nl; n.v /= nl;
+                        float bestT = 1e9f;
+                        for (auto& rd : r.roads) {
+                            float r2u = rd.u2 - rd.u1, r2v = rd.v2 - rd.v1, den = n.u * r2v - n.v * r2u;
+                            if (fabsf(den) < 1e-6f) continue;
+                            float tt = ((rd.u1 - o.u) * r2v - (rd.v1 - o.v) * r2u) / den, q = ((rd.u1 - o.u) * n.v - (rd.v1 - o.v) * n.u) / den;
+                            if (tt <= 0.5f || tt > 60 || q < 0 || q > 1) continue;
+                            float rl = hypotf(r2u, r2v), alongEnd = std::min(q, 1 - q) * rl;
+                            bool atJunction = false;           // the street piece may end at a junction: check other streets near the hit
+                            float hu = o.u + n.u * tt, hv = o.v + n.v * tt;
+                            for (auto& o2 : r.roads) {
+                                if (&o2 == &rd) continue;
+                                float ddu = o2.u2 - o2.u1, ddv = o2.v2 - o2.v1, l2 = ddu * ddu + ddv * ddv;
+                                if (l2 < 1) continue;
+                                if (fabsf((ddu * r2u + ddv * r2v) / (sqrtf(l2) * std::max(0.01f, rl))) > 0.95f) continue;   // the same street, next piece
+                                float t2 = std::clamp(((hu - o2.u1) * ddu + (hv - o2.v1) * ddv) / l2, 0.0f, 1.0f);
+                                if (hypotf(o2.u1 + ddu * t2 - hu, o2.v1 + ddv * t2 - hv) < 10 + o2.width / 2) atJunction = true;
+                            }
+                            (void)alongEnd;
+                            if (!atJunction && tt < bestT) bestT = tt;
+                        }
+                        if (bestT > 60) continue;
+                        bool clear = true;
+                        for (auto& b2 : r.buildings) {
+                            if (&b2 == &b) continue;
+                            for (int k = 0; k <= 20 && clear; ++k) {
+                                float u = o.u + n.u * bestT * k / 20, v = o.v + n.v * bestT * k / 20;
+                                if (fabsf(u - b2.u) < b2.w / 2 + 3.5f && fabsf(v - b2.v) < b2.d / 2 + 3.5f) clear = false;
+                            }
+                        }
+                        if (!clear) continue;
+                        bestLine = { o, { o.u + n.u * bestT, o.v + n.v * bestT } };
+                        best = bestT; ++r.straightDrives;
+                        Log("plan: straight driveway for '%s' at u %.0f v %.0f, %.0f m", t.id.c_str(), b.u, b.v, bestT);
+                    }
+                }
                 if (best < 0) { ++(mode ? r.noRoad : r.noPath); Log("plan: no %s for '%s' at u %.0f v %.0f", mode ? "driveway" : "footpath", t.id.c_str(), b.u, b.v); continue; }
                 (mode ? r.roadPts : r.pedPts).push_back(bestLine[0]);
                 // the game refuses pieces shorter than ~9 m (road) / ~5 m (footpath): a short leg is folded into its

@@ -197,7 +197,7 @@ struct PlanResult {
     std::vector<char>    pathBuild;                 // per path: 0 = only the walking line along a street (the street has pavements)
     std::vector<RoadSeg> roads;
     std::vector<V2>      stops, crossings;
-    int joinedRoads = 0, droppedRoads = 0;
+    int joinedRoads = 0, droppedRoads = 0, straightDrives = 0;
     float steepCut = 0;
     int straightLinks = 0, straightMiss = 0;            // village: entrance links drawn straight / left to the path search                             // metres of street left out because the ground is too steep          // plan street ends tied to existing roads / plan pieces already built
     std::vector<PathSeg> drives;                    // driveways from the street to road connections
