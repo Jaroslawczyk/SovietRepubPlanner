@@ -207,7 +207,8 @@ void Load() {
             Conn cn{ connKind[c], pts[0].u, pts[0].v, 0, 0, connY[c][0] };
             if (pts.size() > 1) { cn.dx = pts[0].u - pts[1].u; cn.dz = pts[0].v - pts[1].v; }
             // wire points are a row of insulators, not an inner / outer pair
-            if (cn.kind >= 8 || fabsf(cn.dx) + fabsf(cn.dz) < 0.05f) { cn.dx = cn.x - b.cx; cn.dz = cn.z - b.cz; }
+            // (a wire port still starts with an outer / inner pair at the same height: that pair gives its direction)
+            if ((cn.kind >= 8 && !(pts.size() > 1 && fabsf(connY[c][1] - connY[c][0]) < 0.01f)) || fabsf(cn.dx) + fabsf(cn.dz) < 0.05f) { cn.dx = cn.x - b.cx; cn.dz = cn.z - b.cz; }
             bool dup = false;
             for (auto& o : b.conns) if (o.kind == cn.kind && fabsf(o.x - cn.x) + fabsf(o.z - cn.z) < 0.5f) dup = true;
             if (!dup) b.conns.push_back(cn);

@@ -1301,6 +1301,27 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
             auto pipe = [&](int net, const Placed* A, const Conn* ca, const Placed* B, const Conn* cb) {
                 if (!A || !B || !ca || !cb) { ++r.utilNoLine[net]; return; }
                 if (net == 3) {     // a wire goes over everything on poles: always one straight piece, port to port
+                    // The game snaps a wire end only to a port that faces the wire (log v0.53: the plan's first input of a
+                    // substation, facing away, never snapped, the game took the input on the side the wire came from and
+                    // refused the rest). So each end takes the free port of the same kind facing the other building best.
+                    static std::vector<std::pair<const Placed*, const Conn*>> used;
+                    { bool any = false; for (auto& l : r.utilLines) if (l.net == 3) any = true; if (!any) used.clear(); }   // a new plan
+                    auto pick = [&](const Placed* X, const Conn* cx, const Placed* Y) {
+                        const Conn* best = cx; float bd = -2;
+                        for (auto& c : all[X->type].conns) {
+                            if (c.kind != cx->kind) continue;
+                            bool taken = false; for (auto& u : used) if (u.first == X && u.second == &c) taken = true;
+                            if (taken) continue;
+                            V2 o = Turn(X->rot, c.x, c.z), n = Turn(X->rot, c.dx, c.dz);
+                            float tu = Y->ou - (X->ou + o.u), tv = Y->ov - (X->ov + o.v), tl = hypotf(tu, tv), nl = hypotf(n.u, n.v);
+                            if (tl < 0.01f || nl < 0.01f) continue;
+                            float d = (n.u * tu + n.v * tv) / (nl * tl);
+                            if (d > bd) { bd = d; best = &c; }
+                        }
+                        used.push_back({ X, best });
+                        return best;
+                    };
+                    ca = pick(A, ca, B); cb = pick(B, cb, A);
                     V2 p = Turn(A->rot, ca->x, ca->z), q = Turn(B->rot, cb->x, cb->z);
                     p.u += A->ou; p.v += A->ov; q.u += B->ou; q.v += B->ov;
                     r.utilLines.push_back({ net, p.u, p.v, q.u, q.v, ca->y, cb->y }); r.utilLen[net] += hypotf(q.u - p.u, q.v - p.v);
