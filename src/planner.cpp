@@ -1447,10 +1447,8 @@ PlanResult MakePlanImpl(const PlanInput& in, const std::vector<V2>* sites) {
                         }
                         return best;
                     };
-                    cb = face(B, cb, line[line.size() - 2]);
+                    cb = face(B, cb, line[line.size() - 2]);   // the target port faces the last span; the start port is never re-picked (that gave several lines one port)
                     V2 o = Turn(B->rot, cb->x, cb->z); line.back() = { B->ou + o.u, B->ov + o.v };
-                    ca = face(A, ca, line[1]);
-                    V2 oa = Turn(A->rot, ca->x, ca->z); line[0] = { A->ou + oa.u, A->ov + oa.v };
                 }
                 for (size_t k = 0; k + 1 < line.size(); ++k) {
                     float len = hypotf(line[k + 1].u - line[k].u, line[k + 1].v - line[k].v);

@@ -338,3 +338,11 @@ exe+0x9e6fb8 видны только создание (0x4d5470), загрузк
 - Overhead wires are now built per whole line (port to port): best-first search over pole spots with probes (steps 7-60 m,
   15 degree fan, bend at a pole <= 75 degrees, never back within 15 m of the own building = no loops into the next
   port), build the first span, search again from the new real pole. Selftest 1: 5/5 pieces, 6 spans, ~3000 probes.
+
+- v0.64.0: line capacity = exe+0x3bce90(G, type, variant, 9, 1, 0, 0) -> MW (tooltip function, constants only). Overhead
+  medium voltage (type 10): variant 0 eletric_low0 0.65 MW, 1 eletric_low1 1.20, 2 eletric_low2 2.35, 3 eletric_low3 1.50.
+  The line start takes the variant as r8 (sub). A line record keeps type at +0x120 and variant at +0x124 (exe 0x3cadb0
+  maps them back to the tool name). The mod uses the cheapest variant >= 2.0 MW (a substation planned for 80 % of 2.5).
+- A span from a pole across a whole row of houses is refused (probes from such a pole: back valid, across the row all 0).
+- Two lines given the same transformer port: the second start snaps onto the first line's pole and gets nowhere - the
+  planner's start-port re-pick ignored taken ports (removed).

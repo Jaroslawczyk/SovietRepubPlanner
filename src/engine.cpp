@@ -659,7 +659,8 @@ typedef void* (*PStart_t)(void*, V3*, UINT64, unsigned char, int, UINT64, V3*);
 typedef void* (*PUpdate_t)(void*, V3*, int, int, unsigned char, unsigned char, unsigned char, UINT64, unsigned char, unsigned char);
 typedef void* (*PCommit_t)(void*, UINT64, UINT64, UINT64, unsigned char, unsigned char, unsigned char);
 typedef void* (*PCancel_t)(void*);
-static bool g_probe = false;          // LineRaw1 only tests the piece (preview validity) and cancels it
+static bool g_probe = false; static int g_probeLog = 0;
+static std::vector<V3> g_wirePoles;   // poles the mod stood in this game session (lines keep 6 m apart)          // LineRaw1 only tests the piece (preview validity) and cancels it
 static void DumpPrev(int r, int mgr, const BYTE* p, size_t n) {
     FILE* f = _wfopen((GameDir() + L"DistrictPlanner.prevdump").c_str(), L"ab");
     if (f) { int hdr[2] = { r, mgr }; fwrite(hdr, 4, 2, f); fwrite(p, 1, n, f); fclose(f); }
@@ -714,6 +715,8 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
                 *(void**)(G + 0xf648), *(void**)(G + 0xf650), *(void**)(G + 0xf6a0), *(void**)(G + 0xf690));
         }
         stage = 4;
+        if (g_probe && g_probeLog > 0) { --g_probeLog;
+            Log("PROBE a(%.1f %.1f)->(%.1f %.1f %.1f) bld %p | b(%.1f %.1f)->(%.1f %.1f) bld %p | valid %d preview %p %p", a0.x, a0.z, a.x, a.y, a.z, snapB[0], b0.x, b0.z, b.x, b.z, *(void**)(G + 0xf6a0), (int)((BYTE*)m)[0x315], p428, p430); }
         if (g_probe) {
             // probe only: mgr+0x315 is the preview's validity (1 = the game would take the piece; found by comparing the
             // manager after 400 previews with their commit results - no exception on roads, footpaths and wires)
@@ -750,6 +753,12 @@ static int LineRaw1(int mgrOffset, int type, int sub, int arg, const char* toolN
 
 // A refused piece is tried again as two halves (a long piece over uneven ground or across another line is refused
 // whole). Retrying without the end snaps was tried and dropped: an unattached driveway end comes out as a loop.
+// capacity of a line type in MW, as the game's tool tip shows it (exe+0x3bce90: edx type 10 overhead / 20 cable,
+// r8d variant 0..3 = eletric_low0..3, r9d 9, [rsp+20] 1, [rsp+28] 0; constants only)
+typedef float (*LineCap_t)(void*, int, int, int, unsigned char, unsigned char, unsigned char);
+static float LineCapacity(int type, int sub) {
+    __try { return ((LineCap_t)(Base() + 0x3bce90))(Game(), type, sub, 9, 1, 0, 0); } __except (1) { return -1; }
+}
 static bool LineProbe(int mgrOffset, int type, int sub, int arg, const char* toolName, V3 a, V3 b) {
     g_probe = true; int r = LineRaw1(mgrOffset, type, sub, arg, toolName, a, b); g_probe = false;
     return r == 1;
@@ -940,57 +949,85 @@ static void GameThreadTick() {
                 { std::lock_guard<std::mutex> l(g_instMx); B = g_inst[e].b; hbB = g_inst[e].hb; }
                 B.y = TerrainHeight(B.x, B.z) + hbB;
                 V3 A0 = a, cur = a; int spans = 0, probes = 0; bool ok = false;
+                // the suitable wire: the cheapest overhead variant that carries a substation's full load (2.5 MW)
+                // (user: "use the proper wires, not any"); the game's own capacity function tells each variant
+                {   static int pickSub = -2; static char pickName[32] = "eletric_low0";
+                    if (pickSub == -2) {
+                        pickSub = -1; float best = 1e9f, maxCap = -1; int maxSub = 0;
+                        for (int v = 0; v < 4; ++v) {
+                            float cap = gx::LineCapacity(10, v);
+                            Log("wire: overhead variant %d (eletric_low%d) carries %.2f MW", v, v, cap);
+                            if (cap >= 2.0f && cap < best) { best = cap; pickSub = v; }    // a substation is planned for 80 % of 2.5 MW
+                            if (cap > maxCap) { maxCap = cap; maxSub = v; }
+                        }
+                        if (pickSub < 0) pickSub = maxSub;
+                        snprintf(pickName, sizeof(pickName), "eletric_low%d", pickSub);
+                        Log("wire: using %s", pickName);
+                    }
+                    if (j.mgr == 0xfa20) { j.sub = pickSub; tn = pickName; }
+                }
                 auto P = [&](V3 p, V3 q) { ++probes; return gx::LineProbe(j.mgr, j.lineType, j.sub, j.arg, tn, p, q); };
                 auto Build = [&](V3 p, V3 q) { return gx::LineRaw(j.mgr, j.lineType, j.sub, j.arg, tn, p, q) == 1; };
                 // best-first search over pole spots with probes (nothing is built while searching); then the first span
                 // of the found way is built and the search runs again from that pole (now a real one, so the game also
                 // judges the bend there). Turns at a pole are kept within 75 degrees.
                 V3 inDir{ 0, 0, 0 }; std::vector<V3> built{ a };
-                for (int step = 0; step < 40 && !ok; ++step) {
-                    if (hypotf(B.x - cur.x, B.z - cur.z) < 40 && P(cur, B)) { ok = Build(cur, B); spans += ok; break; }   // no long slanted span across streets into the port (user: looked bad)
+                // (tried: following the planner's route corners as waypoints - 24 poles instead of 9 on a plain district and no
+                // gain in dense rows; dropped)
+                for (int step = 0; step < 60 && !ok; ++step) {
+                    const bool last = true; V3 T = B;
+                    if (last && hypotf(B.x - cur.x, B.z - cur.z) < 40 && P(cur, B)) { ok = Build(cur, B); spans += ok; break; }   // no long slanted span across streets into the port (user: looked bad)
                     struct N { V3 p; int par; float g; float f; V3 dir; };
-                    std::vector<N> nodes{ { cur, -1, 0, hypotf(B.x - cur.x, B.z - cur.z), inDir } };
+                    std::vector<N> nodes{ { cur, -1, 0, hypotf(T.x - cur.x, T.z - cur.z), inDir } };
                     std::vector<int> open{ 0 }; int goal = -1; int budget = 600;
                     while (!open.empty() && goal < 0 && budget > 0) {
                         size_t bi = 0; for (size_t k = 1; k < open.size(); ++k) if (nodes[open[k]].f < nodes[open[bi]].f) bi = k;
                         int ni = open[bi]; open.erase(open.begin() + bi);
                         N n = nodes[ni];
-                        float th = atan2f(B.z - n.p.z, B.x - n.p.x);
+                        float th = atan2f(T.z - n.p.z, T.x - n.p.x);
+                        float thStraight = hypotf(n.dir.x, n.dir.z) > 0.01f ? atan2f(n.dir.z, n.dir.x) : th;
                         for (float len : { 35.0f, 25.0f, 15.0f, 10.0f, 7.0f }) {   // spans of a player's line, not 60 m diagonals
-                            if (len < 12 && hypotf(B.x - n.p.x, B.z - n.p.z) > 45) continue;   // short steps only near the target
-                            for (float dg = -165; dg <= 180 && goal < 0; dg += 15) {
-                                float an = th + dg * 0.017453f;
+                            if (len < 12 && hypotf(T.x - n.p.x, T.z - n.p.z) > 45) continue;   // short steps only near the target
+                            for (float dg = -180; dg <= 180 && goal < 0; dg += 15) {
+                                float an = dg == -180 ? thStraight : th + dg * 0.017453f;     // -180 slot: straight on from the last span
                                 V3 c{ n.p.x + cosf(an) * len, 0, n.p.z + sinf(an) * len }; c.y = TerrainHeight(c.x, c.z);
                                 float dl = hypotf(n.dir.x, n.dir.z);
                                 if (dl > 0.01f && (cosf(an) * n.dir.x + sinf(an) * n.dir.z) / dl < -0.17f) continue;   // bend > 100 degrees (a right-angle corner at a junction is taken)
                                 if (hypotf(c.x - A0.x, c.z - A0.z) < 15) continue;                                    // never back at the own building
+                                { bool crowd = false; for (auto& op : gx::g_wirePoles) if (hypotf(op.x - c.x, op.z - c.z) < 6) { crowd = true; break; } if (crowd) continue; }   // not next to another line's pole
                                 bool seen = false; for (auto& o : nodes) if (hypotf(o.p.x - c.x, o.p.z - c.z) < 4) { seen = true; break; }
                                 if (seen) continue;
                                 if (--budget < 0) break;
                                 if (!P(n.p, c)) continue;
-                                float rest = hypotf(B.x - c.x, B.z - c.z);
-                                float cb2 = dl > 0.01f ? (cosf(an) * n.dir.x + sinf(an) * n.dir.z) / dl : 1.0f; float bendPen = cb2 < 0.94f ? (cb2 < 0.5f ? 25.0f : 12.0f) : 0.0f;   // bends > 20 deg cost: straight runs
+                                float rest = hypotf(T.x - c.x, T.z - c.z);
+                                float cb2 = dl > 0.01f ? (cosf(an) * n.dir.x + sinf(an) * n.dir.z) / dl : 1.0f; float bendPen = (1.0f - cb2) * 45.0f;   // every bend costs, the sharper the more (user: no left-right zigzag)   // bends > 20 deg cost: straight runs
                                 nodes.push_back({ c, ni, n.g + len + bendPen, n.g + len + bendPen + rest * 1.3f, { cosf(an), 0, sinf(an) } });
                                 int ci2 = (int)nodes.size() - 1;
-                                if (rest < 40 && P(c, B)) { goal = ci2; break; }
+                                if (last ? (rest < 40 && P(c, B)) : rest < 15) { goal = ci2; break; }
                                 open.push_back(ci2);
                             }
                             if (goal >= 0 || budget < 0) break;
                         }
                     }
                     if (goal < 0) {      // not reached within the budget: head for the best spot found (the search runs again from there)
-                        float dNow = hypotf(B.x - cur.x, B.z - cur.z), bestF = 1e9f;
+                        float dNow = hypotf(T.x - cur.x, T.z - cur.z), bestF = 1e9f;
                         for (size_t q = 1; q < nodes.size(); ++q) {
-                            float rest = hypotf(B.x - nodes[q].p.x, B.z - nodes[q].p.z);
+                            float rest = hypotf(T.x - nodes[q].p.x, T.z - nodes[q].p.z);
                             bool back = false; for (auto& bp : built) if (hypotf(bp.x - nodes[q].p.x, bp.z - nodes[q].p.z) < 12) back = true;
                             if (!back && rest < dNow + 60 && nodes[q].f < bestF) { bestF = nodes[q].f; goal = (int)q; }
                         }
                     }
-                    if (goal < 0) { Log("wire: no way found from %.0f %.0f (%d probes)", cur.x, cur.z, probes); break; }
+                    if (goal < 0) {
+                        Log("wire: no way found from %.0f %.0f (%d probes)", cur.x, cur.z, probes);
+                        gx::g_probeLog = 8;          // what the probes from this pole attach to
+                        for (int k = 0; k < 8; ++k) { float an = k * 0.785f; V3 c{ cur.x + cosf(an) * 20, 0, cur.z + sinf(an) * 20 }; c.y = TerrainHeight(c.x, c.z); P(cur, c); }
+                        gx::g_probeLog = 0;
+                        break;
+                    }
                     int first = goal; while (nodes[first].par != 0) first = nodes[first].par;
                     V3 nxt = nodes[first].p;
                     if (!Build(cur, nxt)) { Log("wire: span to %.0f %.0f passed the probe but was refused", nxt.x, nxt.z); break; }
-                    ++spans; inDir = { nxt.x - cur.x, 0, nxt.z - cur.z }; cur = nxt; built.push_back(nxt);
+                    ++spans; inDir = { nxt.x - cur.x, 0, nxt.z - cur.z }; cur = nxt; built.push_back(nxt); gx::g_wirePoles.push_back(nxt);
                 }
                 Log("wire %s: %.0f %.0f -> %.0f %.0f, %d spans, %d probes", ok ? "built" : "NOT finished", A0.x, A0.z, B.x, B.z, spans, probes);
                 code = ok ? 1 : 0;
